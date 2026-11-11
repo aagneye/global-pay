@@ -1,0 +1,33 @@
+{
+  "name": "@globalpay/api",
+  "version": "0.1.0",
+  "private": true,
+  "description": "GlobalPay backend: quotes, relayer, indexer and payouts for stablecoin-to-PromptPay payments",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "tsx watch src/main.ts",
+    "start": "tsx src/main.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "prisma:validate": "prisma validate",
+    "prisma:generate": "prisma generate",
+    "qr:make": "tsx scripts/make-promptpay-qr.ts"
+  },
+  "dependencies": {
+    "fastify": "5.12.8",
+    "viem": "2.57.18",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@types/node": "22.20.5",
+    "dotenv": "18.0.10",
+    "prisma": "7.10.1",
+    "tsx": "4.23.15",
+    "typescript": "7.0.2",
+    "vitest": "5.1.0"
+  }
+}
