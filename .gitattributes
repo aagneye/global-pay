@@ -1,0 +1,15 @@
+# Normalise line endings so Windows and macOS/Linux checkouts produce identical diffs.
+* text=auto eol=lf
+
+# Windows scripts need CRLF.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Binary files
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.jar binary
+*.keystore binary
