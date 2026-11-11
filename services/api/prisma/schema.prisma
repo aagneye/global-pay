@@ -1,0 +1,137 @@
+// GlobalPay backend data model. Money is stored as integers in minor units:
+// USDC base units (6 decimals) and THB satang (2 decimals). Hex values are lowercase.
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model User {
+  id            String     @id @default(cuid())
+  /// Lowercase 0x wallet address
+  walletAddress String     @unique
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
+  kyc           KycRecord?
+  quotes        Quote[]
+  payments      Payment[]
+}
+
+enum KycStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+model KycRecord {
+  id          String    @id @default(cuid())
+  userId      String    @unique
+  user        User      @relation(fields: [userId], references: [id])
+  provider    String
+  providerRef String?
+  tier        Int       @default(0)
+  status      KycStatus @default(PENDING)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+}
+
+/// One-time nonces for Sign-In with Ethereum (EIP-4361)
+model SiweNonce {
+  nonce     String    @id
+  address   String
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([address])
+}
+
+model Quote {
+  /// bytes32 hex. Also the EIP-3009 nonce.
+  id              String   @id
+  userId          String
+  user            User     @relation(fields: [userId], references: [id])
+  payer           String
+  token           String
+  tokenAmount     BigInt
+  fiatCurrency    String   @db.Char(3)
+  fiatAmount      BigInt
+  /// Fiat major units per 1 token, scaled by 1e8, before the spread
+  rateE8          BigInt
+  spreadBps       Int
+  merchantKind    String
+  merchantRef     String
+  merchantRefHash String
+  merchantName    String?
+  qrPayload       String
+  /// Backend's EIP-712 signature over the quote
+  signature       String
+  expiresAt       DateTime
+  createdAt       DateTime @default(now())
+  payment         Payment?
+
+  @@index([userId, createdAt])
+}
+
+enum PaymentStatus {
+  SUBMITTED
+  PAID
+  PAYOUT_PENDING
+  SETTLED
+  REFUNDED
+  FAILED
+}
+
+model Payment {
+  id           String        @id @default(cuid())
+  quoteId      String        @unique
+  quote        Quote         @relation(fields: [quoteId], references: [id])
+  userId       String
+  user         User          @relation(fields: [userId], references: [id])
+  status       PaymentStatus @default(SUBMITTED)
+  payTxHash    String?       @unique
+  paidBlock    BigInt?
+  settleTxHash String?
+  refundTxHash String?
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  payout       Payout?
+
+  @@index([userId, createdAt])
+  @@index([status])
+}
+
+enum PayoutStatus {
+  PENDING
+  SUCCEEDED
+  FAILED
+}
+
+model Payout {
+  id            String       @id @default(cuid())
+  paymentId     String       @unique
+  payment       Payment      @relation(fields: [paymentId], references: [id])
+  provider      String
+  providerRef   String?
+  status        PayoutStatus @default(PENDING)
+  currency      String       @db.Char(3)
+  amount        BigInt
+  attempts      Int          @default(0)
+  failureReason String?
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+
+  @@index([status])
+}
+
+/// Last processed block per contract, so the indexer resumes where it stopped
+model IndexerCursor {
+  /// e.g. "settlement:84532:0xabc..."
+  id        String   @id
+  lastBlock BigInt
+  updatedAt DateTime @updatedAt
+}
