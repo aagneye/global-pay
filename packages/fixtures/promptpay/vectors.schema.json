@@ -1,0 +1,56 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "PromptPay QR test vectors",
+  "type": "object",
+  "required": ["version", "valid", "invalid"],
+  "properties": {
+    "$schema": { "type": "string" },
+    "version": { "const": 1 },
+    "description": { "type": "string" },
+    "valid": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "payload", "expected"],
+        "properties": {
+          "name": { "type": "string" },
+          "payload": { "type": "string" },
+          "expected": {
+            "type": "object",
+            "required": ["initiation", "kind", "targetType", "targetId", "amount", "currency", "country"],
+            "properties": {
+              "initiation": { "enum": ["static", "dynamic"] },
+              "kind": { "enum": ["personal", "merchant"] },
+              "targetType": { "enum": ["mobile", "nationalId", "eWallet", "biller"] },
+              "targetId": { "type": "string" },
+              "reference1": { "type": "string" },
+              "reference2": { "type": "string" },
+              "amount": { "type": ["string", "null"], "pattern": "^\\d+\\.\\d{2}$" },
+              "currency": { "type": "string", "pattern": "^\\d{3}$" },
+              "country": { "type": "string", "pattern": "^[A-Z]{2}$" },
+              "merchantName": { "type": "string" },
+              "merchantCity": { "type": "string" }
+            },
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "invalid": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "payload", "error"],
+        "properties": {
+          "name": { "type": "string" },
+          "payload": { "type": "string" },
+          "error": {
+            "enum": ["crc_mismatch", "missing_crc", "malformed_tlv", "not_promptpay", "unsupported_currency"]
+          }
+        },
+        "additionalProperties": false
+      }
+    }
+  }
+}
