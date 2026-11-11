@@ -1,0 +1,9 @@
+# Foundry build output
+out/
+cache/
+
+# Local-chain (anvil) broadcasts; testnet broadcasts are kept as deployment records
+broadcast/*/31337/
+
+# Secrets
+.env
