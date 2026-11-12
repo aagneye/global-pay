@@ -150,13 +150,30 @@ SUBMITTED ──▶ PAID ──▶ PAYOUT_PENDING ──▶ SETTLED
     └──▶ FAILED              └──▶ REFUNDED
 ```
 
-- `SUBMITTED`: the relayer has sent `pay()`.
-- `FAILED`: the `pay()` transaction reverted, for example because the quote expired.
-- `PAID`: the indexer saw `PaymentReceived`.
-- `PAYOUT_PENDING`: the payout partner was called.
-- `SETTLED` / `REFUNDED`: the matching on-chain transaction confirmed.
+- `SUBMITTED`: the relayer has sent `pay()` (or is confirming whether it was sent).
+- `FAILED`: no funds moved. Either the contract would reject it (found by simulation, so nothing was sent), the `pay()` transaction reverted, or it didn't land before the quote expired.
+- `PAID`: the indexer saw `PaymentReceived` at the confirmation depth.
+- `PAYOUT_PENDING`: the payout partner was asked to pay the merchant.
+- `SETTLED` / `REFUNDED`: the `markSettled` / `refund` transaction is in a block.
 
-On-chain events are the source of truth. Processing an event the indexer has already seen has no effect.
+On-chain events are the source of truth, and every step can be repeated safely ([ADR 0007](adr/0007-chain-is-the-source-of-truth.md)).
+
+## Settlement loop
+
+Three parts of the backend move a payment along. Each pass is safe to repeat after a crash.
+
+| Part | Where | What it does |
+|---|---|---|
+| **Relayer** | `src/adapters/chain/relayer.ts` | Sends `pay`, `markSettled` and `refund` from the operator key. It simulates each call first: a revert becomes `TransactionRejectedError`, decoded to the contract's error name (e.g. `ERC20InsufficientBalance`), and nothing is sent. Calls are queued with a tracked nonce, re-read from the node when wrong. It signs locally, so after a timeout it can resend the same bytes safely. |
+| **Indexer** | `src/workers/indexer.ts` | Every `INDEXER_POLL_MS`, reads `PaymentReceived` from its saved block cursor (`INDEXER_START_BLOCK` the first time) up to `INDEXER_CONFIRMATIONS` behind the head, in chunks of 2,000 blocks, and moves payments SUBMITTED → PAID. It also tracks a payment someone else relayed, since `pay()` is permissionless. It then reconciles SUBMITTED payments: a reverted `pay()` becomes FAILED, and so does one that didn't land within a minute after its quote expired (checked against `paymentOf`). |
+| **Payout worker** | `src/workers/payout-worker.ts` | Every `PAYOUT_POLL_MS`: PAID → creates the payout → PAYOUT_PENDING → asks the partner, then polls it. On success it calls `markSettled`; on failure, `refund`, saving the partner's reason. Before sending, it reads `paymentOf` and records a result that's already on-chain instead of sending again. |
+
+`POST /payments` returns `202` with status SUBMITTED right after sending. The app polls `GET /payments/:id` until SETTLED, REFUNDED or FAILED. Each response links the transactions on `EXPLORER_URL`.
+
+The simulated partner (`SimulatedPromptPayProvider`) keeps no state:
+- its reference encodes the payment ID and start time;
+- a payout resolves after `PAYOUT_DELAY_MS`;
+- whether it fails depends only on the payment ID and `PAYOUT_FAILURE_RATE` (1 fails every payout).
 
 ## Signatures
 
@@ -247,7 +264,7 @@ The signature check is offline, which covers ordinary wallets (EOAs), including 
 | `KycRecord` | Provider, tier, status |
 | `SiweNonce` | One-time nonces for Sign-In with Ethereum |
 | `Quote` | Signed quote, raw QR payload, rate, spread, expiry |
-| `Payment` | Lifecycle status and transaction hashes (`pay`, `settle`, `refund`) |
+| `Payment` | Lifecycle status, transaction hashes (`pay`, `settle`, `refund`), and why it failed or was refunded |
 | `Payout` | Partner reference, status, attempts, failure reason |
 | `IndexerCursor` | Last processed block per contract and chain |
 
@@ -263,10 +280,10 @@ All money is stored as integers in minor units: USDC base units (6 decimals) and
 | POST | `/kyc/start` | Start KYC (mock) | 3 ✅ |
 | GET | `/kyc/status` | KYC tier, status and limits | 3 ✅ |
 | POST | `/quotes` | Quote a PromptPay QR payment | 3 ✅ |
-| POST | `/payments` | Submit a signed authorisation | 4 |
-| GET | `/payments/:id` | Payment status | 4 |
-| GET | `/me/balance` | USDC balance | 4 |
-| GET | `/me/payments` | Payment history | 4 |
+| POST | `/payments` | Submit a signed authorisation; returns 202 SUBMITTED | 4 ✅ |
+| GET | `/payments/:id` | Payment status and transaction links | 4 ✅ |
+| GET | `/me/balance` | USDC balance, read from the chain | 4 ✅ |
+| GET | `/me/payments` | Payment history, newest first | 4 ✅ |
 | GET | `/docs`, `/docs/json` | OpenAPI docs and spec | 3 ✅ |
 
 Each route declares zod schemas. The same schemas validate requests, shape responses, and generate the OpenAPI spec, so the spec can't drift from the code. The Dart client is generated from that spec (iteration 5).

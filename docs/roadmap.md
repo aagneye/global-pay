@@ -53,15 +53,32 @@ Structure, architecture and docs. No business logic yet.
 
 **Result:** 125 tests pass. On a local stack (anvil, Postgres, live rate), `POST /quotes` returned a signed quote, and the deployed contract accepted it in `pay()` together with the user's USDC authorisation.
 
-## Iteration 4: Settlement loop on a local chain
+## Iteration 4: Settlement loop on a local chain ✅
 
-1. viem `SettlementGateway`: `pay`, `markSettled`, `refund`, receipts, logs, balances, and reading the token's EIP-712 domain.
-2. Relayer with nonce management, retries and receipt waiting.
-3. Indexer with a saved block cursor, confirmation depth, and handling of repeated events.
-4. Payout worker with `SimulatedPromptPayProvider`, which then settles or refunds.
-5. Integration test on anvil: deploy mock USDC and the settlement contract (with `script/DeployLocal.s.sol` or the compiled artifacts), then run the full flow from TypeScript for both the settle and refund paths.
+- [x] viem `SettlementGateway`:
+  - `pay`, `markSettled`, `refund`
+  - receipts, events, on-chain payment status, balances, and the token's EIP-712 domain
+  - reverts decoded to the contract's error names
+- [x] Relayer:
+  - simulate before sending, so nothing is sent when the contract would revert
+  - queued sends with a tracked nonce, re-read when the node says it's wrong
+  - local signing, so resending after a timeout is safe
+  - receipt waiting
+- [x] Indexer:
+  - saved block cursor, confirmation depth, chunked log queries
+  - repeated events are harmless, and payments relayed by others are tracked
+  - reconciles stuck SUBMITTED payments (reverted, or never landed before the quote expired)
+- [x] Payout worker with a stateless `SimulatedPromptPayProvider`. It settles or refunds, checks the on-chain status first, and every step can be repeated ([ADR 0007](adr/0007-chain-is-the-source-of-truth.md)).
+- [x] Payment API:
+  - `POST /payments` (signature, expiry and limit checks, then `202 SUBMITTED`)
+  - `GET /payments/:id` with explorer links
+  - `GET /me/balance`, `GET /me/payments`
+- [x] Integration test on anvil:
+  - deploys with `script/DeployLocal.s.sol`, then runs the full flow through the HTTP API and the real chain code
+  - settle path, refund path, a rejected payment, and concurrent payments with a nonce clash
+  - checks our ABI against the compiled contract
 
-**Done when:** the integration test passes for both paths.
+**Result:** 165 tests pass, including the anvil integration test for both paths, on in-memory storage and on Postgres. The real server with its workers on timers also settled live payments on anvil in about 3–4 seconds each.
 
 ## Iteration 5: Mobile app
 

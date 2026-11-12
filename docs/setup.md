@@ -43,7 +43,7 @@ This starts Postgres 17 on `localhost:5432` (user, password and database are all
 npx prisma dev
 ```
 
-It prints a `postgres://` URL (the **TCP** one); put it in `DATABASE_URL`. It's for development only.
+It prints a `postgres://` URL (the **TCP** one); put it in `DATABASE_URL`, and set `DATABASE_POOL_SIZE=1`, because it serves one connection at a time. It's for development only.
 
 ## 3. Backend: `services/api`
 
@@ -65,7 +65,7 @@ On Windows PowerShell, use `Copy-Item .env.example .env` instead of `cp`. Set `J
 - Quotes need a settlement contract. For local development, deploy one to anvil (section 4) and use the "Local chain instead" block in `.env.example`.
 - With no network, set `RATE_SOURCE=fixed` to use `FIXED_USDC_THB_RATE` instead of Coinbase's public rates.
 
-Payments, balance and history return `501 Not Implemented` until iteration 4. [services/api/README.md](../services/api/README.md) walks through a quote end to end.
+[services/api/README.md](../services/api/README.md) walks through a payment end to end on a local chain. With Foundry installed, `npm test` also runs the settlement loop on its own anvil.
 
 ## 4. Contracts: `contracts/`
 

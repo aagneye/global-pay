@@ -11,16 +11,19 @@ Stack: Fastify, zod (validation and OpenAPI), viem, Prisma 7 (Postgres), jose (J
 
 ## Status
 
-Iteration 3 (backend core) is done. These work:
+Iterations 3 (backend core) and 4 (settlement loop) are done. These work:
 
 | Route | What it does |
 |---|---|
 | `POST /auth/nonce`, `POST /auth/verify` | Sign-In with Ethereum, then a JWT |
 | `POST /kyc/start`, `GET /kyc/status` | Mock KYC: approved at tier 1, with spending limits |
 | `POST /quotes` | Parses a PromptPay QR, checks limits, prices it at the live rate plus the spread, and returns an EIP-712-signed quote plus the USDC authorisation for the wallet to sign |
+| `POST /payments` | Checks the user's signed USDC authorisation, relays `pay()`, and returns `202 SUBMITTED` |
+| `GET /payments/:id`, `GET /me/payments` | Status (SUBMITTED → PAID → PAYOUT_PENDING → SETTLED / REFUNDED, or FAILED) with explorer links |
+| `GET /me/balance` | The wallet's USDC balance, read from the chain |
 | `GET /docs` | OpenAPI docs (spec at `/docs/json`) |
 
-Payments, balance and history return `501` until iteration 4. See [docs/roadmap.md](../../docs/roadmap.md).
+In the background, the **indexer** marks payments PAID from on-chain events. The **payout worker** then pays the merchant through the simulated partner and settles or refunds on-chain. See [docs/architecture.md](../../docs/architecture.md#settlement-loop) and [docs/roadmap.md](../../docs/roadmap.md).
 
 ## Layout
 
@@ -34,7 +37,7 @@ src/
   ports/              interfaces to the outside: repositories, KYC, rates, payouts, settlement contract, quote signer
   adapters/           port implementations:
     db/               Prisma repositories
-    chain/            viem quote signer and settlement gateway
+    chain/            viem quote signer, settlement gateway and relayer
     rates/            Coinbase public feed, fixed rate
     kyc/, payouts/    mock KYC, simulated PromptPay payout
   lib/promptpay/      EMVCo PromptPay parser and builder (shared vectors in packages/fixtures)
@@ -76,9 +79,18 @@ To change the schema: edit `prisma/schema.prisma`, then run `npm run db:migrate:
 TEST_DATABASE_URL=postgresql://globalpay:globalpay@localhost:5432/globalpay_test npm test
 ```
 
-Apply the migrations to that database first (`DATABASE_URL=<same url> npm run db:migrate`).
+Apply the migrations to that database first (`DATABASE_URL=<same url> npm run db:migrate`). With a database set, test files run one at a time.
 
-## Try a quote locally
+### Chain integration test
+
+`test/integration/` runs the whole settlement loop on a real local chain:
+1. It starts its own anvil on a free port.
+2. It deploys with `contracts/script/DeployLocal.s.sol`.
+3. It pays, settles and refunds through the HTTP API and the real viem gateway.
+
+It needs Foundry. It finds `anvil` and `forge` in `$FOUNDRY_BIN`, then `~/.foundry/bin`, then PATH, and skips itself if they aren't there. It uses Postgres when `TEST_DATABASE_URL` is set, and memory otherwise.
+
+## Try a payment locally
 
 1. Start anvil and deploy the contracts ([contracts/README.md](../../contracts/README.md#local-chain-anvil)).
 2. In `.env`, use the "Local chain instead" block from `.env.example`.
@@ -88,7 +100,11 @@ Apply the migrations to that database first (`DATABASE_URL=<same url> npm run db
    2. sign the returned `message` (`personal_sign`);
    3. `POST /auth/verify` returns a token;
    4. `POST /kyc/start`, then `GET /kyc/status`;
-   5. `POST /quotes` with a QR from `npm run qr:make`.
+   5. `POST /quotes` with a QR from `npm run qr:make`;
+   6. sign `authorizationToSign` (`eth_signTypedData_v4`) with the same wallet;
+   7. `POST /payments`;
+   8. poll `GET /payments/{id}` until it's SETTLED.
+5. With `INDEXER_CONFIRMATIONS=0` (anvil only mines when there's a transaction), it settles in a few seconds. Set `PAYOUT_FAILURE_RATE=1` to see a refund.
 
 ## Conventions
 
