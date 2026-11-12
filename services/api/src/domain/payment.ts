@@ -1,4 +1,5 @@
 import type { Hex } from 'viem';
+import type { FiatAmount } from './money.js';
 import { AppError } from '../shared/errors.js';
 
 /**
@@ -7,6 +8,12 @@ import { AppError } from '../shared/errors.js';
  *   SUBMITTED ─▶ PAID ─▶ PAYOUT_PENDING ─▶ SETTLED
  *       │                      │
  *       └─▶ FAILED             └─▶ REFUNDED
+ *
+ * - SUBMITTED: pay() was sent (or its sending is being confirmed).
+ * - PAID: the indexer saw PaymentReceived. The user's USDC is in the contract.
+ * - PAYOUT_PENDING: the payout partner was asked to pay the merchant.
+ * - SETTLED / REFUNDED: markSettled / refund confirmed on-chain.
+ * - FAILED: pay() reverted, or never landed before the quote expired. No funds moved.
  */
 export const PAYMENT_STATUSES = [
   'SUBMITTED',
@@ -53,8 +60,26 @@ export interface Payment {
   userId: string;
   status: PaymentStatus;
   payTxHash?: Hex;
+  /** Block of the PaymentReceived event. */
+  paidBlock?: bigint;
   settleTxHash?: Hex;
   refundTxHash?: Hex;
+  /** Why the payment FAILED, or why it was refunded. */
+  failureReason?: string;
   createdAt: Date;
   updatedAt: Date;
+}
+
+export type PayoutStatus = 'PENDING' | 'SUCCEEDED' | 'FAILED';
+
+/** The local-currency payout to the merchant, one per payment. */
+export interface Payout {
+  paymentId: string;
+  provider: string;
+  /** The partner's ID for the payout, once it accepted it. */
+  providerRef?: string;
+  status: PayoutStatus;
+  amount: FiatAmount;
+  attempts: number;
+  failureReason?: string;
 }

@@ -1,23 +1,31 @@
-import type { Address } from 'viem';
-import type { SignedQuote } from '../../src/domain/quote.js';
+import { type Address, type Hex, keccak256, toHex } from 'viem';
+import { type Payment, type Payout, assertTransition } from '../../src/domain/payment.js';
 import type { KycRecord, User } from '../../src/domain/user.js';
-import type { Repositories } from '../../src/ports/repositories.js';
-
-interface StoredPayment {
-  userId: string;
-  fiatMinor: bigint;
-  status: 'SUBMITTED' | 'PAID' | 'PAYOUT_PENDING' | 'SETTLED' | 'REFUNDED' | 'FAILED';
-  createdAt: Date;
-}
+import { buildPromptPayQr } from '../../src/lib/promptpay/build.js';
+import { parsePromptPayQr } from '../../src/lib/promptpay/parse.js';
+import type { PaymentFields, PaymentWithQuote, Repositories, StoredQuote } from '../../src/ports/repositories.js';
 
 /** In-memory repositories with the same behaviour as the Prisma ones, for fast unit tests. */
 export function createMemoryRepositories() {
   const users = new Map<string, User>();
   const nonces = new Map<string, { address: string; expiresAt: Date; usedAt?: Date }>();
   const kyc = new Map<string, KycRecord>();
-  const quotes = new Map<string, { userId: string; signed: SignedQuote }>();
-  const payments: StoredPayment[] = [];
+  const quotes = new Map<string, StoredQuote>();
+  const payments = new Map<string, Payment>();
+  const payouts = new Map<string, Payout>();
+  const cursors = new Map<string, bigint>();
   let nextUserId = 1;
+  let nextPaymentId = 1;
+  let clock = 0;
+
+  /** Strictly increasing timestamps, so "newest first" is deterministic. */
+  const now = () => new Date(Math.max(Date.now(), ++clock));
+
+  const withQuote = (payment: Payment): PaymentWithQuote => {
+    const quote = quotes.get(payment.quoteId.toLowerCase());
+    if (!quote) throw new Error(`payment ${payment.id} has no quote`);
+    return { payment: { ...payment }, quote };
+  };
 
   const repositories: Repositories = {
     users: {
@@ -38,12 +46,12 @@ export function createMemoryRepositories() {
         if (nonces.has(nonce)) throw new Error('duplicate nonce');
         nonces.set(nonce, { address: address.toLowerCase(), expiresAt });
       },
-      async consume(nonce, address, now) {
+      async consume(nonce, address, at) {
         const stored = nonces.get(nonce);
-        if (!stored || stored.usedAt || stored.address !== address.toLowerCase() || stored.expiresAt <= now) {
+        if (!stored || stored.usedAt || stored.address !== address.toLowerCase() || stored.expiresAt <= at) {
           return false;
         }
-        stored.usedAt = now;
+        stored.usedAt = at;
         return true;
       },
     },
@@ -60,15 +68,95 @@ export function createMemoryRepositories() {
       async create(userId, signed) {
         const id = signed.quote.quoteId.toLowerCase();
         if (quotes.has(id)) throw new Error('duplicate quote');
-        quotes.set(id, { userId, signed });
+        quotes.set(id, { userId, ...signed });
+      },
+      async findById(quoteId) {
+        return quotes.get(quoteId.toLowerCase()) ?? null;
       },
     },
     payments: {
       async sumFiatSince(userId, since) {
-        return payments
+        return [...payments.values()]
           .filter((p) => p.userId === userId && p.createdAt >= since)
           .filter((p) => p.status !== 'FAILED' && p.status !== 'REFUNDED')
-          .reduce((sum, p) => sum + p.fiatMinor, 0n);
+          .reduce((sum, p) => sum + (quotes.get(p.quoteId.toLowerCase())?.quote.fiat.minor ?? 0n), 0n);
+      },
+      async createForQuote(quoteId, userId) {
+        const existing = [...payments.values()].find((p) => p.quoteId === quoteId.toLowerCase());
+        if (existing) return { payment: { ...existing }, created: false };
+        const at = now();
+        const payment: Payment = {
+          id: `payment_${nextPaymentId++}`,
+          quoteId: quoteId.toLowerCase() as Hex,
+          userId,
+          status: 'SUBMITTED',
+          createdAt: at,
+          updatedAt: at,
+        };
+        payments.set(payment.id, payment);
+        return { payment: { ...payment }, created: true };
+      },
+      async findById(id) {
+        const payment = payments.get(id);
+        return payment ? withQuote(payment) : null;
+      },
+      async findByQuoteId(quoteId) {
+        const payment = [...payments.values()].find((p) => p.quoteId === quoteId.toLowerCase());
+        return payment ? { ...payment } : null;
+      },
+      async listByUser(userId, limit) {
+        return [...payments.values()]
+          .filter((p) => p.userId === userId)
+          .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
+          .slice(0, limit)
+          .map(withQuote);
+      },
+      async listByStatus(statuses, limit) {
+        return [...payments.values()]
+          .filter((p) => statuses.includes(p.status))
+          .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime())
+          .slice(0, limit)
+          .map(withQuote);
+      },
+      async update(id, fields) {
+        const payment = payments.get(id);
+        if (!payment) throw new Error(`no payment ${id}`);
+        Object.assign(payment, lowerFields(fields), { updatedAt: now() });
+      },
+      async transition(id, from, to, fields = {}) {
+        assertTransition(from, to);
+        const payment = payments.get(id);
+        if (!payment || payment.status !== from) return false;
+        Object.assign(payment, lowerFields(fields), { status: to, updatedAt: now() });
+        return true;
+      },
+    },
+    payouts: {
+      async findByPaymentId(paymentId) {
+        const payout = payouts.get(paymentId);
+        return payout ? { ...payout } : null;
+      },
+      async createForPayment({ paymentId, provider, amount }) {
+        let payout = payouts.get(paymentId);
+        if (!payout) {
+          payout = { paymentId, provider, status: 'PENDING', amount, attempts: 0 };
+          payouts.set(paymentId, payout);
+        }
+        return { ...payout };
+      },
+      async update(paymentId, fields) {
+        const payout = payouts.get(paymentId);
+        if (!payout) throw new Error(`no payout for ${paymentId}`);
+        Object.assign(payout, fields);
+        return { ...payout };
+      },
+    },
+    cursors: {
+      async get(id) {
+        return cursors.get(id) ?? null;
+      },
+      async set(id, lastBlock) {
+        cursors.set(id, lastBlock);
       },
     },
   };
@@ -76,8 +164,62 @@ export function createMemoryRepositories() {
   return {
     ...repositories,
     /** Test-only views of the stored data. */
-    state: { users, nonces, kyc, quotes, payments },
+    state: { users, nonces, kyc, quotes, payments, payouts, cursors },
+  };
+}
+
+function lowerFields(fields: PaymentFields): PaymentFields {
+  return {
+    ...fields,
+    ...(fields.payTxHash ? { payTxHash: fields.payTxHash.toLowerCase() as Hex } : {}),
+    ...(fields.settleTxHash ? { settleTxHash: fields.settleTxHash.toLowerCase() as Hex } : {}),
+    ...(fields.refundTxHash ? { refundTxHash: fields.refundTxHash.toLowerCase() as Hex } : {}),
   };
 }
 
 export type MemoryRepositories = ReturnType<typeof createMemoryRepositories>;
+
+let seeded = 0;
+
+/** Stores a payment (and a quote for it) directly, for tests that need history. */
+export function seedPayment(
+  repos: MemoryRepositories,
+  input: { userId: string; fiatMinor: bigint; status: Payment['status']; createdAt: Date },
+): Payment {
+  const quoteId = keccak256(toHex(`seeded-${++seeded}`));
+  const merchant = parsePromptPayQr(
+    buildPromptPayQr({
+      kind: 'merchant',
+      targetType: 'biller',
+      targetId: '099999999999901',
+      amount: { currency: 'THB', minor: input.fiatMinor },
+    }),
+  );
+  repos.state.quotes.set(quoteId, {
+    userId: input.userId,
+    signature: '0x',
+    quote: {
+      quoteId,
+      payer: '0x0000000000000000000000000000000000000001',
+      token: '0x0000000000000000000000000000000000000002',
+      tokenAmount: input.fiatMinor * 10_000n,
+      fiat: { currency: 'THB', minor: input.fiatMinor },
+      rateE8: 32_50000000n,
+      spreadBps: 100,
+      merchantRef: 'promptpay:biller:099999999999901',
+      merchantRefHash: keccak256(toHex('promptpay:biller:099999999999901')),
+      merchant,
+      expiresAt: input.createdAt,
+    },
+  });
+  const payment: Payment = {
+    id: `seeded_${seeded}`,
+    quoteId,
+    userId: input.userId,
+    status: input.status,
+    createdAt: input.createdAt,
+    updatedAt: input.createdAt,
+  };
+  repos.state.payments.set(payment.id, payment);
+  return payment;
+}

@@ -7,6 +7,7 @@ import { QUOTE_TYPES, SETTLEMENT_DOMAIN } from '../src/lib/typed-data.js';
 import { AppError } from '../src/shared/errors.js';
 import { ANVIL } from './support/anvil.js';
 import { type TestApp, buildTestApp, signIn, signInVerified } from './support/app.js';
+import { seedPayment } from './support/memory-repositories.js';
 
 const cafe = {
   kind: 'merchant',
@@ -251,16 +252,10 @@ describe('POST /quotes', () => {
   it('enforces the 24-hour limit, ignoring refunded payments', async () => {
     const { app, repos, session } = await setup();
     const now = new Date();
-    repos.state.payments.push(
-      { userId: session.userId, fiatMinor: 19_000_00n, status: 'SETTLED', createdAt: now },
-      { userId: session.userId, fiatMinor: 5_000_00n, status: 'REFUNDED', createdAt: now },
-      {
-        userId: session.userId,
-        fiatMinor: 5_000_00n,
-        status: 'SETTLED',
-        createdAt: new Date(now.getTime() - 25 * 3600_000),
-      },
-    );
+    const hoursAgo = (hours: number) => new Date(now.getTime() - hours * 3600_000);
+    seedPayment(repos, { userId: session.userId, fiatMinor: 19_000_00n, status: 'SETTLED', createdAt: now });
+    seedPayment(repos, { userId: session.userId, fiatMinor: 5_000_00n, status: 'REFUNDED', createdAt: now });
+    seedPayment(repos, { userId: session.userId, fiatMinor: 5_000_00n, status: 'SETTLED', createdAt: hoursAgo(25) });
 
     const quoteStatic = (fiatAmountMinor: string) =>
       postQuote(app, session.auth, { payer: session.address, qrPayload: qrStatic, fiatAmountMinor });

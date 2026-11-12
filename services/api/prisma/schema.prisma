@@ -87,19 +87,21 @@ enum PaymentStatus {
 }
 
 model Payment {
-  id           String        @id @default(cuid())
-  quoteId      String        @unique
-  quote        Quote         @relation(fields: [quoteId], references: [id])
-  userId       String
-  user         User          @relation(fields: [userId], references: [id])
-  status       PaymentStatus @default(SUBMITTED)
-  payTxHash    String?       @unique
-  paidBlock    BigInt?
-  settleTxHash String?
-  refundTxHash String?
-  createdAt    DateTime      @default(now())
-  updatedAt    DateTime      @updatedAt
-  payout       Payout?
+  id            String        @id @default(cuid())
+  quoteId       String        @unique
+  quote         Quote         @relation(fields: [quoteId], references: [id])
+  userId        String
+  user          User          @relation(fields: [userId], references: [id])
+  status        PaymentStatus @default(SUBMITTED)
+  payTxHash     String?       @unique
+  paidBlock     BigInt?
+  settleTxHash  String?
+  refundTxHash  String?
+  /// Why the payment failed, or why it was refunded
+  failureReason String?
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+  payout        Payout?
 
   @@index([userId, createdAt])
   @@index([status])

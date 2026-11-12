@@ -157,4 +157,97 @@ describe.skipIf(!url)('Prisma repositories (Postgres)', () => {
     await expect(repos.payments.sumFiatSince(user.id, since)).resolves.toBe(300_00n);
     await expect(repos.payments.sumFiatSince('nobody', since)).resolves.toBe(0n);
   });
+
+  it('reads a stored quote back exactly as signed', async () => {
+    const user = await repos.users.upsertByWallet(PAYER);
+    const id = `0x${'ab'.repeat(32)}`;
+    const qr = await storeQuote(user.id, id, 250_00n);
+
+    const stored = await repos.quotes.findById(id as `0x${string}`);
+    expect(stored).toMatchObject({
+      userId: user.id,
+      signature: `0x${'ab'.repeat(65)}`,
+      quote: {
+        quoteId: id,
+        payer: PAYER,
+        token: ANVIL.usdc,
+        tokenAmount: 3_107_693n,
+        fiat: { currency: 'THB', minor: 250_00n },
+        merchantRef: 'promptpay:biller:099999999999901',
+        expiresAt: new Date('2026-11-12T00:01:00Z'),
+      },
+    });
+    expect(stored?.quote.merchant).toEqual(qr);
+    await expect(repos.quotes.findById(`0x${'00'.repeat(32)}`)).resolves.toBeNull();
+  });
+
+  it('creates one payment per quote and moves it only from the expected status', async () => {
+    const user = await repos.users.upsertByWallet(PAYER);
+    const quoteId = `0x${'cd'.repeat(32)}` as const;
+    await storeQuote(user.id, quoteId, 100_00n);
+
+    const first = await repos.payments.createForQuote(quoteId, user.id);
+    const second = await repos.payments.createForQuote(quoteId, user.id);
+    expect(first.created).toBe(true);
+    expect(second).toMatchObject({ created: false, payment: { id: first.payment.id, status: 'SUBMITTED' } });
+
+    const txHash = `0x${'EF'.repeat(32)}` as const;
+    await repos.payments.update(first.payment.id, { payTxHash: txHash });
+    await expect(repos.payments.transition(first.payment.id, 'PAID', 'PAYOUT_PENDING')).resolves.toBe(false);
+    await expect(
+      repos.payments.transition(first.payment.id, 'SUBMITTED', 'PAID', { paidBlock: 42n }),
+    ).resolves.toBe(true);
+    await expect(repos.payments.transition(first.payment.id, 'SUBMITTED', 'PAID')).resolves.toBe(false);
+    await expect(repos.payments.transition(first.payment.id, 'PAID', 'SETTLED')).rejects.toThrow(/cannot move/);
+
+    const found = await repos.payments.findById(first.payment.id);
+    expect(found?.payment).toMatchObject({ status: 'PAID', payTxHash: txHash.toLowerCase(), paidBlock: 42n });
+    expect(found?.quote.quote.quoteId).toBe(quoteId);
+    await expect(repos.payments.findByQuoteId(quoteId)).resolves.toMatchObject({ id: first.payment.id });
+  });
+
+  it('lists payments by user (newest first) and by status (oldest first)', async () => {
+    const user = await repos.users.upsertByWallet(PAYER);
+    const ids: string[] = [];
+    for (const n of [1, 2, 3]) {
+      const quoteId = `0x${String(n).padStart(64, '0')}` as const;
+      await storeQuote(user.id, quoteId, 10_00n);
+      ids.push((await repos.payments.createForQuote(quoteId, user.id)).payment.id);
+    }
+    await repos.payments.transition(ids[1]!, 'SUBMITTED', 'FAILED', { failureReason: 'test' });
+
+    expect((await repos.payments.listByUser(user.id, 2)).map((p) => p.payment.id)).toEqual([ids[2], ids[1]]);
+    expect((await repos.payments.listByStatus(['SUBMITTED'], 10)).map((p) => p.payment.id)).toEqual([ids[0], ids[2]]);
+    expect((await repos.payments.listByStatus(['FAILED'], 10))[0]?.payment.failureReason).toBe('test');
+  });
+
+  it('creates one payout per payment and updates it', async () => {
+    const user = await repos.users.upsertByWallet(PAYER);
+    const quoteId = `0x${'cd'.repeat(32)}` as const;
+    await storeQuote(user.id, quoteId, 100_00n);
+    const { payment } = await repos.payments.createForQuote(quoteId, user.id);
+    const amount = { currency: 'THB' as const, minor: 100_00n };
+
+    await expect(repos.payouts.findByPaymentId(payment.id)).resolves.toBeNull();
+    const created = await repos.payouts.createForPayment({ paymentId: payment.id, provider: 'sim', amount });
+    expect(created).toEqual({ paymentId: payment.id, provider: 'sim', status: 'PENDING', amount, attempts: 0 });
+    await expect(
+      repos.payouts.createForPayment({ paymentId: payment.id, provider: 'other', amount }),
+    ).resolves.toEqual(created);
+
+    const updated = await repos.payouts.update(payment.id, {
+      providerRef: 'ref-1',
+      status: 'FAILED',
+      failureReason: 'no',
+      attempts: 1,
+    });
+    expect(updated).toMatchObject({ providerRef: 'ref-1', status: 'FAILED', failureReason: 'no', attempts: 1 });
+  });
+
+  it('saves the indexer cursor', async () => {
+    await expect(repos.cursors.get('settlement:31337:0xabc')).resolves.toBeNull();
+    await repos.cursors.set('settlement:31337:0xabc', 10n);
+    await repos.cursors.set('settlement:31337:0xabc', 12n);
+    await expect(repos.cursors.get('settlement:31337:0xabc')).resolves.toBe(12n);
+  });
 });

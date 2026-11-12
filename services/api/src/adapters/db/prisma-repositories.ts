@@ -1,20 +1,38 @@
 import { PrismaPg } from '@prisma/adapter-pg';
-import type { Address, Hex } from 'viem';
+import { type Address, type Hex, getAddress } from 'viem';
+import type { FiatCurrency } from '../../domain/money.js';
+import { type Payment, type PaymentStatus, type Payout, assertTransition } from '../../domain/payment.js';
 import type { SignedQuote } from '../../domain/quote.js';
 import type { KycRecord, KycTier, User } from '../../domain/user.js';
-import { PrismaClient } from '../../generated/prisma/client.js';
+import {
+  Prisma,
+  PrismaClient,
+  type Payment as PaymentRow,
+  type Payout as PayoutRow,
+  type Quote as QuoteRow,
+} from '../../generated/prisma/client.js';
+import { parsePromptPayQr } from '../../lib/promptpay/parse.js';
 import type {
+  CursorRepository,
   KycRepository,
+  PaymentFields,
   PaymentRepository,
+  PaymentWithQuote,
+  PayoutRepository,
   QuoteRepository,
   Repositories,
   SiweNonceRepository,
+  StoredQuote,
   UserRepository,
 } from '../../ports/repositories.js';
 
-/** Prisma 7 talks to Postgres through the `pg` driver adapter. Nothing connects until the first query. */
-export function createPrismaClient(databaseUrl: string): PrismaClient {
-  return new PrismaClient({ adapter: new PrismaPg({ connectionString: databaseUrl }) });
+/**
+ * Prisma 7 talks to Postgres through the `pg` driver adapter. Nothing connects until the first query.
+ * `maxConnections` caps the pool (default 10).
+ */
+export function createPrismaClient(databaseUrl: string, maxConnections?: number): PrismaClient {
+  const pool = maxConnections === undefined ? {} : { max: maxConnections };
+  return new PrismaClient({ adapter: new PrismaPg({ connectionString: databaseUrl, ...pool }) });
 }
 
 export function createPrismaRepositories(prisma: PrismaClient): Repositories {
@@ -24,6 +42,8 @@ export function createPrismaRepositories(prisma: PrismaClient): Repositories {
     kyc: new PrismaKycRepository(prisma),
     quotes: new PrismaQuoteRepository(prisma),
     payments: new PrismaPaymentRepository(prisma),
+    payouts: new PrismaPayoutRepository(prisma),
+    cursors: new PrismaCursorRepository(prisma),
   };
 }
 
@@ -136,6 +156,31 @@ export class PrismaQuoteRepository implements QuoteRepository {
       },
     });
   }
+
+  async findById(quoteId: Hex): Promise<StoredQuote | null> {
+    const row = await this.prisma.quote.findUnique({ where: { id: lower(quoteId) } });
+    return row && toStoredQuote(row);
+  }
+}
+
+function toStoredQuote(row: QuoteRow): StoredQuote {
+  return {
+    userId: row.userId,
+    signature: row.signature as Hex,
+    quote: {
+      quoteId: row.id as Hex,
+      payer: getAddress(row.payer),
+      token: getAddress(row.token),
+      tokenAmount: row.tokenAmount,
+      fiat: { currency: row.fiatCurrency as FiatCurrency, minor: row.fiatAmount },
+      rateE8: row.rateE8,
+      spreadBps: row.spreadBps,
+      merchantRef: row.merchantRef,
+      merchantRefHash: row.merchantRefHash as Hex,
+      merchant: parsePromptPayQr(row.qrPayload),
+      expiresAt: row.expiresAt,
+    },
+  };
 }
 
 export class PrismaPaymentRepository implements PaymentRepository {
@@ -150,5 +195,147 @@ export class PrismaPaymentRepository implements PaymentRepository {
       },
     });
     return result._sum.fiatAmount ?? 0n;
+  }
+
+  async createForQuote(quoteId: Hex, userId: string): Promise<{ payment: Payment; created: boolean }> {
+    try {
+      const row = await this.prisma.payment.create({ data: { quoteId: lower(quoteId), userId } });
+      return { payment: toPayment(row), created: true };
+    } catch (error) {
+      // quoteId is unique, so this is race-free: a second submission gets the first one's payment.
+      if (!(error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002')) throw error;
+      const row = await this.prisma.payment.findUniqueOrThrow({ where: { quoteId: lower(quoteId) } });
+      return { payment: toPayment(row), created: false };
+    }
+  }
+
+  async findById(id: string): Promise<PaymentWithQuote | null> {
+    const row = await this.prisma.payment.findUnique({ where: { id }, include: { quote: true } });
+    return row && withQuote(row);
+  }
+
+  async findByQuoteId(quoteId: Hex): Promise<Payment | null> {
+    const row = await this.prisma.payment.findUnique({ where: { quoteId: lower(quoteId) } });
+    return row && toPayment(row);
+  }
+
+  async listByUser(userId: string, limit: number): Promise<PaymentWithQuote[]> {
+    const rows = await this.prisma.payment.findMany({
+      where: { userId },
+      orderBy: { createdAt: 'desc' },
+      take: limit,
+      include: { quote: true },
+    });
+    return rows.map(withQuote);
+  }
+
+  async listByStatus(statuses: readonly PaymentStatus[], limit: number): Promise<PaymentWithQuote[]> {
+    const rows = await this.prisma.payment.findMany({
+      where: { status: { in: [...statuses] } },
+      orderBy: { createdAt: 'asc' },
+      take: limit,
+      include: { quote: true },
+    });
+    return rows.map(withQuote);
+  }
+
+  async update(id: string, fields: PaymentFields): Promise<void> {
+    await this.prisma.payment.update({ where: { id }, data: toPaymentData(fields) });
+  }
+
+  async transition(id: string, from: PaymentStatus, to: PaymentStatus, fields: PaymentFields = {}): Promise<boolean> {
+    assertTransition(from, to);
+    // Conditional on the current status, so two workers can't both move the same payment.
+    const { count } = await this.prisma.payment.updateMany({
+      where: { id, status: from },
+      data: { status: to, ...toPaymentData(fields) },
+    });
+    return count === 1;
+  }
+}
+
+function toPayment(row: PaymentRow): Payment {
+  return {
+    id: row.id,
+    quoteId: row.quoteId as Hex,
+    userId: row.userId,
+    status: row.status,
+    ...(row.payTxHash === null ? {} : { payTxHash: row.payTxHash as Hex }),
+    ...(row.paidBlock === null ? {} : { paidBlock: row.paidBlock }),
+    ...(row.settleTxHash === null ? {} : { settleTxHash: row.settleTxHash as Hex }),
+    ...(row.refundTxHash === null ? {} : { refundTxHash: row.refundTxHash as Hex }),
+    ...(row.failureReason === null ? {} : { failureReason: row.failureReason }),
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+  };
+}
+
+function withQuote(row: PaymentRow & { quote: QuoteRow }): PaymentWithQuote {
+  return { payment: toPayment(row), quote: toStoredQuote(row.quote) };
+}
+
+function toPaymentData(fields: PaymentFields) {
+  return {
+    ...(fields.payTxHash === undefined ? {} : { payTxHash: lower(fields.payTxHash) }),
+    ...(fields.paidBlock === undefined ? {} : { paidBlock: fields.paidBlock }),
+    ...(fields.settleTxHash === undefined ? {} : { settleTxHash: lower(fields.settleTxHash) }),
+    ...(fields.refundTxHash === undefined ? {} : { refundTxHash: lower(fields.refundTxHash) }),
+    ...(fields.failureReason === undefined ? {} : { failureReason: fields.failureReason }),
+  };
+}
+
+export class PrismaPayoutRepository implements PayoutRepository {
+  constructor(private readonly prisma: PrismaClient) {}
+
+  async findByPaymentId(paymentId: string): Promise<Payout | null> {
+    const row = await this.prisma.payout.findUnique({ where: { paymentId } });
+    return row && toPayout(row);
+  }
+
+  async createForPayment(payout: { paymentId: string; provider: string; amount: Payout['amount'] }): Promise<Payout> {
+    const row = await this.prisma.payout.upsert({
+      where: { paymentId: payout.paymentId },
+      create: {
+        paymentId: payout.paymentId,
+        provider: payout.provider,
+        currency: payout.amount.currency,
+        amount: payout.amount.minor,
+      },
+      update: {},
+    });
+    return toPayout(row);
+  }
+
+  async update(
+    paymentId: string,
+    fields: Partial<Pick<Payout, 'providerRef' | 'status' | 'failureReason' | 'attempts'>>,
+  ): Promise<Payout> {
+    const row = await this.prisma.payout.update({ where: { paymentId }, data: fields });
+    return toPayout(row);
+  }
+}
+
+function toPayout(row: PayoutRow): Payout {
+  return {
+    paymentId: row.paymentId,
+    provider: row.provider,
+    ...(row.providerRef === null ? {} : { providerRef: row.providerRef }),
+    status: row.status,
+    amount: { currency: row.currency as FiatCurrency, minor: row.amount },
+    attempts: row.attempts,
+    ...(row.failureReason === null ? {} : { failureReason: row.failureReason }),
+  };
+}
+
+export class PrismaCursorRepository implements CursorRepository {
+  constructor(private readonly prisma: PrismaClient) {}
+
+  async get(id: string): Promise<bigint | null> {
+    const row = await this.prisma.indexerCursor.findUnique({ where: { id } });
+    return row?.lastBlock ?? null;
+  }
+
+  async set(id: string, lastBlock: bigint): Promise<void> {
+    await this.prisma.indexerCursor.upsert({ where: { id }, create: { id, lastBlock }, update: { lastBlock } });
   }
 }
