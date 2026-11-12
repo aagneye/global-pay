@@ -9,7 +9,7 @@ const BalanceDto = z.object({
   token: out.address,
   units: out.uint.meta({ description: 'Token base units' }),
   decimals: z.number().int(),
-});
+}).meta({ id: 'Balance' });
 
 export const accountRoutes: FastifyPluginAsyncZod<{ account: AccountService }> = async (app, { account }) => {
   app.get(
@@ -18,6 +18,7 @@ export const accountRoutes: FastifyPluginAsyncZod<{ account: AccountService }> =
       schema: {
         tags: ['account'],
         summary: "USDC balance of the signed-in user's wallet",
+        operationId: 'getBalance',
         security: bearerAuth,
         response: { 200: BalanceDto, 401: errorResponses[401], 503: errorResponses[503] },
       },
@@ -34,8 +35,12 @@ export const accountRoutes: FastifyPluginAsyncZod<{ account: AccountService }> =
       schema: {
         tags: ['account'],
         summary: 'Payment history, newest first (last 50)',
+        operationId: 'listPayments',
         security: bearerAuth,
-        response: { 200: z.object({ payments: z.array(PaymentDto) }), 401: errorResponses[401] },
+        response: {
+          200: z.object({ payments: z.array(PaymentDto) }).meta({ id: 'PaymentList' }),
+          401: errorResponses[401],
+        },
       },
     },
     async (request) => ({ payments: await account.payments(requireUserId(request)) }),

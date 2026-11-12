@@ -4,7 +4,6 @@ import { RECEIVE_WITH_AUTHORIZATION_TYPES, quoteStruct } from '../../lib/typed-d
 import {
   addressSchema,
   bearerAuth,
-  errorResponseSchema,
   errorResponses,
   minorUnitsSchema,
   out,
@@ -18,9 +17,9 @@ const QuoteBody = z.object({
   fiatAmountMinor: minorUnitsSchema
     .optional()
     .meta({ description: 'THB satang. Required when the QR has no amount; must match it when it has one.' }),
-});
+}).meta({ id: 'QuoteRequest' });
 
-const typedDataField = z.object({ name: z.string(), type: z.string() });
+const typedDataField = z.object({ name: z.string(), type: z.string() }).meta({ id: 'TypedDataField' });
 
 const QuoteDto = z.object({
   quote: z
@@ -34,7 +33,10 @@ const QuoteDto = z.object({
       merchantRefHash: out.bytes32,
       expiresAt: z.number().int().meta({ description: 'Unix seconds' }),
     })
-    .meta({ description: 'The on-chain Quote struct, as signed. Send it back unchanged with the payment.' }),
+    .meta({
+      id: 'OnChainQuote',
+      description: 'The on-chain Quote struct, as signed. Send it back unchanged with the payment.',
+    }),
   signature: out.hex.meta({ description: "GlobalPay's EIP-712 signature over the quote" }),
   expiresAt: out.dateTime,
   pricing: z.object({
@@ -43,7 +45,7 @@ const QuoteDto = z.object({
     spreadBps: z.number().int(),
     baseTokenAmount: out.uint.meta({ description: 'USDC at the mid-market rate' }),
     feeTokenAmount: out.uint.meta({ description: 'The spread, in USDC base units' }),
-  }),
+  }).meta({ id: 'QuotePricing' }),
   merchant: z.object({
     kind: z.enum(['personal', 'merchant']),
     targetType: z.enum(['mobile', 'nationalId', 'eWallet', 'biller']),
@@ -52,7 +54,7 @@ const QuoteDto = z.object({
     reference2: z.string().optional(),
     merchantName: z.string().optional(),
     merchantCity: z.string().optional(),
-  }),
+  }).meta({ id: 'QuoteMerchant' }),
   authorizationToSign: z
     .object({
       types: z.record(z.string(), z.array(typedDataField)),
@@ -62,7 +64,7 @@ const QuoteDto = z.object({
         version: z.string(),
         chainId: z.number().int(),
         verifyingContract: out.address,
-      }),
+      }).meta({ id: 'Eip712Domain' }),
       message: z.object({
         from: out.address,
         to: out.address,
@@ -70,10 +72,13 @@ const QuoteDto = z.object({
         validAfter: out.uint,
         validBefore: out.uint,
         nonce: out.bytes32,
-      }),
+      }).meta({ id: 'ReceiveAuthorizationMessage' }),
     })
-    .meta({ description: 'EIP-712 typed data for the wallet (eth_signTypedData_v4): USDC ReceiveWithAuthorization' }),
-});
+    .meta({
+      id: 'ReceiveAuthorizationTypedData',
+      description: 'EIP-712 typed data for the wallet (eth_signTypedData_v4): USDC ReceiveWithAuthorization',
+    }),
+}).meta({ id: 'QuoteResponse' });
 
 function toDto({ quote, signature, pricing, authorizationToSign }: QuoteResponse): z.infer<typeof QuoteDto> {
   const struct = quoteStruct(quote);
@@ -139,6 +144,7 @@ export const quoteRoutes: FastifyPluginAsyncZod<{ quotes: QuoteService }> = asyn
       schema: {
         tags: ['quotes'],
         summary: 'Quote a PromptPay QR payment in USDC',
+        operationId: 'createQuote',
         description:
           'Parses the QR, checks KYC limits, prices it at the live rate plus the spread, and signs it. ' +
           'The quote expires after QUOTE_TTL_SECONDS (60 s by default). ' +
@@ -149,8 +155,8 @@ export const quoteRoutes: FastifyPluginAsyncZod<{ quotes: QuoteService }> = asyn
           201: QuoteDto,
           400: errorResponses[400],
           401: errorResponses[401],
-          403: errorResponseSchema.meta({ description: 'KYC not approved, or the payer is not your wallet' }),
-          422: errorResponseSchema.meta({ description: 'Invalid QR, amount or limit' }),
+          403: errorResponses[403],
+          422: errorResponses[422],
           503: errorResponses[503],
         },
       },

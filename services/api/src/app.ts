@@ -17,6 +17,7 @@ import { kycRoutes } from './modules/kyc/routes.js';
 import { paymentRoutes } from './modules/payments/routes.js';
 import { quoteRoutes } from './modules/quotes/routes.js';
 import { AppError } from './shared/errors.js';
+import { namedSchemasTransform } from './shared/openapi.js';
 import { authHook } from './shared/request-user.js';
 
 export interface BuildAppOptions {
@@ -84,12 +85,19 @@ export async function buildApp({ container, logger = true }: BuildAppOptions): P
       },
     },
     transform: jsonSchemaTransform,
+    transformObject: namedSchemasTransform,
   });
   await app.register(fastifySwaggerUi, { routePrefix: '/docs' });
 
   app.get(
     '/health',
-    { schema: { tags: ['system'], response: { 200: z.object({ status: z.literal('ok') }) } } },
+    {
+      schema: {
+        tags: ['system'],
+        operationId: 'getHealth',
+        response: { 200: z.object({ status: z.literal('ok') }).meta({ id: 'Health' }) },
+      },
+    },
     async () => ({ status: 'ok' as const }),
   );
 

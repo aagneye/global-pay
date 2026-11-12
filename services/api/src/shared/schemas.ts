@@ -56,13 +56,21 @@ export const errorResponseSchema = z
     error: z.string().meta({ description: 'Stable machine-readable code', example: 'kyc_required' }),
     message: z.string().optional(),
     issues: z.array(z.unknown()).optional(),
-  });
+  })
+  .meta({ id: 'Error' });
 
-/** Error responses shared by every route, for the OpenAPI spec. */
+/**
+ * Error responses, for the OpenAPI spec. They all share the named `Error` schema, so clients get one
+ * error type: 400 invalid request, 401 not signed in, 403 not allowed, 404 not found,
+ * 422 rejected (see `error`), 503 a dependency (rate feed, chain, config) is unavailable.
+ */
 export const errorResponses = {
-  400: errorResponseSchema.meta({ description: 'Invalid request' }),
-  401: errorResponseSchema.meta({ description: 'Not signed in, or the token is invalid' }),
-  503: errorResponseSchema.meta({ description: 'A dependency (rate feed, chain, config) is unavailable' }),
+  400: errorResponseSchema,
+  401: errorResponseSchema,
+  403: errorResponseSchema,
+  404: errorResponseSchema,
+  422: errorResponseSchema,
+  503: errorResponseSchema,
 } as const;
 
 export const bearerAuth = [{ bearerAuth: [] }];
