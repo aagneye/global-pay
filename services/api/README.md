@@ -7,27 +7,46 @@ The GlobalPay backend (TypeScript, Node 22). It does five jobs:
 - drives the (simulated) baht payout;
 - settles or refunds each payment.
 
-Stack: Fastify, zod, viem, Prisma 7 (Postgres), vitest.
+Stack: Fastify, zod (validation and OpenAPI), viem, Prisma 7 (Postgres), jose (JWT), vitest.
+
+## Status
+
+Iteration 3 (backend core) is done. These work:
+
+| Route | What it does |
+|---|---|
+| `POST /auth/nonce`, `POST /auth/verify` | Sign-In with Ethereum, then a JWT |
+| `POST /kyc/start`, `GET /kyc/status` | Mock KYC: approved at tier 1, with spending limits |
+| `POST /quotes` | Parses a PromptPay QR, checks limits, prices it at the live rate plus the spread, and returns an EIP-712-signed quote plus the USDC authorisation for the wallet to sign |
+| `GET /docs` | OpenAPI docs (spec at `/docs/json`) |
+
+Payments, balance and history return `501` until iteration 4. See [docs/roadmap.md](../../docs/roadmap.md).
 
 ## Layout
 
 ```
 src/
   main.ts             process entry: env → container → app → workers → listen
-  app.ts              Fastify app factory, error handling, route registration
+  app.ts              Fastify app: zod schemas, OpenAPI, auth hook, error handling, routes
   container.ts        composition root: picks adapters, wires services and workers
   config/env.ts       validated configuration (see .env.example)
-  domain/             pure types and rules: money, quote, payment state machine, user limits
-  ports/              interfaces to the outside: KYC, rates, payouts, settlement contract, quote signer
-  adapters/           port implementations: mock KYC, rate feed, simulated PromptPay, viem chain
+  domain/             pure types and rules: money, pricing, quote, payment state machine, KYC limits
+  ports/              interfaces to the outside: repositories, KYC, rates, payouts, settlement contract, quote signer
+  adapters/           port implementations:
+    db/               Prisma repositories
+    chain/            viem quote signer and settlement gateway
+    rates/            Coinbase public feed, fixed rate
+    kyc/, payouts/    mock KYC, simulated PromptPay payout
   lib/promptpay/      EMVCo PromptPay parser and builder (shared vectors in packages/fixtures)
-  modules/<feature>/  routes.ts (HTTP + validation) and service.ts (use case):
+  lib/typed-data.ts   EIP-712 types shared with the contracts (Quote, ReceiveWithAuthorization)
+  modules/<feature>/  routes.ts (HTTP schemas) and service.ts (use case):
                       auth, kyc, quotes, payments, account
   workers/            indexer (chain events) and payout worker (pay out, then settle or refund)
-  shared/             errors, zod schemas, auth helper
-prisma/schema.prisma  data model
+  shared/             errors, zod schemas, auth hook
+  generated/prisma/   Prisma client (generated on npm install, gitignored)
+prisma/               schema and migrations
 scripts/              developer tools (demo QR generator)
-test/                 vitest tests
+test/                 vitest tests; test/support has the test app, in-memory repositories and anvil constants
 ```
 
 Architecture rules:
@@ -38,26 +57,44 @@ Architecture rules:
 ## Commands
 
 ```bash
-npm install
+npm install              # also generates the Prisma client
 cp .env.example .env     # PowerShell: Copy-Item .env.example .env, then set JWT_SECRET
-npm run dev              # http://localhost:3000/health
+npm run db:migrate       # apply migrations to DATABASE_URL
+npm run dev              # http://localhost:3000/docs
 npm run typecheck
 npm test
-npm run prisma:validate
+npm run qr:make          # print demo PromptPay QRs; npm run qr:make -- 250.50 for another amount
 ```
 
-## Status
+To change the schema: edit `prisma/schema.prisma`, then run `npm run db:migrate:dev -- --name <change>`.
 
-Iteration 1 is a skeleton. Here's what works today:
-- `/health` returns ok.
-- Request validation rejects bad input with 400.
-- Every other route returns `501 not_implemented` with the iteration that will build it.
+### Database tests
 
-See [docs/roadmap.md](../../docs/roadmap.md) for the build order.
+`test/db/` checks the Prisma repositories against a real Postgres. The tests are skipped unless `TEST_DATABASE_URL` is set, and they **empty every table**, so point it at a throwaway database:
+
+```bash
+TEST_DATABASE_URL=postgresql://globalpay:globalpay@localhost:5432/globalpay_test npm test
+```
+
+Apply the migrations to that database first (`DATABASE_URL=<same url> npm run db:migrate`).
+
+## Try a quote locally
+
+1. Start anvil and deploy the contracts ([contracts/README.md](../../contracts/README.md#local-chain-anvil)).
+2. In `.env`, use the "Local chain instead" block from `.env.example`.
+3. `npm run dev`, then open `http://localhost:3000/docs`.
+4. The flow is:
+   1. `POST /auth/nonce` with your wallet address;
+   2. sign the returned `message` (`personal_sign`);
+   3. `POST /auth/verify` returns a token;
+   4. `POST /kyc/start`, then `GET /kyc/status`;
+   5. `POST /quotes` with a QR from `npm run qr:make`.
 
 ## Conventions
 
 - **Money:** integers in minor units (`bigint`). Over HTTP, amounts are integer strings (`"10000"` = 100.00 THB).
 - **Rates:** fixed-point `rateE8`, meaning fiat major units per 1 token × 1e8.
-- **Hex values:** addresses and hashes are 0x-prefixed. Store them lowercase.
+- **Rounding:** token amounts round up, so GlobalPay never receives less than it pays out.
+- **Hex values:** addresses and hashes are 0x-prefixed. Store them lowercase; return addresses checksummed.
+- **Errors:** `{ "error": "<code>", "message": "…" }` with a stable code, e.g. `kyc_required`, `invalid_qr`.
 - **Partners:** a new partner is a new adapter for an existing port.

@@ -35,18 +35,37 @@ docker compose up -d
 
 This starts Postgres 17 on `localhost:5432` (user, password and database are all `globalpay`; local use only).
 
+**Port 5432 already taken?** If you already run Postgres locally, put `POSTGRES_PORT=5433` in a `.env` file at the repo root, run `docker compose up -d` again, and use port 5433 in `services/api/.env`.
+
+**No Docker?** Prisma can run a local Postgres for you. From `services/api`:
+
+```bash
+npx prisma dev
+```
+
+It prints a `postgres://` URL (the **TCP** one); put it in `DATABASE_URL`. It's for development only.
+
 ## 3. Backend: `services/api`
 
 ```bash
 cd services/api
 npm install
 cp .env.example .env
+npm run db:migrate
 npm run typecheck
 npm test
 npm run dev
 ```
 
-On Windows PowerShell, use `Copy-Item .env.example .env` instead of `cp`. In iteration 1 only `GET /health` is implemented; other routes return `501 Not Implemented`.
+On Windows PowerShell, use `Copy-Item .env.example .env` instead of `cp`. Set `JWT_SECRET` in `.env` before starting.
+
+- `npm install` also generates the Prisma client.
+- `npm run db:migrate` creates the tables in `DATABASE_URL`.
+- The API docs are at `http://localhost:3000/docs`.
+- Quotes need a settlement contract. For local development, deploy one to anvil (section 4) and use the "Local chain instead" block in `.env.example`.
+- With no network, set `RATE_SOURCE=fixed` to use `FIXED_USDC_THB_RATE` instead of Coinbase's public rates.
+
+Payments, balance and history return `501 Not Implemented` until iteration 4. [services/api/README.md](../services/api/README.md) walks through a quote end to end.
 
 ## 4. Contracts: `contracts/`
 

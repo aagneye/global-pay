@@ -73,10 +73,11 @@ This is a ports-and-adapters design. Core logic depends only on `domain/` and `p
 
 | Folder | Responsibility |
 |---|---|
-| `src/domain/` | Types and rules with no I/O: money in integer minor units, quotes, the payment state machine, users and KYC limits |
-| `src/ports/` | Interfaces to the outside world: `KycProvider`, `RateProvider`, `PayoutProvider`, `SettlementGateway`, `QuoteSigner` |
-| `src/adapters/` | Implementations of the ports: mock KYC, public rate feed, simulated PromptPay payout, viem chain gateway and quote signer |
+| `src/domain/` | Types and rules with no I/O: money in integer minor units, pricing, quotes, the payment state machine, users and KYC limits |
+| `src/ports/` | Interfaces to the outside world: repositories, `KycProvider`, `RateProvider`, `PayoutProvider`, `SettlementGateway`, `QuoteSigner` |
+| `src/adapters/` | Implementations of the ports: Prisma repositories, mock KYC, Coinbase public rate feed (or a fixed rate), simulated PromptPay payout, viem chain gateway and quote signer |
 | `src/lib/promptpay/` | EMVCo PromptPay parser and builder (pure functions, tested against `packages/fixtures`) |
+| `src/lib/typed-data.ts` | EIP-712 types shared with the contracts: `Quote` and USDC `ReceiveWithAuthorization` |
 | `src/modules/` | HTTP features. Each has `routes.ts` (validation + HTTP) and `service.ts` (use case). Modules: `auth`, `kyc`, `quotes`, `payments`, `account` |
 | `src/shared/` | Errors, zod schemas, request-user helper |
 | `src/config/` | Validated environment configuration |
@@ -189,6 +190,41 @@ ReceiveWithAuthorization(from = payer, to = settlement contract, value = tokenAm
 - `receiveWithAuthorization` requires the caller to be the recipient (the contract), so nobody can front-run the transfer.
 - A quote is valid while `block.timestamp < expiresAt`, the same rule USDC applies to `validBefore`. With `validBefore = expiresAt`, both signatures expire at the same second.
 - The USDC EIP-712 domain (`name`, `version`) is read from the chain, never hardcoded. It differs between Base Sepolia and Base mainnet.
+- `POST /quotes` returns both: the signed quote, and the `ReceiveWithAuthorization` as complete `eth_signTypedData_v4` data for the wallet to sign unchanged.
+- The backend's encoding is pinned by a test: its digest and signature must equal what `GlobalPaySettlement.hashQuote` produces on anvil.
+
+## Sign-in
+
+Sign-In with Ethereum (EIP-4361), then a bearer token:
+
+1. `POST /auth/nonce {address}`: the server stores a one-time nonce for that address (5 minutes) and returns the full message to sign.
+2. The wallet signs the message (`personal_sign`).
+3. `POST /auth/verify {message, signature}`: the server checks, in order:
+   1. the message's domain (`SIWE_DOMAIN`), URI, chain ID and expiry;
+   2. the signature;
+   3. the nonce, consumed atomically: it must be unused, unexpired, and issued to the same address.
+4. On success the server creates the user on first sign-in and returns a JWT (HS256, `JWT_TTL_SECONDS`, 24 hours by default) with the user ID and wallet.
+
+An auth hook checks the `Authorization: Bearer` header on every request. Protected routes reject anonymous requests with `401`.
+
+The signature check is offline, which covers ordinary wallets (EOAs), including embedded wallets. Smart-contract wallets would need an on-chain ERC-1271 check.
+
+## Quotes and pricing
+
+`POST /quotes {payer, qrPayload, fiatAmountMinor?}` runs these steps:
+
+1. **Parse the QR**, with the checks and error codes in `packages/fixtures`. With `MERCHANT_QR_ONLY`, personal QRs are refused.
+2. **Amount:** a dynamic QR fixes it; for a static QR the app sends `fiatAmountMinor`.
+3. **Payer:** must be the signed-in wallet.
+4. **Limits:** KYC must be approved, and the amount must fit the tier's per-payment limit and the rolling 24-hour limit. Failed and refunded payments don't count toward the 24 hours. Iteration 4 checks again when the payment is submitted.
+5. **Price:** the mid-market rate, plus the spread:
+
+   ```
+   tokenAmount = ceil( fiat / rate × (1 + SPREAD_BPS / 10000) )
+   ```
+
+   It's exact integer maths with one division, rounded up, so GlobalPay never receives less than it pays the merchant. `SPREAD_BPS` defaults to 100 (1%). The demo rate comes from Coinbase's public feed (cached for 30 seconds); production uses the exchange partner's quote.
+6. **Sign and store:** a random `quoteId`, and an expiry `QUOTE_TTL_SECONDS` ahead (60 s by default) on a whole second. `merchantRefHash` is `keccak256("promptpay:<targetType>:<targetId>")`. It names the payee, while the raw QR stays in the database for the payout.
 
 ## Keys and roles
 
@@ -217,22 +253,25 @@ ReceiveWithAuthorization(from = payer, to = settlement contract, value = tokenAm
 
 All money is stored as integers in minor units: USDC base units (6 decimals) and THB satang (2 decimals). Exchange rates are fixed-point integers scaled by 1e8 (`rateE8`).
 
-## HTTP API (planned)
+## HTTP API
 
 | Method | Path | Purpose | Iteration |
 |---|---|---|---|
-| GET | `/health` | Liveness | 1 |
-| POST | `/auth/nonce` | Get a Sign-In with Ethereum (SIWE) nonce | 3 |
-| POST | `/auth/verify` | Verify a SIWE signature and return a JWT | 3 |
-| POST | `/kyc/start` | Start KYC (mock) | 3 |
-| GET | `/kyc/status` | KYC tier and status | 3 |
-| POST | `/quotes` | Quote a PromptPay QR payment | 3 |
+| GET | `/health` | Liveness | 1 ✅ |
+| POST | `/auth/nonce` | Get a Sign-In with Ethereum (SIWE) nonce and message | 3 ✅ |
+| POST | `/auth/verify` | Verify a SIWE signature and return a JWT | 3 ✅ |
+| POST | `/kyc/start` | Start KYC (mock) | 3 ✅ |
+| GET | `/kyc/status` | KYC tier, status and limits | 3 ✅ |
+| POST | `/quotes` | Quote a PromptPay QR payment | 3 ✅ |
 | POST | `/payments` | Submit a signed authorisation | 4 |
 | GET | `/payments/:id` | Payment status | 4 |
 | GET | `/me/balance` | USDC balance | 4 |
 | GET | `/me/payments` | Payment history | 4 |
+| GET | `/docs`, `/docs/json` | OpenAPI docs and spec | 3 ✅ |
 
-An OpenAPI spec is generated from the route schemas, and the Dart client is generated from that spec.
+Each route declares zod schemas. The same schemas validate requests, shape responses, and generate the OpenAPI spec, so the spec can't drift from the code. The Dart client is generated from that spec (iteration 5).
+
+Errors are `{ "error": "<code>", "message": "…" }` with a stable code, for example `invalid_qr` (422), `kyc_required` (403), `daily_limit_exceeded` (422) or `rate_unavailable` (503).
 
 ## Security and compliance controls in the design
 
@@ -243,7 +282,8 @@ An OpenAPI spec is generated from the route schemas, and the Dart client is gene
 - **KYC-based limits:** per-payment and per-day limits by tier (`src/domain/user.ts`).
 - **Emergency stop:** `pause()` stops new payments. Settling and refunding still work, so in-flight funds can always be resolved. Only the admin can unpause ([ADR 0006](adr/0006-immutable-settlement-contract.md)).
 - **Received-amount check:** `pay` reverts with `UnexpectedTokenTransfer` unless the contract received exactly the quoted amount.
-- **Exact money maths:** amounts are integers everywhere and never floating point.
+- **Exact money maths:** amounts are integers everywhere and never floating point, and token amounts round up. Even the rate feed's decimal strings are parsed without floats.
+- **No sign-in replay:** each sign-in nonce is bound to one address and consumed atomically, after the signature is checked, so nobody can use up another wallet's nonce.
 - **Testnet keys only:** keys live in a gitignored `.env` and are never committed.
 
 ## Configuration

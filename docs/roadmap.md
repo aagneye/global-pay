@@ -41,17 +41,17 @@ Structure, architecture and docs. No business logic yet.
 
 **Result:** `forge test` passes, and coverage of `GlobalPaySettlement` is 100% for lines, statements, branches and functions. `forge fmt --check` and `forge lint` are clean.
 
-## Iteration 3: Backend core
+## Iteration 3: Backend core ✅
 
-1. Prisma client with `@prisma/adapter-pg`, the first migration, and repositories.
-2. PromptPay parser and builder in `src/lib/promptpay`, tested against the shared vectors. Make `npm run qr:make` print test QRs.
-3. Rate provider (public feed) with spread. Quote maths in `bigint`, with tests.
-4. EIP-712 quote signer (viem).
-5. Sign-In with Ethereum: nonce, verify, JWT, and an auth hook on protected routes.
-6. Mock KYC with tiers and limits.
-7. OpenAPI spec through `@fastify/swagger`, served at `/docs`.
+- [x] Prisma client with `@prisma/adapter-pg`, the first migration, and repositories behind ports. Database tests run against real Postgres when `TEST_DATABASE_URL` is set.
+- [x] PromptPay parser and builder in `src/lib/promptpay`, passing every shared vector. A new `invalid_field` error and vector cover bad values in a well-formed QR. `npm run qr:make` prints demo QRs.
+- [x] Rates from Coinbase's public feed, parsed exactly from decimal strings, plus a fixed rate for offline work. Quote maths in `bigint`, rounded up, with a 1% spread by default.
+- [x] EIP-712 quote signer (viem). Its digest and signature match `GlobalPaySettlement.hashQuote` exactly.
+- [x] Sign-In with Ethereum: the server writes the message, then verifies the domain, URI, chain, expiry, signature and one-time nonce, and issues a JWT. An auth hook protects routes.
+- [x] Mock KYC (approved at tier 1), with per-payment and rolling 24-hour limits enforced on quotes.
+- [x] OpenAPI spec generated from the zod route schemas, served at `/docs`.
 
-**Done when:** unit tests pass, and `POST /quotes` returns a signed quote locally.
+**Result:** 125 tests pass. On a local stack (anvil, Postgres, live rate), `POST /quotes` returned a signed quote, and the deployed contract accepted it in `pay()` together with the user's USDC authorisation.
 
 ## Iteration 4: Settlement loop on a local chain
 

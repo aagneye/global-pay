@@ -4,9 +4,10 @@
 
 The first target is foreign remote workers in Thailand who are paid in USDC. They pay any PromptPay QR from the GlobalPay app, and the merchant receives baht. It runs on **Base**, an Ethereum Layer 2 that uses the EVM.
 
-> **Status: iteration 2 of 7 done.**
+> **Status: iteration 3 of 7 done.**
 > - The architecture skeleton and docs are in place.
 > - The settlement contract is implemented and fully tested.
+> - The backend signs users in, runs mock KYC, and returns signed quotes for PromptPay QRs.
 >
 > Nothing moves real money. Partners (exchange, e-money operator, PromptPay payout, KYC) are simulated, and everything runs on testnet or a local chain.
 
@@ -69,6 +70,8 @@ cd contracts && forge test
 ```bash
 cd services/api && npm install && npm test
 ```
+
+If port 5432 is already in use, see [docs/setup.md](docs/setup.md#2-database).
 
 ```bash
 cd apps/mobile && flutter pub get && flutter test
