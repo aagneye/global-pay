@@ -1,28 +1,144 @@
-import type { FastifyBaseLogger } from 'fastify';
-import type { SettlementGateway } from '../ports/settlement-gateway.js';
+import type { Address } from 'viem';
+import type { CursorRepository, PaymentRepository, PaymentWithQuote, QuoteRepository } from '../ports/repositories.js';
+import type { PaymentReceivedEvent, SettlementGateway } from '../ports/settlement-gateway.js';
+import { PollingLoop, type WorkerLogger, silentLogger } from './loop.js';
 
 export interface IndexerDeps {
   gateway: SettlementGateway;
+  payments: PaymentRepository;
+  quotes: QuoteRepository;
+  cursors: CursorRepository;
+  chainId: number;
+  settlementAddress?: Address;
   pollMs: number;
   /** Blocks to wait before treating an event as final. */
   confirmations: number;
+  /** Where to start the first time (the contract's deployment block). */
+  startBlock: bigint;
+  /** Largest block range per log query; RPC providers cap it. */
+  maxBlockRange?: bigint;
+  /** How long after a quote expires to give up on a SUBMITTED payment that never landed. */
+  failAfterExpiryMs?: number;
+  now?: () => Date;
 }
 
 /**
- * Polls `PaymentReceived` events from a saved block cursor and moves payments
- * SUBMITTED → PAID → PAYOUT_PENDING. Re-processing an event has no effect.
- * On-chain events are the source of truth.
+ * Reads `PaymentReceived` events and moves payments SUBMITTED → PAID. On-chain events are the
+ * source of truth: processing an event again has no effect, and the saved block cursor lets it
+ * resume after a restart. Events are only read `confirmations` blocks behind the head.
+ *
+ * It also reconciles SUBMITTED payments whose pay() never produced an event: a reverted
+ * transaction, or one that didn't land before the quote expired, becomes FAILED.
  */
 export class IndexerWorker {
   private readonly deps: IndexerDeps;
+  private readonly loop: PollingLoop;
+  private readonly maxBlockRange: bigint;
+  private readonly failAfterExpiryMs: number;
+  private readonly now: () => Date;
+  private log: WorkerLogger = silentLogger;
 
   constructor(deps: IndexerDeps) {
     this.deps = deps;
+    this.maxBlockRange = deps.maxBlockRange ?? 2_000n;
+    this.failAfterExpiryMs = deps.failAfterExpiryMs ?? 60_000;
+    this.now = deps.now ?? (() => new Date());
+    this.loop = new PollingLoop('indexer', deps.pollMs, () => this.tick());
   }
 
-  start(log: FastifyBaseLogger): void {
-    log.warn({ worker: 'indexer' }, 'indexer is planned for iteration 4; not started');
+  start(log: WorkerLogger): void {
+    this.log = log;
+    if (!this.deps.settlementAddress) {
+      log.warn({ worker: 'indexer' }, 'SETTLEMENT_ADDRESS is not set; indexer not started');
+      return;
+    }
+    this.loop.start(log);
   }
 
-  async stop(): Promise<void> {}
+  async stop(): Promise<void> {
+    await this.loop.stop();
+  }
+
+  /** One pass: index new confirmed blocks, then reconcile stuck payments. */
+  async tick(): Promise<void> {
+    await this.indexEvents();
+    await this.reconcileSubmitted();
+  }
+
+  private get cursorId(): string {
+    return `settlement:${this.deps.chainId}:${this.deps.settlementAddress?.toLowerCase()}`;
+  }
+
+  private async indexEvents(): Promise<void> {
+    const { gateway, cursors } = this.deps;
+    const safeBlock = (await gateway.getLatestBlock()) - BigInt(this.deps.confirmations);
+    let from = ((await cursors.get(this.cursorId)) ?? this.deps.startBlock - 1n) + 1n;
+
+    while (from <= safeBlock) {
+      const to = from + this.maxBlockRange - 1n < safeBlock ? from + this.maxBlockRange - 1n : safeBlock;
+      for (const event of await gateway.getPaymentReceivedEvents(from, to)) {
+        await this.onPaymentReceived(event);
+      }
+      // Saved after the events: a crash in between re-reads them, which is harmless.
+      await cursors.set(this.cursorId, to);
+      from = to + 1n;
+    }
+  }
+
+  private async onPaymentReceived(event: PaymentReceivedEvent): Promise<void> {
+    const { payments, quotes } = this.deps;
+    let payment = await payments.findByQuoteId(event.quoteId);
+    if (!payment) {
+      const stored = await quotes.findById(event.quoteId);
+      if (!stored) {
+        this.log.warn({ quoteId: event.quoteId, txHash: event.txHash }, 'PaymentReceived for an unknown quote');
+        return;
+      }
+      // pay() is permissionless, so someone else may have submitted our quote. Track it like our own.
+      payment = (await payments.createForQuote(event.quoteId, stored.userId)).payment;
+    }
+
+    if (payment.status === 'SUBMITTED') {
+      await payments.transition(payment.id, 'SUBMITTED', 'PAID', {
+        payTxHash: event.txHash,
+        paidBlock: event.blockNumber,
+      });
+      this.log.info({ paymentId: payment.id, txHash: event.txHash }, 'payment received on-chain');
+    } else if (payment.status === 'FAILED') {
+      // Shouldn't happen: payments only fail when the chain shows no payment. Needs a person.
+      this.log.error({ paymentId: payment.id, txHash: event.txHash }, 'FAILED payment was paid on-chain');
+    }
+    // Any other status: we've seen this event before.
+  }
+
+  private async reconcileSubmitted(): Promise<void> {
+    const submitted = await this.deps.payments.listByStatus(['SUBMITTED'], 100);
+    for (const item of submitted) {
+      try {
+        await this.reconcile(item);
+      } catch (error) {
+        this.log.error({ err: error, paymentId: item.payment.id }, 'could not reconcile payment');
+      }
+    }
+  }
+
+  private async reconcile({ payment, quote }: PaymentWithQuote): Promise<void> {
+    const { gateway, payments } = this.deps;
+    if (payment.payTxHash) {
+      const receipt = await gateway.getReceipt(payment.payTxHash);
+      if (receipt?.status === 'reverted') {
+        await payments.transition(payment.id, 'SUBMITTED', 'FAILED', { failureReason: 'The pay() transaction reverted' });
+        return;
+      }
+      if (receipt) return; // mined: its event arrives once confirmed
+    }
+
+    // Not mined (or never sent). After the quote expires, the contract rejects it, so it can never land.
+    const expired = this.now().getTime() > quote.quote.expiresAt.getTime() + this.failAfterExpiryMs;
+    if (!expired) return;
+    if ((await gateway.getPaymentStatus(payment.quoteId)) !== 'None') return; // landed after all
+    await payments.transition(payment.id, 'SUBMITTED', 'FAILED', {
+      failureReason: payment.payTxHash ? 'pay() was not mined before the quote expired' : 'pay() was not sent',
+    });
+  }
 }

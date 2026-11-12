@@ -8,6 +8,8 @@ export const envSchema = z.object({
   PORT: z.coerce.number().int().positive().default(3000),
 
   DATABASE_URL: z.string().min(1),
+  /** Connections to Postgres. Set 1 with `prisma dev`, which can only serve one at a time. */
+  DATABASE_POOL_SIZE: z.coerce.number().int().min(1).max(100).optional(),
 
   JWT_SECRET: z.string().min(32, 'JWT_SECRET must be at least 32 characters'),
   JWT_TTL_SECONDS: z.coerce.number().int().min(300).max(7 * 24 * 3600).default(24 * 3600),
@@ -19,6 +21,8 @@ export const envSchema = z.object({
 
   CHAIN_ID: z.coerce.number().int().positive().default(84532),
   RPC_URL: z.url(),
+  /** How often to poll the node for receipts. Base makes a block every 2 s. */
+  CHAIN_POLL_MS: z.coerce.number().int().min(50).default(1_000),
   EXPLORER_URL: z.url().default('https://sepolia.basescan.org'),
   USDC_ADDRESS: addressSchema,
   SETTLEMENT_ADDRESS: addressSchema.optional(),
@@ -47,9 +51,12 @@ export const envSchema = z.object({
 
   PAYOUT_DELAY_MS: z.coerce.number().int().min(0).default(3_000),
   PAYOUT_FAILURE_RATE: z.coerce.number().min(0).max(1).default(0),
+  PAYOUT_POLL_MS: z.coerce.number().int().min(200).default(2_000),
 
-  INDEXER_POLL_MS: z.coerce.number().int().min(500).default(4_000),
+  INDEXER_POLL_MS: z.coerce.number().int().min(200).default(4_000),
   INDEXER_CONFIRMATIONS: z.coerce.number().int().min(0).default(2),
+  /** First block to index: the settlement contract's deployment block. */
+  INDEXER_START_BLOCK: z.coerce.bigint().nonnegative().default(0n),
 });
 
 export type Env = z.infer<typeof envSchema>;

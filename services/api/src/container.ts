@@ -57,7 +57,7 @@ export function buildContainer(env: Env, overrides: Partial<Adapters> = {}): Con
   let prisma: PrismaClient | undefined;
   let repositories = overrides.repositories;
   if (!repositories) {
-    prisma = createPrismaClient(env.DATABASE_URL);
+    prisma = createPrismaClient(env.DATABASE_URL, env.DATABASE_POOL_SIZE);
     repositories = createPrismaRepositories(prisma);
   }
 
@@ -68,6 +68,7 @@ export function buildContainer(env: Env, overrides: Partial<Adapters> = {}): Con
       chainId: env.CHAIN_ID,
       settlementAddress: env.SETTLEMENT_ADDRESS,
       relayerPrivateKey: env.RELAYER_PRIVATE_KEY,
+      pollingIntervalMs: env.CHAIN_POLL_MS,
     });
   const signer =
     overrides.signer ??
@@ -132,10 +133,23 @@ export function buildContainer(env: Env, overrides: Partial<Adapters> = {}): Con
     workers: {
       indexer: new IndexerWorker({
         gateway,
+        payments: repositories.payments,
+        quotes: repositories.quotes,
+        cursors: repositories.cursors,
+        chainId: env.CHAIN_ID,
+        settlementAddress: env.SETTLEMENT_ADDRESS,
         pollMs: env.INDEXER_POLL_MS,
         confirmations: env.INDEXER_CONFIRMATIONS,
+        startBlock: env.INDEXER_START_BLOCK,
       }),
-      payouts: new PayoutWorker({ payouts: payoutProvider, gateway, pollMs: env.INDEXER_POLL_MS }),
+      payouts: new PayoutWorker({
+        payments: repositories.payments,
+        payouts: repositories.payouts,
+        provider: payoutProvider,
+        gateway,
+        pollMs: env.PAYOUT_POLL_MS,
+        enabled: Boolean(env.SETTLEMENT_ADDRESS && env.RELAYER_PRIVATE_KEY),
+      }),
     },
     async close() {
       await prisma?.$disconnect();
