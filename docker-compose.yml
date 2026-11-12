@@ -9,7 +9,8 @@ services:
       POSTGRES_PASSWORD: globalpay
       POSTGRES_DB: globalpay
     ports:
-      - "5432:5432"
+      # Set POSTGRES_PORT (e.g. in a root .env) if another Postgres already uses 5432.
+      - "${POSTGRES_PORT:-5432}:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
