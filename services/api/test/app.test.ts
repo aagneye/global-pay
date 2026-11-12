@@ -33,13 +33,12 @@ describe('http app', () => {
     });
   });
 
-  it('returns 501 for routes planned in later iterations', async () => {
+  it('serves the account routes to a signed-in user', async () => {
     const { auth } = await signIn(app, ANVIL.accounts.payer.privateKey);
-    for (const url of ['/me/balance', '/me/payments', '/payments/abc']) {
-      const response = await app.inject({ method: 'GET', url, headers: auth });
-      expect(response.statusCode, url).toBe(501);
-      expect(response.json()).toMatchObject({ error: 'not_implemented' });
-    }
+    const balance = await app.inject({ method: 'GET', url: '/me/balance', headers: auth });
+    expect(balance.json()).toEqual({ token: ANVIL.usdc, units: '0', decimals: 6 });
+    const history = await app.inject({ method: 'GET', url: '/me/payments', headers: auth });
+    expect(history.json()).toEqual({ payments: [] });
   });
 
   it('returns 404 for unknown routes', async () => {

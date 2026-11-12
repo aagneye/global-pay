@@ -1,0 +1,55 @@
+import type { Address, Hex } from 'viem';
+import type { PaymentStatus } from '../../domain/payment.js';
+import type { PaymentWithQuote } from '../../ports/repositories.js';
+
+/** A payment as the app sees it. Amounts are integer strings in minor units. */
+export interface PaymentView {
+  id: string;
+  quoteId: Hex;
+  status: PaymentStatus;
+  fiatCurrency: string;
+  fiatAmount: string;
+  token: Address;
+  tokenAmount: string;
+  merchant: { kind: string; targetId: string; name?: string };
+  transactions: { pay?: TxLink; settle?: TxLink; refund?: TxLink };
+  failureReason?: string;
+  quoteExpiresAt: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface TxLink {
+  hash: Hex;
+  url: string;
+}
+
+export function toPaymentView({ payment, quote: { quote } }: PaymentWithQuote, explorerUrl: string): PaymentView {
+  const link = (hash: Hex | undefined) => (hash ? { hash, url: `${explorerUrl.replace(/\/$/, '')}/tx/${hash}` } : undefined);
+  const pay = link(payment.payTxHash);
+  const settle = link(payment.settleTxHash);
+  const refund = link(payment.refundTxHash);
+  return {
+    id: payment.id,
+    quoteId: payment.quoteId,
+    status: payment.status,
+    fiatCurrency: quote.fiat.currency,
+    fiatAmount: quote.fiat.minor.toString(),
+    token: quote.token,
+    tokenAmount: quote.tokenAmount.toString(),
+    merchant: {
+      kind: quote.merchant.kind,
+      targetId: quote.merchant.targetId,
+      ...(quote.merchant.merchantName === undefined ? {} : { name: quote.merchant.merchantName }),
+    },
+    transactions: {
+      ...(pay ? { pay } : {}),
+      ...(settle ? { settle } : {}),
+      ...(refund ? { refund } : {}),
+    },
+    ...(payment.failureReason === undefined ? {} : { failureReason: payment.failureReason }),
+    quoteExpiresAt: quote.expiresAt.toISOString(),
+    createdAt: payment.createdAt.toISOString(),
+    updatedAt: payment.updatedAt.toISOString(),
+  };
+}

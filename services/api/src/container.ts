@@ -85,6 +85,15 @@ export function buildContainer(env: Env, overrides: Partial<Adapters> = {}): Con
     new SimulatedPromptPayProvider({ delayMs: env.PAYOUT_DELAY_MS, failureRate: env.PAYOUT_FAILURE_RATE });
 
   const tokens = new AccessTokens({ secret: env.JWT_SECRET, ttlSeconds: env.JWT_TTL_SECONDS });
+  const payments = new PaymentService({
+    quotes: repositories.quotes,
+    payments: repositories.payments,
+    kyc: repositories.kyc,
+    gateway,
+    chainId: env.CHAIN_ID,
+    settlementAddress: env.SETTLEMENT_ADDRESS,
+    explorerUrl: env.EXPLORER_URL,
+  });
 
   return {
     tokens,
@@ -112,8 +121,13 @@ export function buildContainer(env: Env, overrides: Partial<Adapters> = {}): Con
         spreadBps: env.SPREAD_BPS,
         merchantQrOnly: env.MERCHANT_QR_ONLY,
       }),
-      payments: new PaymentService({ gateway }),
-      account: new AccountService({ gateway, usdcAddress: env.USDC_ADDRESS }),
+      payments,
+      account: new AccountService({
+        users: repositories.users,
+        gateway,
+        payments,
+        usdcAddress: env.USDC_ADDRESS,
+      }),
     },
     workers: {
       indexer: new IndexerWorker({
