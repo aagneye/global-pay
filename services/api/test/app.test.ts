@@ -82,6 +82,16 @@ describe('OpenAPI', () => {
     const nonce = spec.paths['/auth/nonce'].post;
     expect(nonce.security).toBeUndefined();
     expect(nonce.requestBody.content['application/json'].schema.required).toEqual(['address']);
+
+    const quotes = spec.paths['/quotes'].post;
+    expect(quotes.security).toEqual([{ bearerAuth: [] }]);
+    const body = quotes.requestBody.content['application/json'].schema;
+    expect(body.required).toEqual(['payer', 'qrPayload']);
+    expect(body.properties.fiatAmountMinor).toMatchObject({ type: 'string', pattern: '^\\d+$' });
+    const created = quotes.responses['201'].content['application/json'].schema;
+    expect(Object.keys(created.properties)).toEqual(
+      expect.arrayContaining(['quote', 'signature', 'pricing', 'authorizationToSign']),
+    );
   });
 
   it('serves the docs UI', async () => {
