@@ -1,0 +1,23 @@
+# Generates the typed API client in lib/data/api/generated/ from the backend's OpenAPI spec.
+# After the spec changes (cd services/api && npm run openapi), regenerate:
+#   dart run swagger_parser
+#   dart run build_runner build --delete-conflicting-outputs
+swagger_parser:
+  schema_path: ../../packages/openapi/openapi.json
+  output_directory: lib/data/api/generated
+  name: globalpay_api
+  language: dart
+  json_serializer: json_serializable
+  root_client: true
+  root_client_name: GlobalPayApi
+  merge_clients: false
+  put_clients_in_folder: true
+  path_method_name: false
+  enums_to_json: true
+  unknown_enum_value: true
+  mark_files_as_generated: true
+  export_file: true
+  replacement_rules:
+    # `Error` would shadow dart:core's Error.
+    - pattern: "^Error$"
+      replacement: "ApiError"
