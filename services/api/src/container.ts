@@ -1,18 +1,39 @@
 import { ViemQuoteSigner } from './adapters/chain/viem-quote-signer.js';
 import { ViemSettlementGateway } from './adapters/chain/viem-settlement-gateway.js';
+import { createPrismaClient, createPrismaRepositories } from './adapters/db/prisma-repositories.js';
 import { MockKycProvider } from './adapters/kyc/mock-kyc-provider.js';
 import { SimulatedPromptPayProvider } from './adapters/payouts/simulated-promptpay-provider.js';
+import { FixedRateProvider } from './adapters/rates/fixed-rate-provider.js';
 import { PublicFeedRateProvider } from './adapters/rates/public-feed-rate-provider.js';
 import type { Env } from './config/env.js';
+import type { PrismaClient } from './generated/prisma/client.js';
 import { AccountService } from './modules/account/service.js';
 import { AuthService } from './modules/auth/service.js';
+import { AccessTokens } from './modules/auth/tokens.js';
 import { KycService } from './modules/kyc/service.js';
 import { PaymentService } from './modules/payments/service.js';
 import { QuoteService } from './modules/quotes/service.js';
+import type { KycProvider } from './ports/kyc-provider.js';
+import type { PayoutProvider } from './ports/payout-provider.js';
+import type { QuoteSigner } from './ports/quote-signer.js';
+import type { RateProvider } from './ports/rate-provider.js';
+import type { Repositories } from './ports/repositories.js';
+import type { SettlementGateway } from './ports/settlement-gateway.js';
 import { IndexerWorker } from './workers/indexer.js';
 import { PayoutWorker } from './workers/payout-worker.js';
 
+/** Everything that talks to the outside world. Tests replace any of these. */
+export interface Adapters {
+  repositories: Repositories;
+  rates: RateProvider;
+  signer: QuoteSigner;
+  gateway: SettlementGateway;
+  kyc: KycProvider;
+  payouts: PayoutProvider;
+}
+
 export interface Container {
+  tokens: AccessTokens;
   services: {
     auth: AuthService;
     kyc: KycService;
@@ -24,35 +45,58 @@ export interface Container {
     indexer: IndexerWorker;
     payouts: PayoutWorker;
   };
+  /** Releases connections (database). */
+  close(): Promise<void>;
 }
 
 /**
  * Composition root: the only place that chooses adapters.
  * To swap a simulated partner for a real one, change it here and nowhere else.
  */
-export function buildContainer(env: Env): Container {
-  const gateway = new ViemSettlementGateway({
-    rpcUrl: env.RPC_URL,
-    chainId: env.CHAIN_ID,
-    settlementAddress: env.SETTLEMENT_ADDRESS,
-    relayerPrivateKey: env.RELAYER_PRIVATE_KEY,
-  });
-  const signer = new ViemQuoteSigner({
-    privateKey: env.QUOTE_SIGNER_PRIVATE_KEY,
-    chainId: env.CHAIN_ID,
-    settlementAddress: env.SETTLEMENT_ADDRESS,
-  });
-  const kycProvider = new MockKycProvider();
-  const rates = new PublicFeedRateProvider();
-  const payoutProvider = new SimulatedPromptPayProvider({
-    delayMs: env.PAYOUT_DELAY_MS,
-    failureRate: env.PAYOUT_FAILURE_RATE,
-  });
+export function buildContainer(env: Env, overrides: Partial<Adapters> = {}): Container {
+  let prisma: PrismaClient | undefined;
+  let repositories = overrides.repositories;
+  if (!repositories) {
+    prisma = createPrismaClient(env.DATABASE_URL);
+    repositories = createPrismaRepositories(prisma);
+  }
+
+  const gateway =
+    overrides.gateway ??
+    new ViemSettlementGateway({
+      rpcUrl: env.RPC_URL,
+      chainId: env.CHAIN_ID,
+      settlementAddress: env.SETTLEMENT_ADDRESS,
+      relayerPrivateKey: env.RELAYER_PRIVATE_KEY,
+    });
+  const signer =
+    overrides.signer ??
+    new ViemQuoteSigner({
+      privateKey: env.QUOTE_SIGNER_PRIVATE_KEY,
+      chainId: env.CHAIN_ID,
+      settlementAddress: env.SETTLEMENT_ADDRESS,
+    });
+  const kycProvider = overrides.kyc ?? new MockKycProvider();
+  const rates =
+    overrides.rates ??
+    (env.RATE_SOURCE === 'fixed' ? new FixedRateProvider(env.FIXED_USDC_THB_RATE) : new PublicFeedRateProvider());
+  const payoutProvider =
+    overrides.payouts ??
+    new SimulatedPromptPayProvider({ delayMs: env.PAYOUT_DELAY_MS, failureRate: env.PAYOUT_FAILURE_RATE });
+
+  const tokens = new AccessTokens({ secret: env.JWT_SECRET, ttlSeconds: env.JWT_TTL_SECONDS });
 
   return {
+    tokens,
     services: {
-      auth: new AuthService({ jwtSecret: env.JWT_SECRET, chainId: env.CHAIN_ID }),
-      kyc: new KycService({ provider: kycProvider }),
+      auth: new AuthService({
+        users: repositories.users,
+        nonces: repositories.nonces,
+        tokens,
+        chainId: env.CHAIN_ID,
+        domain: env.SIWE_DOMAIN,
+      }),
+      kyc: new KycService({ provider: kycProvider, records: repositories.kyc }),
       quotes: new QuoteService({
         rates,
         signer,
@@ -73,6 +117,9 @@ export function buildContainer(env: Env): Container {
         confirmations: env.INDEXER_CONFIRMATIONS,
       }),
       payouts: new PayoutWorker({ payouts: payoutProvider, gateway, pollMs: env.INDEXER_POLL_MS }),
+    },
+    async close() {
+      await prisma?.$disconnect();
     },
   };
 }

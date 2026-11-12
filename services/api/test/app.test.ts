@@ -1,14 +1,13 @@
 import type { FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { buildApp } from '../src/app.js';
-import { buildContainer } from '../src/container.js';
-import { testEnv } from './helpers.js';
+import { ANVIL } from './support/anvil.js';
+import { buildTestApp, signIn } from './support/app.js';
 
 describe('http app', () => {
   let app: FastifyInstance;
 
   beforeAll(async () => {
-    app = await buildApp({ container: buildContainer(testEnv()), logger: false });
+    ({ app } = await buildTestApp());
   });
 
   afterAll(async () => {
@@ -28,16 +27,66 @@ describe('http app', () => {
       payload: { address: 'not-an-address' },
     });
     expect(response.statusCode).toBe(400);
-    expect(response.json().error).toBe('invalid_request');
+    expect(response.json()).toMatchObject({
+      error: 'invalid_request',
+      issues: [{ path: '/address', message: 'expected a 0x-prefixed 20-byte address' }],
+    });
   });
 
   it('returns 501 for routes planned in later iterations', async () => {
-    const response = await app.inject({
-      method: 'POST',
-      url: '/auth/nonce',
-      payload: { address: '0x000000000000000000000000000000000000dEaD' },
-    });
-    expect(response.statusCode).toBe(501);
-    expect(response.json()).toMatchObject({ error: 'not_implemented' });
+    const { auth } = await signIn(app, ANVIL.accounts.payer.privateKey);
+    for (const url of ['/me/balance', '/me/payments', '/payments/abc']) {
+      const response = await app.inject({ method: 'GET', url, headers: auth });
+      expect(response.statusCode, url).toBe(501);
+      expect(response.json()).toMatchObject({ error: 'not_implemented' });
+    }
+  });
+
+  it('returns 404 for unknown routes', async () => {
+    expect((await app.inject({ method: 'GET', url: '/nope' })).statusCode).toBe(404);
+  });
+});
+
+describe('OpenAPI', () => {
+  let app: FastifyInstance;
+
+  beforeAll(async () => {
+    ({ app } = await buildTestApp());
+  });
+
+  afterAll(async () => {
+    await app.close();
+  });
+
+  it('serves the spec with every route, schemas and bearer auth', async () => {
+    const response = await app.inject({ method: 'GET', url: '/docs/json' });
+    expect(response.statusCode).toBe(200);
+    const spec = response.json();
+
+    expect(spec.openapi).toBe('3.0.3');
+    expect(spec.components.securitySchemes.bearerAuth).toMatchObject({ type: 'http', scheme: 'bearer' });
+    expect(Object.keys(spec.paths).sort()).toEqual([
+      '/auth/nonce',
+      '/auth/verify',
+      '/health',
+      '/kyc/start',
+      '/kyc/status',
+      '/me/balance',
+      '/me/payments',
+      '/payments',
+      '/payments/{id}',
+      '/quotes',
+    ]);
+
+    expect(spec.paths['/kyc/status'].get.security).toEqual([{ bearerAuth: [] }]);
+    const nonce = spec.paths['/auth/nonce'].post;
+    expect(nonce.security).toBeUndefined();
+    expect(nonce.requestBody.content['application/json'].schema.required).toEqual(['address']);
+  });
+
+  it('serves the docs UI', async () => {
+    const response = await app.inject({ method: 'GET', url: '/docs/' });
+    expect(response.statusCode).toBe(200);
+    expect(response.headers['content-type']).toContain('text/html');
   });
 });

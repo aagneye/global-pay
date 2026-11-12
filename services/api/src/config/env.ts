@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { RATE_DECIMALS, parseDecimal } from '../domain/money.js';
 import { addressSchema, privateKeySchema } from '../shared/schemas.js';
 
 export const envSchema = z.object({
@@ -7,7 +8,14 @@ export const envSchema = z.object({
   PORT: z.coerce.number().int().positive().default(3000),
 
   DATABASE_URL: z.string().min(1),
+
   JWT_SECRET: z.string().min(32, 'JWT_SECRET must be at least 32 characters'),
+  JWT_TTL_SECONDS: z.coerce.number().int().min(300).max(7 * 24 * 3600).default(24 * 3600),
+  /** EIP-4361 domain that sign-in messages must name. */
+  SIWE_DOMAIN: z
+    .string()
+    .regex(/^[a-z0-9.-]+(?::\d+)?$/i, 'SIWE_DOMAIN must be a host name, e.g. globalpay.local')
+    .default('globalpay.local'),
 
   CHAIN_ID: z.coerce.number().int().positive().default(84532),
   RPC_URL: z.url(),
@@ -21,6 +29,21 @@ export const envSchema = z.object({
   QUOTE_TTL_SECONDS: z.coerce.number().int().min(15).max(300).default(60),
   SPREAD_BPS: z.coerce.number().int().min(0).max(1_000).default(100),
   MERCHANT_QR_ONLY: z.stringbool().default(false),
+
+  /** `public`: Coinbase's public USDC rates. `fixed`: FIXED_USDC_THB_RATE (offline development and tests). */
+  RATE_SOURCE: z.enum(['public', 'fixed']).default('public'),
+  /** THB per 1 USDC, as a decimal. Becomes rateE8. */
+  FIXED_USDC_THB_RATE: z
+    .string()
+    .default('35.00')
+    .transform((value, ctx) => {
+      const rateE8 = parseDecimal(value, RATE_DECIMALS);
+      if (rateE8 === null || rateE8 <= 0n) {
+        ctx.addIssue({ code: 'custom', message: 'FIXED_USDC_THB_RATE must be a positive decimal, e.g. 35.00' });
+        return z.NEVER;
+      }
+      return rateE8;
+    }),
 
   PAYOUT_DELAY_MS: z.coerce.number().int().min(0).default(3_000),
   PAYOUT_FAILURE_RATE: z.coerce.number().min(0).max(1).default(0),

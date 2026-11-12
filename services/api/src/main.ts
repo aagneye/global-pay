@@ -17,6 +17,7 @@ async function shutdown(signal: string): Promise<void> {
   await container.workers.indexer.stop();
   await container.workers.payouts.stop();
   await app.close();
+  await container.close();
   process.exit(0);
 }
 
