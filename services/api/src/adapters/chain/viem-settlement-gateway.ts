@@ -1,19 +1,29 @@
 import {
   type Address,
+  type Chain,
   type Hex,
   type PublicClient,
+  TransactionReceiptNotFoundError,
   type Transport,
   createPublicClient,
+  defineChain,
+  hexToString,
   http,
-  parseAbi,
+  parseSignature,
 } from 'viem';
+import { privateKeyToAccount } from 'viem/accounts';
 import type { ReceiveAuthorization, SignedQuote } from '../../domain/quote.js';
-import type {
-  PaymentReceivedEvent,
-  SettlementGateway,
-  TxReceipt,
+import { quoteStruct } from '../../lib/typed-data.js';
+import {
+  ChainUnavailableError,
+  type OnChainPaymentStatus,
+  type PaymentReceivedEvent,
+  type SettlementGateway,
+  type TxReceipt,
 } from '../../ports/settlement-gateway.js';
-import { AppError, NotImplementedError } from '../../shared/errors.js';
+import { AppError } from '../../shared/errors.js';
+import { ON_CHAIN_STATUS, erc20Abi, settlementAbi } from './abi.js';
+import { Relayer } from './relayer.js';
 
 export interface ViemSettlementGatewayOptions {
   rpcUrl: string;
@@ -21,52 +31,125 @@ export interface ViemSettlementGatewayOptions {
   settlementAddress?: Address;
   /** Key holding OPERATOR_ROLE. Pays gas for pay/markSettled/refund. */
   relayerPrivateKey?: Hex;
+  /** How often to poll for receipts. */
+  pollingIntervalMs?: number;
+  /** How long to wait for a receipt before giving up (the transaction may still land later). */
+  receiptTimeoutMs?: number;
   /** Overrides the HTTP transport (tests). */
   transport?: Transport;
 }
 
-const EIP712_TOKEN_ABI = parseAbi([
-  'function name() view returns (string)',
-  'function version() view returns (string)',
-]);
-
-/** SettlementGateway backed by viem public and wallet clients. */
+/** SettlementGateway backed by viem: reads through a public client, writes through the Relayer. */
 export class ViemSettlementGateway implements SettlementGateway {
-  private readonly options: ViemSettlementGatewayOptions;
   private readonly client: PublicClient;
+  private readonly chain: Chain;
+  private readonly transport: Transport;
+  private readonly settlementAddress?: Address;
+  private readonly relayerPrivateKey?: Hex;
+  private readonly receiptTimeoutMs: number;
+  private relayer?: Relayer;
   private readonly tokenDomains = new Map<string, Promise<{ name: string; version: string }>>();
 
   constructor(options: ViemSettlementGatewayOptions) {
-    this.options = options;
-    this.client = createPublicClient({ transport: options.transport ?? http(options.rpcUrl) });
+    this.chain = defineChain({
+      id: options.chainId,
+      name: `chain-${options.chainId}`,
+      nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 },
+      rpcUrls: { default: { http: [options.rpcUrl] } },
+    });
+    this.transport = options.transport ?? http(options.rpcUrl);
+    this.client = createPublicClient({
+      chain: this.chain,
+      transport: this.transport,
+      pollingInterval: options.pollingIntervalMs ?? 1_000,
+    });
+    if (options.settlementAddress) this.settlementAddress = options.settlementAddress;
+    if (options.relayerPrivateKey) this.relayerPrivateKey = options.relayerPrivateKey;
+    this.receiptTimeoutMs = options.receiptTimeoutMs ?? 120_000;
   }
 
-  async submitPayment(_signed: SignedQuote, _authorization: ReceiveAuthorization): Promise<Hex> {
-    throw new NotImplementedError('Relayer pay()', 4);
+  async submitPayment({ quote, signature }: SignedQuote, authorization: ReceiveAuthorization): Promise<Hex> {
+    const { v, yParity, r, s } = parseSignature(authorization.signature);
+    return this.write('pay', [
+      quoteStruct(quote),
+      signature,
+      {
+        validAfter: authorization.validAfter,
+        validBefore: authorization.validBefore,
+        v: v === undefined ? yParity + 27 : Number(v),
+        r,
+        s,
+      },
+    ]);
   }
 
-  async markSettled(_quoteId: Hex): Promise<Hex> {
-    throw new NotImplementedError('Relayer markSettled()', 4);
+  async markSettled(quoteId: Hex): Promise<Hex> {
+    return this.write('markSettled', [quoteId]);
   }
 
-  async refund(_quoteId: Hex): Promise<Hex> {
-    throw new NotImplementedError('Relayer refund()', 4);
+  async refund(quoteId: Hex): Promise<Hex> {
+    return this.write('refund', [quoteId]);
   }
 
-  async waitForReceipt(_txHash: Hex): Promise<TxReceipt> {
-    throw new NotImplementedError('Receipt tracking', 4);
+  async waitForReceipt(txHash: Hex): Promise<TxReceipt> {
+    const receipt = await this.read(() =>
+      this.client.waitForTransactionReceipt({ hash: txHash, timeout: this.receiptTimeoutMs }),
+    );
+    return { status: receipt.status, blockNumber: receipt.blockNumber };
+  }
+
+  async getReceipt(txHash: Hex): Promise<TxReceipt | null> {
+    try {
+      const receipt = await this.client.getTransactionReceipt({ hash: txHash });
+      return { status: receipt.status, blockNumber: receipt.blockNumber };
+    } catch (error) {
+      if (error instanceof TransactionReceiptNotFoundError) return null;
+      throw unavailable(error);
+    }
   }
 
   async getLatestBlock(): Promise<bigint> {
-    throw new NotImplementedError('Block reads', 4);
+    return this.read(() => this.client.getBlockNumber({ cacheTime: 0 }));
   }
 
-  async getPaymentReceivedEvents(_fromBlock: bigint, _toBlock: bigint): Promise<PaymentReceivedEvent[]> {
-    throw new NotImplementedError('Event indexing', 4);
+  async getPaymentReceivedEvents(fromBlock: bigint, toBlock: bigint): Promise<PaymentReceivedEvent[]> {
+    const address = this.requireSettlement();
+    const logs = await this.read(() =>
+      this.client.getContractEvents({
+        address,
+        abi: settlementAbi,
+        eventName: 'PaymentReceived',
+        fromBlock,
+        toBlock,
+        strict: true,
+      }),
+    );
+    return logs.map((log) => ({
+      quoteId: log.args.quoteId,
+      payer: log.args.payer,
+      token: log.args.token,
+      tokenAmount: log.args.tokenAmount,
+      fiatCurrency: hexToString(log.args.fiatCurrency, { size: 3 }),
+      fiatAmount: log.args.fiatAmount,
+      merchantRefHash: log.args.merchantRefHash,
+      txHash: log.transactionHash,
+      blockNumber: log.blockNumber,
+      logIndex: log.logIndex,
+    }));
   }
 
-  async getTokenBalance(_token: Address, _owner: Address): Promise<bigint> {
-    throw new NotImplementedError('Balance reads', 4);
+  async getPaymentStatus(quoteId: Hex): Promise<OnChainPaymentStatus> {
+    const address = this.requireSettlement();
+    const payment = await this.read(() =>
+      this.client.readContract({ address, abi: settlementAbi, functionName: 'paymentOf', args: [quoteId] }),
+    );
+    const status = ON_CHAIN_STATUS[payment.status];
+    if (!status) throw new AppError('chain_unavailable', `Unknown payment status ${payment.status}`, 503);
+    return status;
+  }
+
+  async getTokenBalance(token: Address, owner: Address): Promise<bigint> {
+    return this.read(() => this.client.readContract({ address: token, abi: erc20Abi, functionName: 'balanceOf', args: [owner] }));
   }
 
   /**
@@ -88,8 +171,8 @@ export class ViemSettlementGateway implements SettlementGateway {
   private async readTokenDomain(token: Address): Promise<{ name: string; version: string }> {
     try {
       const [name, version] = await Promise.all([
-        this.client.readContract({ address: token, abi: EIP712_TOKEN_ABI, functionName: 'name' }),
-        this.client.readContract({ address: token, abi: EIP712_TOKEN_ABI, functionName: 'version' }),
+        this.client.readContract({ address: token, abi: erc20Abi, functionName: 'name' }),
+        this.client.readContract({ address: token, abi: erc20Abi, functionName: 'version' }),
       ]);
       return { name, version };
     } catch (error) {
@@ -100,4 +183,42 @@ export class ViemSettlementGateway implements SettlementGateway {
       );
     }
   }
+
+  private write(functionName: 'pay' | 'markSettled' | 'refund', args: readonly unknown[]): Promise<Hex> {
+    const address = this.requireSettlement();
+    return this.getRelayer().send({ address, abi: settlementAbi, functionName, args });
+  }
+
+  private getRelayer(): Relayer {
+    if (!this.relayerPrivateKey) {
+      throw new AppError('not_configured', 'Sending transactions needs RELAYER_PRIVATE_KEY to be set', 503);
+    }
+    this.relayer ??= new Relayer({
+      account: privateKeyToAccount(this.relayerPrivateKey),
+      chain: this.chain,
+      transport: this.transport,
+      publicClient: this.client,
+    });
+    return this.relayer;
+  }
+
+  private requireSettlement(): Address {
+    if (!this.settlementAddress) {
+      throw new AppError('not_configured', 'Chain access needs SETTLEMENT_ADDRESS to be set', 503);
+    }
+    return this.settlementAddress;
+  }
+
+  private async read<T>(fn: () => Promise<T>): Promise<T> {
+    try {
+      return await fn();
+    } catch (error) {
+      throw unavailable(error);
+    }
+  }
+}
+
+function unavailable(error: unknown): ChainUnavailableError {
+  const message = error instanceof Error ? error.message.split('\n')[0] : String(error);
+  return new ChainUnavailableError(`Chain read failed: ${message}`);
 }
