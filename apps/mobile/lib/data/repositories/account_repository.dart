@@ -1,4 +1,5 @@
 import 'package:globalpay/data/api/api_client.dart';
+import 'package:globalpay/data/repositories/payments_repository.dart';
 import 'package:globalpay/domain/models/money.dart';
 import 'package:globalpay/domain/models/payment.dart';
 
@@ -8,9 +9,18 @@ class AccountRepository {
 
   final ApiClient api;
 
-  static const _planned = 'Account API is planned for iteration 5';
+  /// USDC in the wallet, read from the chain by the backend.
+  Future<({TokenAmount amount, String token})> balance() async {
+    final response = await ApiClient.call(() => api.api.account.getBalance());
+    return (
+      amount: TokenAmount(symbol: 'USDC', units: BigInt.parse(response.units), decimals: response.decimals),
+      token: response.token,
+    );
+  }
 
-  Future<TokenAmount> balance() => throw UnimplementedError(_planned);
-
-  Future<List<Payment>> history() => throw UnimplementedError(_planned);
+  /// Newest first.
+  Future<List<Payment>> history() async {
+    final response = await ApiClient.call(() => api.api.account.listPayments());
+    return response.payments.map(paymentFromDto).toList();
+  }
 }
