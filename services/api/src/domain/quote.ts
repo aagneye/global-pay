@@ -17,7 +17,9 @@ export interface Quote {
   /** Fiat major units per 1 token, scaled by RATE_SCALE (1e8), before the spread. */
   rateE8: bigint;
   spreadBps: number;
-  /** keccak256 of the normalised merchant / biller ID. */
+  /** Normalised payee reference, e.g. "promptpay:biller:099999999999901". */
+  merchantRef: string;
+  /** keccak256 of `merchantRef`. */
   merchantRefHash: Hex;
   merchant: PromptPayQr;
   expiresAt: Date;

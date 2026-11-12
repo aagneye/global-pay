@@ -1,11 +1,19 @@
-import type { Address, Hex } from 'viem';
+import {
+  type Address,
+  type Hex,
+  type PublicClient,
+  type Transport,
+  createPublicClient,
+  http,
+  parseAbi,
+} from 'viem';
 import type { ReceiveAuthorization, SignedQuote } from '../../domain/quote.js';
 import type {
   PaymentReceivedEvent,
   SettlementGateway,
   TxReceipt,
 } from '../../ports/settlement-gateway.js';
-import { NotImplementedError } from '../../shared/errors.js';
+import { AppError, NotImplementedError } from '../../shared/errors.js';
 
 export interface ViemSettlementGatewayOptions {
   rpcUrl: string;
@@ -13,14 +21,24 @@ export interface ViemSettlementGatewayOptions {
   settlementAddress?: Address;
   /** Key holding OPERATOR_ROLE. Pays gas for pay/markSettled/refund. */
   relayerPrivateKey?: Hex;
+  /** Overrides the HTTP transport (tests). */
+  transport?: Transport;
 }
+
+const EIP712_TOKEN_ABI = parseAbi([
+  'function name() view returns (string)',
+  'function version() view returns (string)',
+]);
 
 /** SettlementGateway backed by viem public and wallet clients. */
 export class ViemSettlementGateway implements SettlementGateway {
   private readonly options: ViemSettlementGatewayOptions;
+  private readonly client: PublicClient;
+  private readonly tokenDomains = new Map<string, Promise<{ name: string; version: string }>>();
 
   constructor(options: ViemSettlementGatewayOptions) {
     this.options = options;
+    this.client = createPublicClient({ transport: options.transport ?? http(options.rpcUrl) });
   }
 
   async submitPayment(_signed: SignedQuote, _authorization: ReceiveAuthorization): Promise<Hex> {
@@ -51,7 +69,35 @@ export class ViemSettlementGateway implements SettlementGateway {
     throw new NotImplementedError('Balance reads', 4);
   }
 
-  async getTokenDomain(_token: Address): Promise<{ name: string; version: string }> {
-    throw new NotImplementedError('Token EIP-712 domain', 3);
+  /**
+   * Reads `name()` and `version()` from the token. USDC's values differ between networks
+   * (and the mock's match Base Sepolia's), so they're never hardcoded. Cached per token;
+   * a failed read isn't cached.
+   */
+  async getTokenDomain(token: Address): Promise<{ name: string; version: string }> {
+    const key = token.toLowerCase();
+    let domain = this.tokenDomains.get(key);
+    if (!domain) {
+      domain = this.readTokenDomain(token);
+      this.tokenDomains.set(key, domain);
+      domain.catch(() => this.tokenDomains.delete(key));
+    }
+    return domain;
+  }
+
+  private async readTokenDomain(token: Address): Promise<{ name: string; version: string }> {
+    try {
+      const [name, version] = await Promise.all([
+        this.client.readContract({ address: token, abi: EIP712_TOKEN_ABI, functionName: 'name' }),
+        this.client.readContract({ address: token, abi: EIP712_TOKEN_ABI, functionName: 'version' }),
+      ]);
+      return { name, version };
+    } catch (error) {
+      throw new AppError(
+        'chain_unavailable',
+        `Could not read the EIP-712 domain of token ${token}: ${(error as Error).message.split('\n')[0]}`,
+        503,
+      );
+    }
   }
 }
