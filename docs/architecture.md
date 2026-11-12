@@ -63,7 +63,7 @@ flowchart LR
 | App shell | `lib/app/` | `MaterialApp.router`, routes (`go_router`), theme |
 | Core | `lib/core/` | Config from `--dart-define`, Riverpod providers, shared widgets, errors |
 | Domain | `lib/domain/` | Pure Dart models (money, quote, payment, PromptPay QR) and the PromptPay parser |
-| Data | `lib/data/` | HTTP client (`dio`) and repositories. The OpenAPI-generated client goes in `lib/data/api/generated/`. |
+| Data | `lib/data/` | Repositories over the API client generated from the OpenAPI spec (`lib/data/api/generated/`), plus the saved session |
 | Services | `lib/services/wallet/` | `WalletService` interface; `DevWalletService` (local key, development only) and `PrivyWalletService` (embedded wallet) |
 | Features | `lib/features/` | One folder per screen group: auth, kyc, home, receive, scan, pay, history |
 
@@ -286,7 +286,9 @@ All money is stored as integers in minor units: USDC base units (6 decimals) and
 | GET | `/me/payments` | Payment history, newest first | 4 ✅ |
 | GET | `/docs`, `/docs/json` | OpenAPI docs and spec | 3 ✅ |
 
-Each route declares zod schemas. The same schemas validate requests, shape responses, and generate the OpenAPI spec, so the spec can't drift from the code. The Dart client is generated from that spec (iteration 5).
+Each route declares zod schemas. The same schemas validate requests, shape responses, and generate the OpenAPI spec. Every operation has an `operationId`, and the main schemas have names (`QuoteResponse`, `Payment`, …), so generated clients get readable methods and classes.
+
+The spec is committed at [`packages/openapi/openapi.json`](../packages/openapi/openapi.json) (`npm run openapi` rewrites it). A backend test fails if it differs from the routes. The app's Dart client is generated from that file with `swagger_parser` (see [apps/mobile/README.md](../apps/mobile/README.md)).
 
 Errors are `{ "error": "<code>", "message": "…" }` with a stable code, for example `invalid_qr` (422), `kyc_required` (403), `daily_limit_exceeded` (422) or `rate_unavailable` (503).
 

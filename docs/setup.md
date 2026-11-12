@@ -118,14 +118,15 @@ The app reads its settings from `--dart-define` values:
 | Key | Default | Notes |
 |---|---|---|
 | `API_BASE_URL` | `http://10.0.2.2:3000` | `10.0.2.2` is your computer, as seen from the Android emulator |
-| `CHAIN_ID` | `84532` | Base Sepolia |
-| `EXPLORER_URL` | `https://sepolia.basescan.org` | Used for transaction links |
+| `CHAIN_ID` | `84532` | Base Sepolia; `31337` for anvil |
+| `DEV_WALLET_PRIVATE_KEY` | none | Optional, local chains only: a funded test key for the dev wallet |
 
-Example:
+To pay on a local chain, start anvil and the backend first. Then follow [apps/mobile/README.md](../apps/mobile/README.md#run-against-a-local-chain): it uses anvil's funded test account.
 
-```bash
-flutter run --dart-define=API_BASE_URL=http://10.0.2.2:3000
-```
+**Emulator notes:**
+- **Starting the emulator:** without Android SDK cmdline-tools, `flutter emulators` lists nothing, but an emulator you created in Android Studio's Device Manager still works. Start it there, or with `emulator -avd <name>` from the SDK's `emulator` folder.
+- **First build:** the first `flutter run` downloads the Android Gradle plugin and build tools, which takes about 15 minutes.
+- **Black screen:** some emulator images can't run Flutter's Impeller renderer. Add `--no-enable-impeller`.
 
 ## Keys and secrets
 

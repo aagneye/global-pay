@@ -4,11 +4,12 @@
 
 The first target is foreign remote workers in Thailand who are paid in USDC. They pay any PromptPay QR from the GlobalPay app, and the merchant receives baht. It runs on **Base**, an Ethereum Layer 2 that uses the EVM.
 
-> **Status: iteration 4 of 7 done.**
+> **Status: iteration 5 of 7 done.**
 > - The architecture skeleton and docs are in place.
 > - The settlement contract is implemented and fully tested.
 > - The backend signs users in, runs mock KYC, and returns signed quotes for PromptPay QRs.
 > - The full payment loop works on a local chain: pay, simulated baht payout, then settle or refund.
+> - The Flutter app runs the whole flow on the Android emulator: sign in, KYC, scan, confirm, pay, and follow the payment until it settles.
 >
 > Nothing moves real money. Partners (exchange, e-money operator, PromptPay payout, KYC) are simulated, and everything runs on testnet or a local chain.
 
