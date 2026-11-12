@@ -28,3 +28,11 @@ Parsers must run their checks in this order, so each invalid vector produces exa
 The file follows `promptpay/vectors.schema.json`. Consumers:
 - `services/api/src/lib/promptpay/` (iteration 3)
 - `apps/mobile/lib/domain/promptpay/` (iteration 5)
+
+## `wallet/vectors.json`
+
+Reference signatures made by viem (the backend's library) for the app wallet to match byte for byte:
+- `personalSign`: a Sign-In with Ethereum message, signed with EIP-191 `personal_sign`.
+- `typedData`: a USDC `ReceiveWithAuthorization` in exactly the shape `POST /quotes` returns, signed with EIP-712 (`eth_signTypedData_v4`). Includes the digest.
+
+The key is anvil account #4, a public test key: never use it outside local chains and tests. Consumer: `apps/mobile/test/services/local_key_signer_test.dart`.

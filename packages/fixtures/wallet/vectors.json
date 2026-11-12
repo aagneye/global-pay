@@ -1,0 +1,77 @@
+{
+  "description": "Reference signatures from viem, for the app wallet (apps/mobile). The key is anvil account #4, a public test key: never use it outside local chains and tests.",
+  "privateKey": "0x47e179ec197488593b187f80a00eb0da91f1b9d0b13f8733639f19c30a34926a",
+  "address": "0x15d34AAf54267DB7D7c367839AAf71A00a2C6A65",
+  "personalSign": {
+    "message": "globalpay.local wants you to sign in with your Ethereum account:\n0x15d34AAf54267DB7D7c367839AAf71A00a2C6A65\n\nSign in to GlobalPay.\n\nURI: https://globalpay.local\nVersion: 1\nChain ID: 31337\nNonce: aBcD1234eFgH5678\nIssued At: 2026-11-12T00:00:00.000Z\nExpiration Time: 2026-11-12T00:05:00.000Z",
+    "hash": "0xa2ea20c7143bb4be83faf7d77d6dbc371d51be19bab0c43cafa447896fc25dd9",
+    "signature": "0xf55299feeb1f83eded8fda5a05e7bad3a54d598ecb0c2dbcee7ab52eab8d57f42688b18b940e8b50172a39f67ff7974c76109f5dce45189324293a81744fc20d1c"
+  },
+  "typedData": {
+    "data": {
+      "types": {
+        "EIP712Domain": [
+          {
+            "name": "name",
+            "type": "string"
+          },
+          {
+            "name": "version",
+            "type": "string"
+          },
+          {
+            "name": "chainId",
+            "type": "uint256"
+          },
+          {
+            "name": "verifyingContract",
+            "type": "address"
+          }
+        ],
+        "ReceiveWithAuthorization": [
+          {
+            "name": "from",
+            "type": "address"
+          },
+          {
+            "name": "to",
+            "type": "address"
+          },
+          {
+            "name": "value",
+            "type": "uint256"
+          },
+          {
+            "name": "validAfter",
+            "type": "uint256"
+          },
+          {
+            "name": "validBefore",
+            "type": "uint256"
+          },
+          {
+            "name": "nonce",
+            "type": "bytes32"
+          }
+        ]
+      },
+      "primaryType": "ReceiveWithAuthorization",
+      "domain": {
+        "name": "USDC",
+        "version": "2",
+        "chainId": 31337,
+        "verifyingContract": "0x5FbDB2315678afecb367f032d93F642f64180aa3"
+      },
+      "message": {
+        "from": "0x15d34AAf54267DB7D7c367839AAf71A00a2C6A65",
+        "to": "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512",
+        "value": "7769231",
+        "validAfter": "0",
+        "validBefore": "1794500000",
+        "nonce": "0xabababababababababababababababababababababababababababababababab"
+      }
+    },
+    "hash": "0x0af485a69587ac066891bd4405cd2ff8054f8481b9da7c1fa6905822d7829623",
+    "signature": "0x1588e61566164dfcf0e2a7985469e55760e7368075e20ec83fa42dc2a1fb07fa4ad64338566ce3ea205125825438c367c32ffebc5bf87e177cb3542b8d95ff4c1c"
+  }
+}
