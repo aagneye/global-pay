@@ -46,7 +46,7 @@
           "name": { "type": "string" },
           "payload": { "type": "string" },
           "error": {
-            "enum": ["crc_mismatch", "missing_crc", "malformed_tlv", "not_promptpay", "unsupported_currency"]
+            "enum": ["crc_mismatch", "missing_crc", "malformed_tlv", "not_promptpay", "unsupported_currency", "invalid_field"]
           }
         },
         "additionalProperties": false

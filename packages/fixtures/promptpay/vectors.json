@@ -112,6 +112,11 @@
       "name": "wrong currency (USD 840)",
       "payload": "00020101021229370016A000000677010111011300668123456785303840540510.005802TH6304E8AE",
       "error": "unsupported_currency"
+    },
+    {
+      "name": "amount is not a number",
+      "payload": "00020101021229370016A000000677010111011300668123456785303764540512.5X5802TH63047E67",
+      "error": "invalid_field"
     }
   ]
 }
