@@ -7,7 +7,8 @@ plugins {
 
 android {
     namespace = "com.globalpay.globalpay"
-    compileSdk = flutter.compileSdkVersion
+    // 36: needed by CameraX 1.6 (mobile_scanner 7.5).
+    compileSdk = 36
     ndkVersion = flutter.ndkVersion
 
     compileOptions {
@@ -24,7 +25,8 @@ android {
         applicationId = "com.globalpay.globalpay"
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
-        minSdk = flutter.minSdkVersion
+        // mobile_scanner and flutter_secure_storage need Android 6 (API 23).
+        minSdk = 23
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
