@@ -1,9 +1,8 @@
 import { randomBytes } from 'node:crypto';
 import { type Address, type Hex, bytesToHex, getAddress } from 'viem';
-import { FIAT_DECIMALS, TOKEN_DECIMALS, formatMinor } from '../../domain/money.js';
+import { FIAT_DECIMALS, TOKEN_DECIMALS } from '../../domain/money.js';
 import { type Price, priceInToken } from '../../domain/pricing.js';
 import type { AuthorizationToSign, Quote, QuoteRequest, SignedQuote } from '../../domain/quote.js';
-import { checkSpendingLimit, effectiveTier } from '../../domain/user.js';
 import { merchantRef, merchantRefHash } from '../../lib/promptpay/merchant-ref.js';
 import { parsePromptPayQr } from '../../lib/promptpay/parse.js';
 import { toUnixSeconds } from '../../lib/typed-data.js';
@@ -12,6 +11,7 @@ import type { RateProvider } from '../../ports/rate-provider.js';
 import type { KycRepository, PaymentRepository, QuoteRepository, UserRepository } from '../../ports/repositories.js';
 import type { SettlementGateway } from '../../ports/settlement-gateway.js';
 import { AppError } from '../../shared/errors.js';
+import { enforceSpendingLimit } from '../kyc/limits.js';
 
 export interface QuoteServiceDeps {
   users: UserRepository;
@@ -36,8 +36,6 @@ export interface QuoteResponse extends SignedQuote {
   /** What the user's wallet must sign (USDC ReceiveWithAuthorization, nonce = quoteId). */
   authorizationToSign: AuthorizationToSign;
 }
-
-const DAY_MS = 24 * 60 * 60 * 1000;
 
 /**
  * Turns a scanned PromptPay QR into a signed, short-lived quote:
@@ -75,22 +73,7 @@ export class QuoteService {
       throw new AppError('payer_mismatch', 'The payer must be the wallet you signed in with', 403);
     }
     const now = this.now();
-    const tier = effectiveTier(await deps.kyc.find(user.id));
-    const spent = await deps.payments.sumFiatSince(user.id, new Date(now.getTime() - DAY_MS));
-    const violation = checkSpendingLimit(tier, fiatMinor, spent);
-    if (violation?.code === 'kyc_required') {
-      throw new AppError('kyc_required', 'Complete identity verification before paying', 403);
-    }
-    if (violation?.code === 'payment_limit_exceeded') {
-      throw new AppError('payment_limit_exceeded', `The limit per payment is ${thb(violation.limit)}`, 422);
-    }
-    if (violation?.code === 'daily_limit_exceeded') {
-      throw new AppError(
-        'daily_limit_exceeded',
-        `The 24-hour limit is ${thb(violation.limit)}; ${thb(violation.remaining)} remains`,
-        422,
-      );
-    }
+    await enforceSpendingLimit(deps, user.id, fiatMinor, now);
 
     // 3. Price it.
     const rate = await deps.rates.getRate('USDC', 'THB');
@@ -154,8 +137,4 @@ function resolveAmount(qrAmount: bigint | undefined, requested: bigint | undefin
   }
   if (requested <= 0n) throw new AppError('invalid_amount', 'The amount must be positive', 422);
   return requested;
-}
-
-function thb(minor: bigint): string {
-  return `${formatMinor(minor, FIAT_DECIMALS.THB)} THB`;
 }
