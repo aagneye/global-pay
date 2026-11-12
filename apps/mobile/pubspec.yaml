@@ -7,16 +7,28 @@ environment:
   sdk: ^3.8.1
 
 dependencies:
+  blockchain_utils: ^7.1.0
   dio: ^5.11.1
   flutter:
     sdk: flutter
   flutter_riverpod: ^3.3.2
+  flutter_secure_storage: ^10.3.4
   go_router: ^17.0.0
+  json_annotation: ^4.9.0
+  mobile_scanner: ^7.5.0
+  on_chain: ^8.1.0
+  qr_flutter: ^4.1.0
+  # Pinned with retrofit_generator: newer pairs need Dart 3.9+.
+  retrofit: 4.9.1
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^5.0.0
+  swagger_parser: ^1.46.0
+  retrofit_generator: 10.2.0
+  json_serializable: ^6.11.2
+  build_runner: ^2.7.1
 
 flutter:
   uses-material-design: true

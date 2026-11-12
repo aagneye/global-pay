@@ -14,10 +14,7 @@ void main() {
 
     test('formats amounts with symbols', () {
       expect(FiatAmount(currency: FiatCurrency.thb, minor: BigInt.from(25000)).format(), '฿250.00');
-      expect(
-        TokenAmount(symbol: 'USDC', units: BigInt.from(7123456), decimals: 6).format(),
-        '7.123456 USDC',
-      );
+      expect(TokenAmount(symbol: 'USDC', units: BigInt.from(7123456), decimals: 6).format(), '7.123456 USDC');
     });
   });
 

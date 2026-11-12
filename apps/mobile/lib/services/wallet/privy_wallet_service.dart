@@ -21,6 +21,5 @@ class PrivyWalletService implements WalletService {
   Future<String> signMessage(String message) => throw UnimplementedError(_planned);
 
   @override
-  Future<String> signTypedData(Map<String, Object?> typedData) =>
-      throw UnimplementedError(_planned);
+  Future<String> signTypedData(Map<String, Object?> typedData) => throw UnimplementedError(_planned);
 }

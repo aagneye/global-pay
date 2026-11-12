@@ -1,1 +1,9 @@
 include: package:flutter_lints/flutter.yaml
+
+formatter:
+  page_width: 120
+
+analyzer:
+  exclude:
+    # Generated from packages/openapi/openapi.json (see swagger_parser.yaml).
+    - lib/data/api/generated/**
