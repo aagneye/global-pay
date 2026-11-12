@@ -52,10 +52,10 @@ A quote is valid while `block.timestamp < expiresAt`, the same rule USDC uses fo
 
 ## Commands
 
-After cloning, fetch the libraries:
+After cloning, fetch the libraries. Don't add `--recursive`; OpenZeppelin's own test dependencies aren't needed.
 
 ```bash
-git submodule update --init --recursive
+git submodule update --init
 ```
 
 ```bash

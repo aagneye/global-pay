@@ -69,8 +69,10 @@ The installer puts `forge`, `cast` and `anvil` in `%USERPROFILE%\.foundry\bin`, 
 The libraries (forge-std, OpenZeppelin) are git submodules. Fetch them after cloning:
 
 ```bash
-git submodule update --init --recursive
+git submodule update --init
 ```
+
+Don't add `--recursive`. OpenZeppelin's own test dependencies aren't needed, and their long file paths can make the clone fail on Windows.
 
 Then:
 

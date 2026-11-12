@@ -48,10 +48,14 @@ flowchart LR
 
 ## Quick start
 
-Clone with the contract libraries (git submodules):
+Clone, then fetch the contract libraries (git submodules):
 
 ```bash
-git clone --recurse-submodules https://github.com/aagneye/global-pay.git
+git clone https://github.com/aagneye/global-pay.git
+```
+
+```bash
+cd global-pay && git submodule update --init
 ```
 
 ```bash
