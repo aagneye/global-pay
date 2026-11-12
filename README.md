@@ -4,7 +4,11 @@
 
 The first target is foreign remote workers in Thailand who are paid in USDC. They pay any PromptPay QR from the GlobalPay app, and the merchant receives baht. It runs on **Base**, an Ethereum Layer 2 that uses the EVM.
 
-> **Status: iteration 1 (foundation).** This is the architecture skeleton and docs. Nothing moves real money. Partners (exchange, e-money operator, PromptPay payout, KYC) are simulated, and everything runs on testnet.
+> **Status: iteration 2 of 7 done.**
+> - The architecture skeleton and docs are in place.
+> - The settlement contract is implemented and fully tested.
+>
+> Nothing moves real money. Partners (exchange, e-money operator, PromptPay payout, KYC) are simulated, and everything runs on testnet or a local chain.
 
 ## How a payment works
 
@@ -44,8 +48,18 @@ flowchart LR
 
 ## Quick start
 
+Clone with the contract libraries (git submodules):
+
+```bash
+git clone --recurse-submodules https://github.com/aagneye/global-pay.git
+```
+
 ```bash
 docker compose up -d
+```
+
+```bash
+cd contracts && forge test
 ```
 
 ```bash

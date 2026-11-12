@@ -22,22 +22,24 @@ Structure, architecture and docs. No business logic yet.
 
 **Done when:** `npm run typecheck` and `npm test` pass in `services/api`, and `flutter analyze` and `flutter test` pass in `apps/mobile`.
 
-## Iteration 2: Settlement contract
+## Iteration 2: Settlement contract ✅
 
-1. Install Foundry (`foundryup` in Git Bash, or WSL as a fallback) and add the libraries: `forge install foundry-rs/forge-std OpenZeppelin/openzeppelin-contracts`.
-2. Implement `GlobalPaySettlement`:
-   - roles, `Pausable`, `ReentrancyGuard`, EIP-712 quote verification
-   - `pay` via `receiveWithAuthorization`, plus `markSettled` and `refund`
-   - token allowlist and treasury
-3. Implement `test/mocks/MockUSDC3009.sol`.
-4. Tests:
-   - happy path
-   - failure cases: expired quote, replayed quote or nonce, wrong signer, payer or amount mismatch, token not allowed, paused
-   - settle and refund only from `Paid`; role checks
-   - fuzz tests on amounts
-5. Write `script/Deploy.s.sol` to deploy the contract, grant roles and allowlist USDC.
+- [x] Foundry 1.9 installed. forge-std v1.17.0 and OpenZeppelin v5.7.0 pinned as submodules.
+- [x] `GlobalPaySettlement`:
+  - roles, `Pausable`, `ReentrancyGuard`, EIP-712 quote verification
+  - `pay` via `receiveWithAuthorization`, with a received-amount check
+  - `markSettled` and `refund`
+  - token allowlist and treasury
+  - not upgradeable, and only the admin can unpause ([ADR 0006](adr/0006-immutable-settlement-contract.md))
+- [x] `MockUSDC3009` (with its own tests) and a broken-token mock.
+- [x] Tests:
+  - happy paths and the EIP-712 encoding lock
+  - failure cases: expired, replayed, wrong signer, tampered quote, wrong user wallet, token not allowed, zero amount, paused, transfer mismatch
+  - status rules and role checks
+  - fuzz tests on amounts and expiry
+- [x] `script/Deploy.s.sol` (from `.env`) and `script/DeployLocal.s.sol` (anvil). Both were run against a local chain.
 
-**Done when:** `forge test` passes and coverage has been reviewed.
+**Result:** `forge test` passes, and coverage of `GlobalPaySettlement` is 100% for lines, statements, branches and functions. `forge fmt --check` and `forge lint` are clean.
 
 ## Iteration 3: Backend core
 
@@ -57,7 +59,7 @@ Structure, architecture and docs. No business logic yet.
 2. Relayer with nonce management, retries and receipt waiting.
 3. Indexer with a saved block cursor, confirmation depth, and handling of repeated events.
 4. Payout worker with `SimulatedPromptPayProvider`, which then settles or refunds.
-5. Integration test on anvil: deploy mock USDC and the settlement contract, then run the full flow from TypeScript for both the settle and refund paths.
+5. Integration test on anvil: deploy mock USDC and the settlement contract (with `script/DeployLocal.s.sol` or the compiled artifacts), then run the full flow from TypeScript for both the settle and refund paths.
 
 **Done when:** the integration test passes for both paths.
 

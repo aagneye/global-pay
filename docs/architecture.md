@@ -87,7 +87,7 @@ This is a ports-and-adapters design. Core logic depends only on `domain/` and `p
 
 ### Smart contract: `contracts/` (Solidity, Foundry)
 
-- **`GlobalPaySettlement`:** receives USDC against backend-signed quotes and tracks each payment until it's settled or refunded. The interface is in `src/interfaces/IGlobalPaySettlement.sol`.
+- **`GlobalPaySettlement`:** receives USDC against backend-signed quotes and tracks each payment until it's settled or refunded. The interface is in `src/interfaces/IGlobalPaySettlement.sol`. The contract isn't upgradeable ([ADR 0006](adr/0006-immutable-settlement-contract.md)).
 - **`IERC3009`:** the part of USDC's interface used for gasless, signature-based transfers.
 
 ### Shared test data: `packages/fixtures`
@@ -187,16 +187,17 @@ ReceiveWithAuthorization(from = payer, to = settlement contract, value = tokenAm
 
 - `nonce = quoteId` ties the user's authorisation to exactly one quote.
 - `receiveWithAuthorization` requires the caller to be the recipient (the contract), so nobody can front-run the transfer.
+- A quote is valid while `block.timestamp < expiresAt`, the same rule USDC applies to `validBefore`. With `validBefore = expiresAt`, both signatures expire at the same second.
 - The USDC EIP-712 domain (`name`, `version`) is read from the chain, never hardcoded. It differs between Base Sepolia and Base mainnet.
 
 ## Keys and roles
 
 | Key / role | Held by | Can | Cannot |
 |---|---|---|---|
-| Admin (`DEFAULT_ADMIN_ROLE`) | Deployer on testnet; multisig in production | Grant and revoke roles, set treasury, allowlist tokens | Move a payment directly |
+| Admin (`DEFAULT_ADMIN_ROLE`) | Deployer on testnet; multisig in production | Grant and revoke roles, set treasury, allowlist tokens, unpause | Move a payment directly |
 | Quote signer (`QUOTE_SIGNER_ROLE`) | Backend (KMS in production) | Sign quotes | Move funds: every quote still needs the user's USDC authorisation |
 | Operator (`OPERATOR_ROLE`) | Backend relayer | Call `markSettled` and `refund`; pay gas | Send USDC anywhere except the treasury or back to the payer |
-| Pauser (`PAUSER_ROLE`) | Operations | Pause new payments | Move funds |
+| Pauser (`PAUSER_ROLE`) | Operations | Pause new payments | Unpause, or move funds |
 | Treasury | Company wallet (multisig in production) | Receive settled USDC | — |
 | User wallet | Embedded wallet provider, controlled by the user | Authorise exactly one payment per quote | — |
 
@@ -240,7 +241,8 @@ An OpenAPI spec is generated from the route schemas, and the Dart client is gene
 - **No replay:** each `quoteId` can be used once, enforced by both the contract state and the USDC nonce.
 - **Merchant-only QRs:** a policy flag (`MERCHANT_QR_ONLY`), on in production, stops payments to personal accounts.
 - **KYC-based limits:** per-payment and per-day limits by tier (`src/domain/user.ts`).
-- **Emergency stop:** `pause()` stops new payments. Settling and refunding still work, so in-flight funds can always be resolved.
+- **Emergency stop:** `pause()` stops new payments. Settling and refunding still work, so in-flight funds can always be resolved. Only the admin can unpause ([ADR 0006](adr/0006-immutable-settlement-contract.md)).
+- **Received-amount check:** `pay` reverts with `UnexpectedTokenTransfer` unless the contract received exactly the quoted amount.
 - **Exact money maths:** amounts are integers everywhere and never floating point.
 - **Testnet keys only:** keys live in a gitignored `.env` and are never committed.
 
