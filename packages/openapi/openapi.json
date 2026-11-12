@@ -1,0 +1,1330 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "GlobalPay API",
+    "version": "0.1.0",
+    "description": "Pay Thai PromptPay QRs with USDC on Base. Testnet demo: partners are simulated.\n\nMoney is sent as integer strings in minor units: THB satang (\"10000\" = 100.00 THB) and USDC base units (\"1000000\" = 1 USDC). Rates are THB per USDC × 1e8."
+  },
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT"
+      }
+    },
+    "schemas": {
+      "Balance": {
+        "type": "object",
+        "properties": {
+          "token": {
+            "type": "string",
+            "pattern": "^0x[a-fA-F0-9]{40}$",
+            "example": "0x15d34AAf54267DB7D7c367839AAf71A00a2C6A65"
+          },
+          "units": {
+            "type": "string",
+            "pattern": "^\\d+$",
+            "description": "Token base units"
+          },
+          "decimals": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [
+          "token",
+          "units",
+          "decimals"
+        ],
+        "additionalProperties": false
+      },
+      "Eip712Domain": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "version": {
+            "type": "string"
+          },
+          "chainId": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "verifyingContract": {
+            "type": "string",
+            "pattern": "^0x[a-fA-F0-9]{40}$",
+            "example": "0x15d34AAf54267DB7D7c367839AAf71A00a2C6A65"
+          }
+        },
+        "required": [
+          "name",
+          "version",
+          "chainId",
+          "verifyingContract"
+        ],
+        "additionalProperties": false
+      },
+      "Error": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "string",
+            "description": "Stable machine-readable code",
+            "example": "kyc_required"
+          },
+          "message": {
+            "type": "string"
+          },
+          "issues": {
+            "type": "array",
+            "items": {}
+          }
+        },
+        "required": [
+          "error"
+        ],
+        "additionalProperties": false
+      },
+      "Health": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "ok"
+            ]
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "additionalProperties": false
+      },
+      "KycSession": {
+        "type": "object",
+        "properties": {
+          "provider": {
+            "type": "string"
+          },
+          "sessionToken": {
+            "type": "string"
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+          }
+        },
+        "required": [
+          "provider",
+          "sessionToken",
+          "expiresAt"
+        ],
+        "additionalProperties": false,
+        "description": "For the provider's mobile SDK. Null if the user is already approved."
+      },
+      "KycStart": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "NOT_STARTED",
+              "PENDING",
+              "APPROVED",
+              "REJECTED"
+            ]
+          },
+          "tier": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 2,
+            "description": "0 until verification is approved"
+          },
+          "limits": {
+            "$ref": "#/components/schemas/SpendingLimits"
+          },
+          "session": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/KycSession"
+              }
+            ]
+          }
+        },
+        "required": [
+          "status",
+          "tier",
+          "limits",
+          "session"
+        ],
+        "additionalProperties": false
+      },
+      "KycStatus": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "NOT_STARTED",
+              "PENDING",
+              "APPROVED",
+              "REJECTED"
+            ]
+          },
+          "tier": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 2,
+            "description": "0 until verification is approved"
+          },
+          "limits": {
+            "$ref": "#/components/schemas/SpendingLimits"
+          }
+        },
+        "required": [
+          "status",
+          "tier",
+          "limits"
+        ],
+        "additionalProperties": false
+      },
+      "NonceRequest": {
+        "type": "object",
+        "properties": {
+          "address": {
+            "description": "Wallet that will sign in",
+            "type": "string",
+            "pattern": "^0x[a-fA-F0-9]{40}$"
+          }
+        },
+        "required": [
+          "address"
+        ]
+      },
+      "NonceResponse": {
+        "type": "object",
+        "properties": {
+          "nonce": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string",
+            "description": "EIP-4361 message to sign with personal_sign, unchanged"
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+          }
+        },
+        "required": [
+          "nonce",
+          "message",
+          "expiresAt"
+        ],
+        "additionalProperties": false
+      },
+      "OnChainQuote": {
+        "type": "object",
+        "properties": {
+          "quoteId": {
+            "type": "string",
+            "pattern": "^0x[a-fA-F0-9]{64}$"
+          },
+          "payer": {
+            "type": "string",
+            "pattern": "^0x[a-fA-F0-9]{40}$",
+            "example": "0x15d34AAf54267DB7D7c367839AAf71A00a2C6A65"
+          },
+          "token": {
+            "type": "string",
+            "pattern": "^0x[a-fA-F0-9]{40}$",
+            "example": "0x15d34AAf54267DB7D7c367839AAf71A00a2C6A65"
+          },
+          "tokenAmount": {
+            "type": "string",
+            "pattern": "^\\d+$",
+            "description": "USDC base units (6 decimals), spread included"
+          },
+          "fiatCurrency": {
+            "type": "string",
+            "enum": [
+              "THB"
+            ]
+          },
+          "fiatAmount": {
+            "type": "string",
+            "pattern": "^\\d+$",
+            "description": "THB satang the merchant receives"
+          },
+          "merchantRefHash": {
+            "type": "string",
+            "pattern": "^0x[a-fA-F0-9]{64}$"
+          },
+          "expiresAt": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991,
+            "description": "Unix seconds"
+          }
+        },
+        "required": [
+          "quoteId",
+          "payer",
+          "token",
+          "tokenAmount",
+          "fiatCurrency",
+          "fiatAmount",
+          "merchantRefHash",
+          "expiresAt"
+        ],
+        "additionalProperties": false,
+        "description": "The on-chain Quote struct, as signed. Send it back unchanged with the payment."
+      },
+      "Payment": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "quoteId": {
+            "type": "string",
+            "pattern": "^0x[a-fA-F0-9]{64}$"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "SUBMITTED",
+              "PAID",
+              "PAYOUT_PENDING",
+              "SETTLED",
+              "REFUNDED",
+              "FAILED"
+            ],
+            "description": "SETTLED, REFUNDED and FAILED are final. Poll until one of them."
+          },
+          "fiatCurrency": {
+            "type": "string"
+          },
+          "fiatAmount": {
+            "type": "string",
+            "pattern": "^\\d+$",
+            "description": "THB satang the merchant receives"
+          },
+          "token": {
+            "type": "string",
+            "pattern": "^0x[a-fA-F0-9]{40}$",
+            "example": "0x15d34AAf54267DB7D7c367839AAf71A00a2C6A65"
+          },
+          "tokenAmount": {
+            "type": "string",
+            "pattern": "^\\d+$",
+            "description": "USDC base units the user pays"
+          },
+          "merchant": {
+            "$ref": "#/components/schemas/PaymentMerchant"
+          },
+          "transactions": {
+            "$ref": "#/components/schemas/PaymentTransactions"
+          },
+          "failureReason": {
+            "type": "string"
+          },
+          "quoteExpiresAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+          }
+        },
+        "required": [
+          "id",
+          "quoteId",
+          "status",
+          "fiatCurrency",
+          "fiatAmount",
+          "token",
+          "tokenAmount",
+          "merchant",
+          "transactions",
+          "quoteExpiresAt",
+          "createdAt",
+          "updatedAt"
+        ],
+        "additionalProperties": false
+      },
+      "PaymentList": {
+        "type": "object",
+        "properties": {
+          "payments": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Payment"
+            }
+          }
+        },
+        "required": [
+          "payments"
+        ],
+        "additionalProperties": false
+      },
+      "PaymentMerchant": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string"
+          },
+          "targetId": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "targetId"
+        ],
+        "additionalProperties": false
+      },
+      "PaymentRequest": {
+        "type": "object",
+        "properties": {
+          "quoteId": {
+            "type": "string",
+            "pattern": "^0x[a-fA-F0-9]{64}$"
+          },
+          "validAfter": {
+            "description": "From authorizationToSign.message, unchanged",
+            "type": "string",
+            "pattern": "^\\d+$"
+          },
+          "validBefore": {
+            "description": "From authorizationToSign.message, unchanged",
+            "type": "string",
+            "pattern": "^\\d+$"
+          },
+          "signature": {
+            "description": "The payer wallet's signature over authorizationToSign",
+            "type": "string",
+            "pattern": "^0x(?:[a-fA-F0-9]{2})*$"
+          }
+        },
+        "required": [
+          "quoteId",
+          "validAfter",
+          "validBefore",
+          "signature"
+        ]
+      },
+      "PaymentTransactions": {
+        "type": "object",
+        "properties": {
+          "pay": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TxLink"
+              }
+            ]
+          },
+          "settle": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TxLink"
+              }
+            ]
+          },
+          "refund": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TxLink"
+              }
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
+      "QuoteMerchant": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "personal",
+              "merchant"
+            ]
+          },
+          "targetType": {
+            "type": "string",
+            "enum": [
+              "mobile",
+              "nationalId",
+              "eWallet",
+              "biller"
+            ]
+          },
+          "targetId": {
+            "type": "string"
+          },
+          "reference1": {
+            "type": "string"
+          },
+          "reference2": {
+            "type": "string"
+          },
+          "merchantName": {
+            "type": "string"
+          },
+          "merchantCity": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "targetType",
+          "targetId"
+        ],
+        "additionalProperties": false
+      },
+      "QuotePricing": {
+        "type": "object",
+        "properties": {
+          "rateE8": {
+            "type": "string",
+            "pattern": "^\\d+$",
+            "description": "Mid-market THB per USDC × 1e8"
+          },
+          "rateSource": {
+            "type": "string"
+          },
+          "spreadBps": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "baseTokenAmount": {
+            "type": "string",
+            "pattern": "^\\d+$",
+            "description": "USDC at the mid-market rate"
+          },
+          "feeTokenAmount": {
+            "type": "string",
+            "pattern": "^\\d+$",
+            "description": "The spread, in USDC base units"
+          }
+        },
+        "required": [
+          "rateE8",
+          "rateSource",
+          "spreadBps",
+          "baseTokenAmount",
+          "feeTokenAmount"
+        ],
+        "additionalProperties": false
+      },
+      "QuoteRequest": {
+        "type": "object",
+        "properties": {
+          "payer": {
+            "description": "Wallet that will pay; must be the signed-in user's wallet",
+            "type": "string",
+            "pattern": "^0x[a-fA-F0-9]{40}$"
+          },
+          "qrPayload": {
+            "type": "string",
+            "minLength": 20,
+            "maxLength": 512,
+            "description": "The scanned PromptPay QR text"
+          },
+          "fiatAmountMinor": {
+            "description": "THB satang. Required when the QR has no amount; must match it when it has one.",
+            "type": "string",
+            "pattern": "^\\d+$"
+          }
+        },
+        "required": [
+          "payer",
+          "qrPayload"
+        ]
+      },
+      "QuoteResponse": {
+        "type": "object",
+        "properties": {
+          "quote": {
+            "$ref": "#/components/schemas/OnChainQuote"
+          },
+          "signature": {
+            "type": "string",
+            "pattern": "^0x(?:[a-fA-F0-9]{2})*$",
+            "description": "GlobalPay's EIP-712 signature over the quote"
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+          },
+          "pricing": {
+            "$ref": "#/components/schemas/QuotePricing"
+          },
+          "merchant": {
+            "$ref": "#/components/schemas/QuoteMerchant"
+          },
+          "authorizationToSign": {
+            "$ref": "#/components/schemas/ReceiveAuthorizationTypedData"
+          }
+        },
+        "required": [
+          "quote",
+          "signature",
+          "expiresAt",
+          "pricing",
+          "merchant",
+          "authorizationToSign"
+        ],
+        "additionalProperties": false
+      },
+      "ReceiveAuthorizationMessage": {
+        "type": "object",
+        "properties": {
+          "from": {
+            "type": "string",
+            "pattern": "^0x[a-fA-F0-9]{40}$",
+            "example": "0x15d34AAf54267DB7D7c367839AAf71A00a2C6A65"
+          },
+          "to": {
+            "type": "string",
+            "pattern": "^0x[a-fA-F0-9]{40}$",
+            "example": "0x15d34AAf54267DB7D7c367839AAf71A00a2C6A65"
+          },
+          "value": {
+            "type": "string",
+            "pattern": "^\\d+$"
+          },
+          "validAfter": {
+            "type": "string",
+            "pattern": "^\\d+$"
+          },
+          "validBefore": {
+            "type": "string",
+            "pattern": "^\\d+$"
+          },
+          "nonce": {
+            "type": "string",
+            "pattern": "^0x[a-fA-F0-9]{64}$"
+          }
+        },
+        "required": [
+          "from",
+          "to",
+          "value",
+          "validAfter",
+          "validBefore",
+          "nonce"
+        ],
+        "additionalProperties": false
+      },
+      "ReceiveAuthorizationTypedData": {
+        "type": "object",
+        "properties": {
+          "types": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "array",
+              "items": {
+                "$ref": "#/components/schemas/TypedDataField"
+              }
+            }
+          },
+          "primaryType": {
+            "type": "string",
+            "enum": [
+              "ReceiveWithAuthorization"
+            ]
+          },
+          "domain": {
+            "$ref": "#/components/schemas/Eip712Domain"
+          },
+          "message": {
+            "$ref": "#/components/schemas/ReceiveAuthorizationMessage"
+          }
+        },
+        "required": [
+          "types",
+          "primaryType",
+          "domain",
+          "message"
+        ],
+        "additionalProperties": false,
+        "description": "EIP-712 typed data for the wallet (eth_signTypedData_v4): USDC ReceiveWithAuthorization"
+      },
+      "SignInRequest": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2000
+          },
+          "signature": {
+            "description": "personal_sign signature over `message`",
+            "type": "string",
+            "pattern": "^0x(?:[a-fA-F0-9]{2})*$"
+          }
+        },
+        "required": [
+          "message",
+          "signature"
+        ]
+      },
+      "SignInResponse": {
+        "type": "object",
+        "properties": {
+          "token": {
+            "type": "string"
+          },
+          "tokenType": {
+            "type": "string",
+            "enum": [
+              "Bearer"
+            ]
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+          },
+          "user": {
+            "$ref": "#/components/schemas/User"
+          }
+        },
+        "required": [
+          "token",
+          "tokenType",
+          "expiresAt",
+          "user"
+        ],
+        "additionalProperties": false
+      },
+      "SpendingLimits": {
+        "type": "object",
+        "properties": {
+          "perPayment": {
+            "type": "string",
+            "pattern": "^\\d+$",
+            "description": "THB satang"
+          },
+          "perDay": {
+            "type": "string",
+            "pattern": "^\\d+$",
+            "description": "THB satang, rolling 24 hours"
+          }
+        },
+        "required": [
+          "perPayment",
+          "perDay"
+        ],
+        "additionalProperties": false
+      },
+      "TxLink": {
+        "type": "object",
+        "properties": {
+          "hash": {
+            "type": "string",
+            "pattern": "^0x[a-fA-F0-9]{64}$"
+          },
+          "url": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "hash",
+          "url"
+        ],
+        "additionalProperties": false
+      },
+      "TypedDataField": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "type"
+        ],
+        "additionalProperties": false
+      },
+      "User": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "walletAddress": {
+            "type": "string",
+            "pattern": "^0x[a-fA-F0-9]{40}$",
+            "example": "0x15d34AAf54267DB7D7c367839AAf71A00a2C6A65"
+          }
+        },
+        "required": [
+          "id",
+          "walletAddress"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "paths": {
+    "/health": {
+      "get": {
+        "operationId": "getHealth",
+        "tags": [
+          "system"
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Health"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/nonce": {
+      "post": {
+        "operationId": "createSignInNonce",
+        "summary": "Start sign-in: get a one-time nonce and the message to sign",
+        "tags": [
+          "auth"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NonceRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NonceResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/verify": {
+      "post": {
+        "operationId": "verifySignIn",
+        "summary": "Finish sign-in: verify the signed message and get an access token",
+        "tags": [
+          "auth"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SignInRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SignInResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/kyc/start": {
+      "post": {
+        "operationId": "startKyc",
+        "summary": "Start identity verification (mock: approved on the next status check)",
+        "tags": [
+          "kyc"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KycStart"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/kyc/status": {
+      "get": {
+        "operationId": "getKycStatus",
+        "summary": "Verification status, tier and spending limits",
+        "tags": [
+          "kyc"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KycStatus"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/quotes": {
+      "post": {
+        "operationId": "createQuote",
+        "summary": "Quote a PromptPay QR payment in USDC",
+        "tags": [
+          "quotes"
+        ],
+        "description": "Parses the QR, checks KYC limits, prices it at the live rate plus the spread, and signs it. The quote expires after QUOTE_TTL_SECONDS (60 s by default). Sign `authorizationToSign` with the payer wallet, then submit it to POST /payments.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/QuoteRequest"
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuoteResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/payments": {
+      "post": {
+        "operationId": "submitPayment",
+        "summary": "Pay a quote with the signed USDC authorisation",
+        "tags": [
+          "payments"
+        ],
+        "description": "Checks the signature and limits, then relays pay() and returns at once with status SUBMITTED. Poll GET /payments/{id} until SETTLED, REFUNDED or FAILED. Submitting the same quote again returns the same payment.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PaymentRequest"
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Payment"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/payments/{id}": {
+      "get": {
+        "operationId": "getPayment",
+        "summary": "Payment status and transactions",
+        "tags": [
+          "payments"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            },
+            "in": "path",
+            "name": "id",
+            "required": true
+          }
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Payment"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/me/balance": {
+      "get": {
+        "operationId": "getBalance",
+        "summary": "USDC balance of the signed-in user's wallet",
+        "tags": [
+          "account"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Balance"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/me/payments": {
+      "get": {
+        "operationId": "listPayments",
+        "summary": "Payment history, newest first (last 50)",
+        "tags": [
+          "account"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaymentList"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "tags": [
+    {
+      "name": "auth",
+      "description": "Sign-In with Ethereum"
+    },
+    {
+      "name": "kyc",
+      "description": "Identity verification (mock) and limits"
+    },
+    {
+      "name": "quotes",
+      "description": "Signed quotes for PromptPay QRs"
+    },
+    {
+      "name": "payments",
+      "description": "Submit and track payments (iteration 4)"
+    },
+    {
+      "name": "account",
+      "description": "Balance and history (iteration 4)"
+    },
+    {
+      "name": "system"
+    }
+  ]
+}

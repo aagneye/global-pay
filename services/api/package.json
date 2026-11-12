@@ -18,7 +18,8 @@
     "prisma:generate": "prisma generate",
     "db:migrate": "prisma migrate deploy",
     "db:migrate:dev": "prisma migrate dev",
-    "qr:make": "tsx scripts/make-promptpay-qr.ts"
+    "qr:make": "tsx scripts/make-promptpay-qr.ts",
+    "openapi": "tsx scripts/export-openapi.ts"
   },
   "dependencies": {
     "@fastify/swagger": "9.9.3",

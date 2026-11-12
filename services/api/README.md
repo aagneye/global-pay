@@ -67,6 +67,7 @@ npm run dev              # http://localhost:3000/docs
 npm run typecheck
 npm test
 npm run qr:make          # print demo PromptPay QRs; npm run qr:make -- 250.50 for another amount
+npm run openapi          # after changing a route: rewrite packages/openapi/openapi.json
 ```
 
 To change the schema: edit `prisma/schema.prisma`, then run `npm run db:migrate:dev -- --name <change>`.
