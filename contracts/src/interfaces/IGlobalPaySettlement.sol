@@ -30,11 +30,12 @@ interface IGlobalPaySettlement {
         bytes3 fiatCurrency; // ISO 4217 code, e.g. "THB"
         uint256 fiatAmount; // fiat minor units (THB: satang)
         bytes32 merchantRefHash; // keccak256 of the normalised merchant / biller ID
-        uint64 expiresAt; // unix seconds
+        uint64 expiresAt; // unix seconds; valid while block.timestamp < expiresAt (like EIP-3009 validBefore)
     }
 
     /// @notice The payer's EIP-3009 ReceiveWithAuthorization signature.
     /// @dev from = quote.payer, to = this contract, value = quote.tokenAmount, nonce = quote.quoteId.
+    ///      The backend sets validBefore = quote.expiresAt so both signatures expire together.
     struct Authorization {
         uint256 validAfter;
         uint256 validBefore;
@@ -71,6 +72,8 @@ interface IGlobalPaySettlement {
     error InvalidPaymentStatus(bytes32 quoteId, PaymentStatus status);
     error ZeroAddress();
     error ZeroAmount();
+    /// @dev The token moved a different amount than authorised (misconfigured or non-standard token).
+    error UnexpectedTokenTransfer(uint256 expected, uint256 received);
 
     /// @notice Pull the payer's tokens for a signed quote and record the payment as Paid.
     /// @dev Permissionless: the two signatures authorise the payment, not the caller.
