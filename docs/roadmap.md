@@ -1,8 +1,10 @@
-# Roadmap: testnet demo
+# Roadmap
 
-The demo is built in seven iterations. Each one ends with its tests passing and is committed as small, atomic commits.
+The demo was built in iterations 1–5; iterations 6–11 turn it into a product. Each one ends with its tests passing and is committed as small, atomic commits.
 
-**End goal:** in the Flutter app, scan a PromptPay QR, pay with test USDC on Base Sepolia, and watch a simulated baht payout settle, or refund if the payout fails.
+**Demo goal (iterations 1–5, done):** in the Flutter app, scan a PromptPay QR, pay with test USDC, and watch a simulated baht payout settle, or refund if the payout fails.
+
+**Product goal (iterations 6–11):** confirmed payouts through a real partner, a way to add money, tap-to-pay between people, and a hardened release, on Base Sepolia first.
 
 ## Iteration 1: Foundation ✅
 
@@ -100,33 +102,86 @@ Two bugs that the fakes had hidden were found and fixed:
 - an empty request body was sent as JSON;
 - unset optional fields were sent as `null`.
 
-## Iteration 6: Base Sepolia
+## From demo to product (iterations 6–11)
+
+A review of a similar app listed what separates a demo from a real product: a payout that is actually confirmed, a way to add money, tap payments with push, and production hardening. The research behind this plan (partners, endpoints, regulation) is in [research/production-rails.md](research/production-rails.md).
+
+## Iteration 6: Real payout confirmation and operations
+
+The payout stops being simulated and is checked properly. Built against the **Xendit** payouts sandbox; the simulated partner stays for local tests.
+
+1. Payout outcomes: `PENDING`, `SUCCEEDED` (with the bank reference), `FAILED`, `UNKNOWN`, `REVERSED`. Every partner response and webhook is stored for audit.
+2. No double payout: one idempotency key per payout, saved before the partner is called; before a retry, look the payout up by that key.
+3. Settle only on SUCCEEDED with a reference; refund only on a definite failure. Anything unclear becomes UNKNOWN: re-checked with backoff, then handed to an operator.
+4. Quotes refuse QRs the payout partner can't pay, and refuse payments when the payout float is too low.
+5. Xendit webhook (re-fetched before acting), and an operator page: payments stuck or UNKNOWN, reversals, failed settle/refund transactions, low relayer gas, low float. Operator actions are limited and logged.
+6. The app shows "Merchant paid" only with the partner's reference, and "Needs review" for UNKNOWN.
+
+**Done when:** tests cover every partner status, crash retries and UNKNOWN; the anvil integration test covers UNKNOWN → operator → settled; a sandbox smoke test pays, fails and shows exceptions.
+
+## Iteration 7: Base Sepolia
 
 1. Generate testnet keys and fund the deployer and relayer with Base Sepolia ETH. Then deploy the contract and verify it on Basescan.
-2. Point the backend at Base Sepolia and Circle's test USDC, and fund the app wallet from Circle's faucet.
-3. End-to-end test: a 100 THB payment settles, and a forced payout failure refunds.
+2. Point the backend at Base Sepolia, Circle's test USDC and the Xendit sandbox; expose the webhook through a tunnel.
+3. End-to-end test: a 100 THB payment settles with a Xendit reference, a forced payout failure refunds, and a forced UNKNOWN shows on the operator page.
 
-**Done when:** both paths are visible on Basescan.
+**Done when:** all three are visible on Basescan and the operator page.
 
-## Iteration 7: Embedded wallet
+## Iteration 8: Add money
+
+1. **MoonPay** onramp (sandbox first): the backend creates an order and a signed MoonPay link for the user's own address; the app opens it in a browser tab.
+2. Status from signed webhooks and polling. "Received" only after the USDC transfer to the user's address is confirmed on-chain.
+3. "Deposit from another wallet": the receive screen plus a watcher for incoming USDC, shown in history.
+
+**Done when:** a sandbox order completes end to end, and a deposit on Base Sepolia shows in the app.
+
+## Iteration 9: Tap to pay
+
+1. Person-to-person USDC payments: the receiver enters an amount, the sender holds their phone to the receiver's phone (NFC), or scans a QR as a fallback.
+2. The sender's phone proves who it is with a hardware-backed key; the backend sends a push notification carrying only the request ID.
+3. The sender sees the recipient's verified name and the amount, approves with their fingerprint, and signs a gasless USDC transfer that the backend relays.
+4. Requests are stored, expire after 2 minutes, and are rate-limited.
+
+**Done when:** two Android phones complete a tap payment on Base Sepolia, with the push arriving while the app is closed.
+
+## Iteration 10: Production hardening
+
+1. App: release builds without the dev wallet, test keys or plain HTTP; release signing; code shrinking.
+2. Backend: rate limits, log redaction, webhook checks, key rotation, crash reporting without personal data.
+3. A threat model, a key-rotation runbook and a launch checklist.
+
+**Done when:** a signed release build passes the checklist's automated checks.
+
+## Iteration 11: Embedded wallet
 
 1. Create a Privy app (you do this), then implement `PrivyWalletService` with email/Google login and typed-data signing. Use Web3Auth if Privy doesn't fit.
 2. Make it the default `WalletService`, and keep `DevWalletService` for tests.
 
 **Done when:** a new user can sign up with email and complete a payment.
 
+## Before real money
+
+- Thai legal opinion: the SEC's crypto-payment ban, the Payment Systems Act, and Decree No. 2 on offshore digital-asset services.
+- A licensed partner: Krungsri corporate API (pays PromptPay IDs and bill-payment QRs) or a TouristDigiPay exchange and e-money operator.
+- Contract audit, production key management (KMS, multisig admin), monitoring.
+- A controlled 1-baht live payment to an allowlisted merchant.
+
 ## After the demo (product)
 
 - USDT support (Permit2 or ERC-4337 paymaster)
 - Partner debit card
+- Disputes ("merchant not paid"), spending limits and wallet recovery screens
 - Invoices, income statements and CSV export
-- Real Thai partners and entry into the sandbox
-- Production key management (KMS, multisig admin), monitoring, and a contract audit
+- Bank-card tap as an alternative to phone-to-phone (only after a PCI review)
 - More countries: Indonesia (QRIS), Vietnam (VietQR), then India via the offshore + prepaid-wallet structure
 
 ## Steps that need the project owner
 
 - **Android:** install cmdline-tools in Android Studio's SDK Manager and accept the SDK licences (`flutter doctor --android-licenses`).
-- **Privy:** create a dashboard account and app ID (iteration 7).
-- **Faucets:** Base Sepolia ETH and Circle test USDC (iteration 6).
+- **Xendit:** a test account and its secret key and callback token (iteration 6).
+- **Faucets:** Base Sepolia ETH and Circle test USDC (iteration 7).
+- **MoonPay:** a sandbox account (iteration 8).
+- **Firebase:** a project and the Android `google-services.json` (iteration 9).
+- **Privy:** a dashboard account and app ID (iteration 11).
 - **Optional:** an Etherscan API key for contract verification.
+- **Business and legal:** the items under "Before real money".

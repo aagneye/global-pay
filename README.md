@@ -4,7 +4,7 @@
 
 The first target is foreign remote workers in Thailand who are paid in USDC. They pay any PromptPay QR from the GlobalPay app, and the merchant receives baht. It runs on **Base**, an Ethereum Layer 2 that uses the EVM.
 
-> **Status: iteration 5 of 7 done.**
+> **Status: iteration 5 of 11 done.** Iterations 6–11 turn the demo into a product (see the roadmap).
 > - The architecture skeleton and docs are in place.
 > - The settlement contract is implemented and fully tested.
 > - The backend signs users in, runs mock KYC, and returns signed quotes for PromptPay QRs.
@@ -46,7 +46,8 @@ flowchart LR
 - [Product scope](docs/scope.md): the idea, markets, risks and chosen direction
 - [Architecture](docs/architecture.md): components, payment flow, state machines, signatures, keys and roles
 - [Decision records](docs/adr): Base, gasless USDC, embedded wallet, TypeScript backend, partner ports, immutable contract, chain as source of truth
-- [Roadmap](docs/roadmap.md): the build in seven iterations, with action steps
+- [Roadmap](docs/roadmap.md): the build in iterations, with action steps
+- [Research: production rails](docs/research/production-rails.md): payout partners, onramps and tap-to-pay, with endpoints and regulation
 - [Setup](docs/setup.md): toolchain and how to run each part
 
 ## Quick start
