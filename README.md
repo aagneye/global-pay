@@ -46,10 +46,11 @@ flowchart LR
 
 - [Product scope](docs/scope.md): the idea, markets, risks and chosen direction
 - [Architecture](docs/architecture.md): components, payment flow, state machines, signatures, keys and roles
-- [Decision records](docs/adr): Base, gasless USDC, embedded wallet, TypeScript backend, partner ports, immutable contract, chain as source of truth
+- [Decision records](docs/adr): Base, gasless USDC, embedded wallet, TypeScript backend, partner ports, immutable contract, chain as source of truth, payout outcomes
 - [Roadmap](docs/roadmap.md): the build in iterations, with action steps
 - [Research: production rails](docs/research/production-rails.md): payout partners, onramps and tap-to-pay, with endpoints and regulation
 - [Setup](docs/setup.md): toolchain and how to run each part
+- [Base Sepolia runbook](docs/testnet.md): keys, funding, deployment, and an end-to-end payment on testnet
 
 ## Quick start
 

@@ -5,7 +5,7 @@ Solidity contracts for GlobalPay, built with [Foundry](https://getfoundry.sh/). 
 **Status:** iteration 2 is complete.
 - `GlobalPaySettlement` is implemented and tested: 42 tests including fuzzing, with 100% line and branch coverage.
 - Deploy scripts are tested on a local chain (anvil).
-- Nothing is deployed to Base Sepolia yet; that happens in iteration 6.
+- The real `Deploy.s.sol` is rehearsed on a fork of Base Sepolia, against Circle's test USDC. The Base Sepolia deployment (iteration 7) follows [docs/testnet.md](../docs/testnet.md).
 
 ## Layout
 
@@ -23,7 +23,7 @@ test/
     MockUSDC3009.t.sol         tests for the mock itself
     NoopToken3009.sol          broken token, used to test the received-amount check
 script/
-  Deploy.s.sol                 deploy from .env (Base Sepolia, iteration 6)
+  Deploy.s.sol                 deploy from .env (Base Sepolia, iteration 7)
   DeployLocal.s.sol            deploy mock USDC + settlement to anvil
 lib/                           forge-std v1.17.0, OpenZeppelin v5.7.0 (git submodules)
 ```
@@ -88,9 +88,9 @@ Roles use anvil's default test accounts. Their keys are public, so use them on t
 | #3 | Operator (backend `RELAYER_PRIVATE_KEY`) |
 | #4 | Test payer, funded with 10,000 test USDC |
 
-## Base Sepolia (iteration 6)
+## Base Sepolia (iteration 7)
 
-Copy `.env.example` to `.env` and fill it in with **testnet keys only**. Then:
+Follow [docs/testnet.md](../docs/testnet.md). `npm run testnet -- init` (in `services/api`) writes `.env` with fresh **testnet keys**; fund the deployer, then:
 
 ```bash
 forge script script/Deploy.s.sol --rpc-url base_sepolia --broadcast --verify

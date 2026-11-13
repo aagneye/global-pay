@@ -101,7 +101,7 @@ forge build
 forge test
 ```
 
-To run a local chain with the contracts deployed, see [contracts/README.md](../contracts/README.md#local-chain-anvil).
+To run a local chain with the contracts deployed, see [contracts/README.md](../contracts/README.md#local-chain-anvil). To deploy to Base Sepolia, see [testnet.md](testnet.md).
 
 ## 5. Mobile app: `apps/mobile`
 
@@ -133,3 +133,4 @@ To pay on a local chain, start anvil and the backend first. Then follow [apps/mo
 - Use **testnet keys only**. Each package keeps them in its own gitignored `.env`.
 - Only `.env.example` files are committed.
 - Never paste a mainnet key into this project.
+- For Base Sepolia, `npm run testnet -- init` (in `services/api`) generates fresh keys into `contracts/.env` and `services/api/.env.base-sepolia`. See [testnet.md](testnet.md).

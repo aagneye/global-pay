@@ -138,9 +138,29 @@ The anvil integration test now covers UNKNOWN → operator marks paid → settle
 
 **Not done yet:** the Xendit sandbox smoke run. `npm run xendit:sandbox` is ready but needs the owner's Xendit test key; it moves to iteration 7, with the webhook tunnel.
 
-## Iteration 7: Base Sepolia
+## Iteration 7: Base Sepolia (in progress)
 
-1. Generate testnet keys and fund the deployer and relayer with Base Sepolia ETH. Then deploy the contract and verify it on Basescan.
+The runbook is [testnet.md](testnet.md).
+
+**Done so far:**
+- [x] **Rehearsal on a fork of Base Sepolia** (`test/integration/base-sepolia-fork.test.ts`), against Circle's real test USDC:
+  - the real `Deploy.s.sol` with fresh keys;
+  - a gasless `pay()` through USDC's `receiveWithAuthorization`;
+  - the indexer;
+  - `markSettled` and `refund`.
+
+  Both pass.
+- [x] **`npm run testnet`:**
+  - `init` makes testnet keys into gitignored files;
+  - `status` checks balances, the deployment and roles on chain;
+  - `record` saves the contract address and start block;
+  - `pay` runs one payment through the API.
+- [x] **Indexer range fix:** Base Sepolia's public RPC caps `eth_getLogs` at 200 blocks, and the indexer asked for 2,000. Now `INDEXER_MAX_BLOCK_RANGE` (default 200) sets the range, and the indexer warns when a public chain would be scanned from block 0. Checked against the public RPC.
+- [x] **Running against the testnet:** `npm run dev:testnet` runs the API with `.env.base-sepolia`.
+
+**Waiting on funding** (owner): Base Sepolia ETH for the deployer and relayer, and Circle test USDC for the test payer. Then:
+
+1. Deploy the contract and verify it on Basescan.
 2. Point the backend at Base Sepolia, Circle's test USDC and the Xendit sandbox; expose the webhook through a tunnel. First run `npm run xendit:sandbox` (balance, THB channels, one test payout) with the owner's test key.
 3. End-to-end test: a 100 THB payment settles with a Xendit reference, a forced payout failure refunds, and a forced UNKNOWN shows on the operator page.
 
