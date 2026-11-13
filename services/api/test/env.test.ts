@@ -33,4 +33,10 @@ describe('loadEnv', () => {
     expect(() => testEnv({ PAYOUT_TEST_DESTINATIONS: 'not json' })).toThrow(/JSON map/);
   });
 
+  it('reads THB thresholds as satang', () => {
+    const env = testEnv({ PAYOUT_FLOAT_BUFFER_THB: '5000.50', OPS_MIN_PAYOUT_FLOAT_THB: '100' });
+    expect(env.PAYOUT_FLOAT_BUFFER_THB).toBe(500_050n);
+    expect(env.OPS_MIN_PAYOUT_FLOAT_THB).toBe(10_000n);
+    expect(() => testEnv({ PAYOUT_FLOAT_BUFFER_THB: 'lots' })).toThrow(/THB amount/);
+  });
 });

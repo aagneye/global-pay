@@ -70,6 +70,8 @@ export interface SettlementGateway {
   getPaymentReceivedEvents(fromBlock: bigint, toBlock: bigint): Promise<PaymentReceivedEvent[]>;
   getPaymentStatus(quoteId: Hex): Promise<OnChainPaymentStatus>;
   getTokenBalance(token: Address, owner: Address): Promise<bigint>;
+  /** The relayer's address and ETH balance (wei), for the low-gas alert; null without a relayer key. */
+  getRelayerBalance(): Promise<{ address: Address; wei: bigint } | null>;
   /** The token's EIP-712 domain. Read from the chain because name/version differ per network. */
   getTokenDomain(token: Address): Promise<{ name: string; version: string }>;
 }

@@ -253,6 +253,14 @@ describe.skipIf(!url)('Prisma repositories (Postgres)', () => {
     await expect(repos.payouts.transition(payment.id, 'PENDING', 'UNKNOWN', { unknownSince })).resolves.toBe(true);
     await expect(repos.payouts.transition(payment.id, 'FAILED', 'PENDING')).rejects.toThrow(/cannot move/);
     expect(await repos.payouts.listByStatus(['UNKNOWN'], 10)).toHaveLength(1);
+    expect((await repos.payouts.listNeedingAttention(10)).map((p) => p.paymentId)).toEqual([payment.id]);
+    await expect(repos.payouts.countByStatus()).resolves.toEqual({
+      PENDING: 0,
+      SUCCEEDED: 0,
+      FAILED: 0,
+      UNKNOWN: 1,
+      REVERSED: 0,
+    });
 
     await repos.payouts.transition(payment.id, 'UNKNOWN', 'SUCCEEDED', {
       providerReference: 'BANKREF123',
@@ -263,6 +271,7 @@ describe.skipIf(!url)('Prisma repositories (Postgres)', () => {
     expect(settled).toMatchObject({ status: 'SUCCEEDED', providerRef: 'po-1', providerReference: 'BANKREF123' });
     expect(settled?.unknownSince).toBeUndefined();
     expect(settled?.lastError).toBeUndefined();
+    await expect(repos.payouts.listNeedingAttention(10)).resolves.toEqual([]);
 
     await repos.payouts.recordEvent(payment.id, { source: 'create', providerStatus: 'ACCEPTED', payload: { amount: 1n } });
     await repos.payouts.recordEvent(payment.id, { source: 'webhook', providerStatus: 'SUCCEEDED', payload: { ok: true } });

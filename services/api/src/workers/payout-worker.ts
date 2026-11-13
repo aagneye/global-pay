@@ -90,9 +90,16 @@ export class PayoutWorker {
     // PENDING: wait. UNKNOWN or REVERSED: an operator decides (see /ops).
   }
 
+  /** Records the final status, and clears the error shown to operators. */
+  private async finish(paymentId: string, target: 'SETTLED' | 'REFUNDED', fields: { failureReason?: string }): Promise<void> {
+    if (await this.deps.payments.transition(paymentId, 'PAYOUT_PENDING', target, fields)) {
+      await this.deps.payouts.update(paymentId, { lastError: null });
+    }
+  }
+
   /** markSettled or refund on-chain, then record it once the transaction is in a block. */
   private async resolve(payment: Payment, action: Resolution, reason?: string): Promise<void> {
-    const { gateway, payments } = this.deps;
+    const { gateway } = this.deps;
     const target = action === 'settle' ? 'SETTLED' : 'REFUNDED';
     const onChainTarget = action === 'settle' ? 'Settled' : 'Refunded';
     const field = action === 'settle' ? 'settleTxHash' : 'refundTxHash';
@@ -103,7 +110,7 @@ export class PayoutWorker {
       const receipt = await gateway.getReceipt(sentBefore);
       if (!receipt) return; // still pending
       if (receipt.status === 'success') {
-        await payments.transition(payment.id, 'PAYOUT_PENDING', target, done);
+        await this.finish(payment.id, target, done);
         return;
       }
       // Reverted: check the contract below before trying again.
@@ -112,7 +119,7 @@ export class PayoutWorker {
     const onChain = await gateway.getPaymentStatus(payment.quoteId);
     if (onChain === onChainTarget) {
       // Done already, e.g. by a run that crashed before saving the transaction hash.
-      await payments.transition(payment.id, 'PAYOUT_PENDING', target, done);
+      await this.finish(payment.id, target, done);
       return;
     }
     if (onChain !== 'Paid') {
@@ -122,10 +129,10 @@ export class PayoutWorker {
     }
 
     const txHash = action === 'settle' ? await gateway.markSettled(payment.quoteId) : await gateway.refund(payment.quoteId);
-    await payments.update(payment.id, { [field]: txHash });
+    await this.deps.payments.update(payment.id, { [field]: txHash });
     const receipt = await gateway.waitForReceipt(txHash);
     if (receipt.status === 'success') {
-      await payments.transition(payment.id, 'PAYOUT_PENDING', target, done);
+      await this.finish(payment.id, target, done);
       this.log.info({ paymentId: payment.id, txHash, status: target }, 'payment resolved on-chain');
     } else {
       this.log.warn({ paymentId: payment.id, txHash, action }, 'transaction reverted; will check again');

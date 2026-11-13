@@ -104,6 +104,28 @@ export const envSchema = z.object({
       }
     }),
 
+  // Operations
+  /** Bearer token for /ops (at least 32 characters). Without it, /ops is off. */
+  OPS_API_TOKEN: z.string().min(32, 'OPS_API_TOKEN must be at least 32 characters').optional(),
+  /** An UNKNOWN payout older than this is shown as needing an operator. */
+  OPS_ESCALATE_AFTER_MS: z.coerce.number().int().min(0).default(30 * 60_000),
+  /** An operator can approve a refund only after the payout has been UNKNOWN this long. */
+  OPS_REFUND_COOLOFF_MS: z.coerce.number().int().min(0).default(60 * 60_000),
+  /** Alert when the relayer has less than this much ETH. */
+  OPS_MIN_RELAYER_ETH: z.string().regex(/^\d+(\.\d+)?$/).default('0.005'),
+  /** Alert when the payout float is below this (THB). */
+  OPS_MIN_PAYOUT_FLOAT_THB: z
+    .string()
+    .default('0')
+    .transform((value, ctx) => {
+      const minor = parseDecimal(value, FIAT_DECIMALS.THB);
+      if (minor === null) {
+        ctx.addIssue({ code: 'custom', message: 'OPS_MIN_PAYOUT_FLOAT_THB must be a THB amount, e.g. 5000 or 5000.00' });
+        return z.NEVER;
+      }
+      return minor;
+    }),
+
   INDEXER_POLL_MS: z.coerce.number().int().min(200).default(4_000),
   INDEXER_CONFIRMATIONS: z.coerce.number().int().min(0).default(2),
   /** First block to index: the settlement contract's deployment block. */

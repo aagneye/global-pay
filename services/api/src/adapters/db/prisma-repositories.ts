@@ -2,6 +2,7 @@ import { PrismaPg } from '@prisma/adapter-pg';
 import { type Address, type Hex, getAddress } from 'viem';
 import type { FiatCurrency } from '../../domain/money.js';
 import {
+  PAYOUT_STATUSES,
   type Payment,
   type PaymentStatus,
   type Payout,
@@ -351,6 +352,22 @@ export class PrismaPayoutRepository implements PayoutRepository {
       take: limit,
     });
     return rows.map(toPayout);
+  }
+
+  async listNeedingAttention(limit: number): Promise<Payout[]> {
+    const rows = await this.prisma.payout.findMany({
+      where: { OR: [{ status: { in: ['UNKNOWN', 'REVERSED'] } }, { lastError: { not: null } }] },
+      orderBy: { createdAt: 'asc' },
+      take: limit,
+    });
+    return rows.map(toPayout);
+  }
+
+  async countByStatus(): Promise<Record<PayoutStatus, number>> {
+    const groups = await this.prisma.payout.groupBy({ by: ['status'], _count: { _all: true } });
+    const counts = Object.fromEntries(PAYOUT_STATUSES.map((status) => [status, 0])) as Record<PayoutStatus, number>;
+    for (const group of groups) counts[group.status] = group._count._all;
+    return counts;
   }
 
   async recordEvent(paymentId: string, event: Omit<PayoutEvent, 'paymentId' | 'createdAt'>): Promise<void> {

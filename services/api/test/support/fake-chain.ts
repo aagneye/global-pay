@@ -96,6 +96,14 @@ export class FakeChain implements SettlementGateway {
     return this.balances.get(owner.toLowerCase()) ?? 0n;
   }
 
+  /** The relayer's ETH, in wei; null to act as if there's no relayer key. */
+  relayerWei: bigint | null = 10n ** 18n;
+
+  async getRelayerBalance(): Promise<{ address: Address; wei: bigint } | null> {
+    if (this.relayerWei === null) return null;
+    return { address: '0x00000000000000000000000000000000000000aa', wei: this.relayerWei };
+  }
+
   async getTokenDomain(): Promise<{ name: string; version: string }> {
     return { name: 'USDC', version: '2' };
   }

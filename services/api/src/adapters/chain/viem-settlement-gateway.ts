@@ -152,6 +152,12 @@ export class ViemSettlementGateway implements SettlementGateway {
     return this.read(() => this.client.readContract({ address: token, abi: erc20Abi, functionName: 'balanceOf', args: [owner] }));
   }
 
+  async getRelayerBalance(): Promise<{ address: Address; wei: bigint } | null> {
+    if (!this.relayerPrivateKey) return null;
+    const { address } = privateKeyToAccount(this.relayerPrivateKey);
+    return { address, wei: await this.read(() => this.client.getBalance({ address })) };
+  }
+
   /**
    * Reads `name()` and `version()` from the token. USDC's values differ between networks
    * (and the mock's match Base Sepolia's), so they're never hardcoded. Cached per token;

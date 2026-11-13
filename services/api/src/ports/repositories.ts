@@ -99,6 +99,9 @@ export interface PayoutRepository {
   transition(paymentId: string, from: PayoutStatus, to: PayoutStatus, fields?: PayoutFields): Promise<boolean>;
   /** Oldest first. */
   listByStatus(statuses: readonly PayoutStatus[], limit: number): Promise<Payout[]>;
+  /** UNKNOWN or REVERSED payouts, and any with an error recorded. Oldest first. */
+  listNeedingAttention(limit: number): Promise<Payout[]>;
+  countByStatus(): Promise<Record<PayoutStatus, number>>;
   recordEvent(paymentId: string, event: Omit<PayoutEvent, 'paymentId' | 'createdAt'>): Promise<void>;
   /** Newest first. */
   listEvents(paymentId: string, limit: number): Promise<PayoutEvent[]>;

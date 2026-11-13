@@ -105,6 +105,15 @@ export class PayoutTracker {
     return this.apply(payout, result, source);
   }
 
+  /**
+   * Asks the partner about a payout without ever creating it: by its partner ID if it has one, else by
+   * idempotency key. null means the partner has no such payout. Used by operator actions.
+   */
+  async lookup(payout: Payout): Promise<PayoutResult | null> {
+    const { provider } = this.deps;
+    return payout.providerRef ? provider.getPayout(payout.providerRef) : provider.findByIdempotencyKey(payout.idempotencyKey);
+  }
+
   /** A webhook arrived: find the payout, re-fetch it from the partner (webhooks aren't trusted alone), apply. */
   async onWebhook(ref: PayoutWebhookRef, payload: unknown): Promise<'applied' | 'ignored'> {
     const { payouts, provider } = this.deps;
@@ -151,6 +160,13 @@ export class PayoutTracker {
             unknownSince: null,
             nextCheckAt: null,
             lastError: null,
+          });
+        } else if (payout.status === 'FAILED') {
+          // Paid after we gave up on it: the user may have been refunded too. An operator must look.
+          await payouts.update(payout.paymentId, {
+            ...seen,
+            providerReference: result.reference,
+            lastError: 'Partner reports this payout as paid, but it was treated as failed',
           });
         } else {
           await payouts.update(payout.paymentId, seen);

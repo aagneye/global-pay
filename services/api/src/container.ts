@@ -1,3 +1,4 @@
+import { parseEther } from 'viem';
 import { ViemQuoteSigner } from './adapters/chain/viem-quote-signer.js';
 import { ViemSettlementGateway } from './adapters/chain/viem-settlement-gateway.js';
 import { createPrismaClient, createPrismaRepositories } from './adapters/db/prisma-repositories.js';
@@ -12,6 +13,7 @@ import { AccountService } from './modules/account/service.js';
 import { AuthService } from './modules/auth/service.js';
 import { AccessTokens } from './modules/auth/tokens.js';
 import { KycService } from './modules/kyc/service.js';
+import { OpsService } from './modules/ops/service.js';
 import { PayoutTracker } from './modules/payouts/payout-tracker.js';
 import { PaymentService } from './modules/payments/service.js';
 import { QuoteService } from './modules/quotes/service.js';
@@ -36,6 +38,8 @@ export interface Adapters {
 
 export interface Container {
   tokens: AccessTokens;
+  /** OPS_API_TOKEN: without it, the operator console is off. */
+  opsToken: string | undefined;
   services: {
     auth: AuthService;
     kyc: KycService;
@@ -43,6 +47,7 @@ export interface Container {
     payments: PaymentService;
     account: AccountService;
     payouts: PayoutTracker;
+    ops: OpsService;
   };
   workers: {
     indexer: IndexerWorker;
@@ -105,6 +110,7 @@ export function buildContainer(env: Env, overrides: Partial<Adapters> = {}): Con
 
   return {
     tokens,
+    opsToken: env.OPS_API_TOKEN,
     services: {
       auth: new AuthService({
         users: repositories.users,
@@ -133,6 +139,18 @@ export function buildContainer(env: Env, overrides: Partial<Adapters> = {}): Con
       }),
       payments,
       payouts: payoutTracker,
+      ops: new OpsService({
+        payments: repositories.payments,
+        payouts: repositories.payouts,
+        actions: repositories.opsActions,
+        tracker: payoutTracker,
+        payoutRail: payoutProvider,
+        gateway,
+        escalateAfterMs: env.OPS_ESCALATE_AFTER_MS,
+        refundCooloffMs: env.OPS_REFUND_COOLOFF_MS,
+        minRelayerWei: parseEther(env.OPS_MIN_RELAYER_ETH),
+        minFloatMinor: env.OPS_MIN_PAYOUT_FLOAT_THB,
+      }),
       account: new AccountService({
         users: repositories.users,
         gateway,

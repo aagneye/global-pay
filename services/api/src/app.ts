@@ -14,6 +14,7 @@ import type { Container } from './container.js';
 import { accountRoutes } from './modules/account/routes.js';
 import { authRoutes } from './modules/auth/routes.js';
 import { kycRoutes } from './modules/kyc/routes.js';
+import { opsRoutes } from './modules/ops/routes.js';
 import { paymentRoutes } from './modules/payments/routes.js';
 import { payoutWebhookRoutes } from './modules/payouts/webhook-routes.js';
 import { quoteRoutes } from './modules/quotes/routes.js';
@@ -109,6 +110,7 @@ export async function buildApp({ container, logger = true }: BuildAppOptions): P
   await app.register(paymentRoutes, { payments: services.payments });
   await app.register(accountRoutes, { account: services.account });
   await app.register(payoutWebhookRoutes, { tracker: services.payouts });
+  await app.register(opsRoutes, { ops: services.ops, token: container.opsToken });
 
   return app;
 }

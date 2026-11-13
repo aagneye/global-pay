@@ -1,8 +1,10 @@
 import { type Address, type Hex, keccak256, toHex } from 'viem';
 import {
+  PAYOUT_STATUSES,
   type Payment,
   type Payout,
   type PayoutEvent,
+  type PayoutStatus,
   assertPayoutTransition,
   assertTransition,
 } from '../../src/domain/payment.js';
@@ -195,6 +197,18 @@ export function createMemoryRepositories() {
           .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime())
           .slice(0, limit)
           .map((p) => ({ ...p }));
+      },
+      async listNeedingAttention(limit) {
+        return [...payouts.values()]
+          .filter((p) => p.status === 'UNKNOWN' || p.status === 'REVERSED' || p.lastError !== undefined)
+          .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime())
+          .slice(0, limit)
+          .map((p) => ({ ...p }));
+      },
+      async countByStatus() {
+        const counts = Object.fromEntries(PAYOUT_STATUSES.map((status) => [status, 0])) as Record<PayoutStatus, number>;
+        for (const payout of payouts.values()) counts[payout.status]++;
+        return counts;
       },
       async recordEvent(paymentId, event) {
         if (!payouts.has(paymentId)) throw new Error(`no payout for ${paymentId}`);
