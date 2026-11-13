@@ -106,23 +106,42 @@ Two bugs that the fakes had hidden were found and fixed:
 
 A review of a similar app listed what separates a demo from a real product: a payout that is actually confirmed, a way to add money, tap payments with push, and production hardening. The research behind this plan (partners, endpoints, regulation) is in [research/production-rails.md](research/production-rails.md).
 
-## Iteration 6: Real payout confirmation and operations
+## Iteration 6: Real payout confirmation and operations ✅
 
-The payout stops being simulated and is checked properly. Built against the **Xendit** payouts sandbox; the simulated partner stays for local tests.
+The payout is now checked properly instead of trusted. It's built against the **Xendit** payouts sandbox; the simulated partner stays for local tests. The rules are in [ADR 0008](adr/0008-payout-outcomes-and-reconciliation.md).
 
-1. Payout outcomes: `PENDING`, `SUCCEEDED` (with the bank reference), `FAILED`, `UNKNOWN`, `REVERSED`. Every partner response and webhook is stored for audit.
-2. No double payout: one idempotency key per payout, saved before the partner is called; before a retry, look the payout up by that key.
-3. Settle only on SUCCEEDED with a reference; refund only on a definite failure. Anything unclear becomes UNKNOWN: re-checked with backoff, then handed to an operator.
-4. Quotes refuse QRs the payout partner can't pay, and refuse payments when the payout float is too low.
-5. Xendit webhook (re-fetched before acting), and an operator page: payments stuck or UNKNOWN, reversals, failed settle/refund transactions, low relayer gas, low float. Operator actions are limited and logged.
-6. The app shows "Merchant paid" only with the partner's reference, and "Needs review" for UNKNOWN.
+- [x] **Payout outcomes:** `PENDING`, `SUCCEEDED` (with the bank reference), `FAILED`, `UNKNOWN`, `REVERSED`. Every partner answer and webhook is stored as a `PayoutEvent`. Migration `20261113000000_payout_outcomes` backfills the idempotency key of existing payouts.
+- [x] **No double payout:** the idempotency key (the payment ID) is saved before the partner is called; before any retry, `PayoutTracker` looks the payout up by that key.
+- [x] **Settle and refund rules:** settle only on SUCCEEDED with a reference; refund only on a definite failure. Anything unclear becomes UNKNOWN: timeouts, 5xx errors, duplicates, a success with no reference, or still pending after 30 minutes. It is re-checked with backoff (30 s up to 1 h) and never settled or refunded automatically.
+- [x] **Quote guards:** quotes refuse QRs the rail can't pay (422 `merchant_not_supported`), and refuse payments when the partner's float would drop below the buffer or can't be read (503 `payouts_unavailable`).
+- [x] **`XenditPayoutProvider`** (v2 payouts):
+  - `Idempotency-key` header;
+  - lookup by `reference_id`;
+  - cached balance;
+  - sandbox test destinations (refused in production);
+  - constant-time webhook token check.
+- [x] **Webhook:** `POST /webhooks/payouts/:partner` re-fetches the payout before acting.
+- [x] **Operator console** at `/ops`, behind its own token:
+  - exceptions (stuck PAID, UNKNOWN, escalated UNKNOWN, reversals, partner errors, failing settle or refund, conflicts);
+  - health (relayer gas, payout float);
+  - actions: re-check, mark paid (needs a reference), approve refund (after a cooling-off period, and only if the partner has no record). Each action re-checks the partner first and is written to the `OpsAction` audit log.
+- [x] **API and app:** `Payment.payout {status, provider, reference}`. The app shows "Merchant paid" with the bank reference only for SUCCEEDED, and "Needs review" for UNKNOWN or REVERSED.
 
-**Done when:** tests cover every partner status, crash retries and UNKNOWN; the anvil integration test covers UNKNOWN → operator → settled; a sandbox smoke test pays, fails and shows exceptions.
+**Result:** 223 backend tests pass, against Postgres (`prisma dev`) and anvil. They cover:
+- every Xendit status, timeouts, 5xx errors and duplicates;
+- the retry that looks up before creating;
+- UNKNOWN never settling or refunding;
+- deadline and backoff;
+- webhook re-fetch, reversal and operator rules.
+
+The anvil integration test now covers UNKNOWN → operator marks paid → settled on-chain. 49 app tests pass, including "Needs review".
+
+**Not done yet:** the Xendit sandbox smoke run. `npm run xendit:sandbox` is ready but needs the owner's Xendit test key; it moves to iteration 7, with the webhook tunnel.
 
 ## Iteration 7: Base Sepolia
 
 1. Generate testnet keys and fund the deployer and relayer with Base Sepolia ETH. Then deploy the contract and verify it on Basescan.
-2. Point the backend at Base Sepolia, Circle's test USDC and the Xendit sandbox; expose the webhook through a tunnel.
+2. Point the backend at Base Sepolia, Circle's test USDC and the Xendit sandbox; expose the webhook through a tunnel. First run `npm run xendit:sandbox` (balance, THB channels, one test payout) with the owner's test key.
 3. End-to-end test: a 100 THB payment settles with a Xendit reference, a forced payout failure refunds, and a forced UNKNOWN shows on the operator page.
 
 **Done when:** all three are visible on Basescan and the operator page.

@@ -4,14 +4,14 @@ The GlobalPay backend (TypeScript, Node 22). It does five jobs:
 - signs quotes for PromptPay QR payments;
 - relays the user's signed USDC authorisation to the settlement contract;
 - indexes on-chain payment events;
-- drives the (simulated) baht payout;
+- drives the baht payout (simulated, or Xendit's sandbox);
 - settles or refunds each payment.
 
 Stack: Fastify, zod (validation and OpenAPI), viem, Prisma 7 (Postgres), jose (JWT), vitest.
 
 ## Status
 
-Iterations 3 (backend core) and 4 (settlement loop) are done. These work:
+Iterations 3 (backend core), 4 (settlement loop) and 6 (payout confirmation and operations) are done. These work:
 
 | Route | What it does |
 |---|---|
@@ -19,11 +19,13 @@ Iterations 3 (backend core) and 4 (settlement loop) are done. These work:
 | `POST /kyc/start`, `GET /kyc/status` | Mock KYC: approved at tier 1, with spending limits |
 | `POST /quotes` | Parses a PromptPay QR, checks limits, prices it at the live rate plus the spread, and returns an EIP-712-signed quote plus the USDC authorisation for the wallet to sign |
 | `POST /payments` | Checks the user's signed USDC authorisation, relays `pay()`, and returns `202 SUBMITTED` |
-| `GET /payments/:id`, `GET /me/payments` | Status (SUBMITTED → PAID → PAYOUT_PENDING → SETTLED / REFUNDED, or FAILED) with explorer links |
+| `GET /payments/:id`, `GET /me/payments` | Status (SUBMITTED → PAID → PAYOUT_PENDING → SETTLED / REFUNDED, or FAILED) with explorer links, plus the payout's status and bank reference |
 | `GET /me/balance` | The wallet's USDC balance, read from the chain |
 | `GET /docs` | OpenAPI docs (spec at `/docs/json`) |
+| `POST /webhooks/payouts/:partner` | Partner status webhooks: token checked, then the payout is re-fetched before anything changes |
+| `/ops`, `/ops/api/*` | Operator console (with `OPS_API_TOKEN`): exceptions, health, re-check, mark paid, approve refund |
 
-In the background, the **indexer** marks payments PAID from on-chain events. The **payout worker** then pays the merchant through the simulated partner and settles or refunds on-chain. See [docs/architecture.md](../../docs/architecture.md#settlement-loop) and [docs/roadmap.md](../../docs/roadmap.md).
+In the background, the **indexer** marks payments PAID from on-chain events. The **payout worker** then pays the merchant through the payout partner and settles or refunds on-chain. An unclear payout outcome is never settled or refunded automatically; it waits for the partner or an operator ([ADR 0008](../../docs/adr/0008-payout-outcomes-and-reconciliation.md)). See [docs/architecture.md](../../docs/architecture.md#settlement-loop) and [docs/roadmap.md](../../docs/roadmap.md).
 
 ## Layout
 
@@ -39,16 +41,18 @@ src/
     db/               Prisma repositories
     chain/            viem quote signer, settlement gateway and relayer
     rates/            Coinbase public feed, fixed rate
-    kyc/, payouts/    mock KYC, simulated PromptPay payout
+    kyc/              mock KYC
+    payouts/          simulated PromptPay partner, Xendit payouts (sandbox)
   lib/promptpay/      EMVCo PromptPay parser and builder (shared vectors in packages/fixtures)
   lib/typed-data.ts   EIP-712 types shared with the contracts (Quote, ReceiveWithAuthorization)
   modules/<feature>/  routes.ts (HTTP schemas) and service.ts (use case):
-                      auth, kyc, quotes, payments, account
+                      auth, kyc, quotes, payments, account, ops (operator console)
+  modules/payouts/    PayoutTracker (partner answers → payout status, shared by worker, webhook and ops)
   workers/            indexer (chain events) and payout worker (pay out, then settle or refund)
   shared/             errors, zod schemas, auth hook
   generated/prisma/   Prisma client (generated on npm install, gitignored)
 prisma/               schema and migrations
-scripts/              developer tools (demo QR generator)
+scripts/              developer tools (demo QR generator, Xendit sandbox check, OpenAPI export)
 test/                 vitest tests; test/support has the test app, in-memory repositories and anvil constants
 ```
 
@@ -106,6 +110,26 @@ It needs Foundry. It finds `anvil` and `forge` in `$FOUNDRY_BIN`, then `~/.found
    7. `POST /payments`;
    8. poll `GET /payments/{id}` until it's SETTLED.
 5. With `INDEXER_CONFIRMATIONS=0` (anvil only mines when there's a transaction), it settles in a few seconds. Set `PAYOUT_FAILURE_RATE=1` to see a refund.
+
+## Payouts and the operator console
+
+`PAYOUT_PROVIDER` picks the partner:
+- **`simulated`** (the default): no money moves.
+  - `PAYOUT_FAILURE_RATE=1` forces refunds.
+  - `PAYOUT_UNKNOWN_RATE=1` makes every outcome unclear, so you can try the operator flow.
+- **`xendit`**: Xendit payouts, with **test-mode keys only**.
+  1. Run `npm run xendit:sandbox` with `XENDIT_SECRET_KEY` set. It shows your THB balance and payout channels.
+  2. Set `XENDIT_PROMPTPAY_CHANNEL`, or map the demo QRs to test accounts with `PAYOUT_TEST_DESTINATIONS`.
+  3. `npm run xendit:sandbox -- pay <channel> <account> <amount>` sends one test payout through the adapter.
+  4. For webhooks, expose the API (e.g. with a tunnel), then set `<url>/webhooks/payouts/xendit` and `XENDIT_CALLBACK_TOKEN` in the Xendit dashboard.
+
+Set `OPS_API_TOKEN` (32+ characters) and open `http://localhost:3000/ops`. Enter your name and the token. The page lists everything that needs a person:
+- unclear (UNKNOWN) or reversed payouts;
+- stuck payments;
+- partner errors;
+- settlements that keep failing.
+
+It also shows the relayer's gas and the payout float. Its actions (re-check, mark paid with a bank reference, approve refund) each re-check the partner first, and each is recorded in the audit log ([ADR 0008](../../docs/adr/0008-payout-outcomes-and-reconciliation.md)).
 
 ## Conventions
 

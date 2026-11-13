@@ -120,13 +120,16 @@ sequenceDiagram
   B->>C: pay(quote, quoteSignature, auth) (relayer pays gas)
   C->>T: receiveWithAuthorization(payer to contract)
   C-->>B: PaymentReceived event (read by indexer)
-  B->>X: createPayout(merchant, THB)
-  alt payout succeeds
+  B->>X: createPayout(merchant, THB, idempotency key)
+  alt payout succeeds (with a bank reference)
     X-->>B: succeeded
     B->>C: markSettled(quoteId), USDC to treasury
-  else payout fails
+  else payout definitely fails
     X-->>B: failed
     B->>C: refund(quoteId), USDC back to payer
+  else outcome unclear
+    X-->>B: timeout or unknown
+    B->>B: UNKNOWN: re-check with backoff, then an operator decides
   end
   A->>B: GET /payments/:id (polling)
   B-->>A: SETTLED or REFUNDED + explorer links
@@ -166,14 +169,23 @@ Three parts of the backend move a payment along. Each pass is safe to repeat aft
 |---|---|---|
 | **Relayer** | `src/adapters/chain/relayer.ts` | Sends `pay`, `markSettled` and `refund` from the operator key. It simulates each call first: a revert becomes `TransactionRejectedError`, decoded to the contract's error name (e.g. `ERC20InsufficientBalance`), and nothing is sent. Calls are queued with a tracked nonce, re-read from the node when wrong. It signs locally, so after a timeout it can resend the same bytes safely. |
 | **Indexer** | `src/workers/indexer.ts` | Every `INDEXER_POLL_MS`, reads `PaymentReceived` from its saved block cursor (`INDEXER_START_BLOCK` the first time) up to `INDEXER_CONFIRMATIONS` behind the head, in chunks of 2,000 blocks, and moves payments SUBMITTED → PAID. It also tracks a payment someone else relayed, since `pay()` is permissionless. It then reconciles SUBMITTED payments: a reverted `pay()` becomes FAILED, and so does one that didn't land within a minute after its quote expired (checked against `paymentOf`). |
-| **Payout worker** | `src/workers/payout-worker.ts` | Every `PAYOUT_POLL_MS`: PAID → creates the payout → PAYOUT_PENDING → asks the partner, then polls it. On success it calls `markSettled`; on failure, `refund`, saving the partner's reason. Before sending, it reads `paymentOf` and records a result that's already on-chain instead of sending again. |
+| **Payout worker** | `src/workers/payout-worker.ts` | Every `PAYOUT_POLL_MS`: PAID → stores the payout and its idempotency key → PAYOUT_PENDING → asks the partner through `PayoutTracker` (looking the payout up before any re-create). Only a SUCCEEDED payout with a reference leads to `markSettled`, and only a definite FAILED to `refund`. UNKNOWN waits for the partner or an operator ([ADR 0008](adr/0008-payout-outcomes-and-reconciliation.md)). Before sending, it reads `paymentOf` and records a result that's already on-chain instead of sending again. |
 
 `POST /payments` returns `202` with status SUBMITTED right after sending. The app polls `GET /payments/:id` until SETTLED, REFUNDED or FAILED. Each response links the transactions on `EXPLORER_URL`.
 
-The simulated partner (`SimulatedPromptPayProvider`) keeps no state:
-- its reference encodes the payment ID and start time;
-- a payout resolves after `PAYOUT_DELAY_MS`;
-- whether it fails depends only on the payment ID and `PAYOUT_FAILURE_RATE` (1 fails every payout).
+The payout partner is chosen by `PAYOUT_PROVIDER`:
+- **`SimulatedPromptPayProvider`** keeps almost no state:
+  - its reference encodes the idempotency key and start time;
+  - a payout resolves after `PAYOUT_DELAY_MS`;
+  - whether it fails, or stays unclear, depends only on the key and on `PAYOUT_FAILURE_RATE` / `PAYOUT_UNKNOWN_RATE`.
+- **`XenditPayoutProvider`** calls Xendit's v2 payouts in the sandbox:
+  - an `Idempotency-key` on every create;
+  - lookup by `reference_id`;
+  - a constant-time webhook token check.
+
+  Timeouts and 5xx errors become UNKNOWN, never FAILED.
+
+Partner webhooks (`POST /webhooks/payouts/:partner`) and the operator console (`/ops`) use the same `PayoutTracker` as the worker. A webhook only triggers a re-fetch from the partner. Quotes are refused up front when the rail can't pay the QR type (422 `merchant_not_supported`) or the partner's float is too low (503 `payouts_unavailable`).
 
 ## Signatures
 
@@ -265,7 +277,9 @@ The signature check is offline, which covers ordinary wallets (EOAs), including 
 | `SiweNonce` | One-time nonces for Sign-In with Ethereum |
 | `Quote` | Signed quote, raw QR payload, rate, spread, expiry |
 | `Payment` | Lifecycle status, transaction hashes (`pay`, `settle`, `refund`), and why it failed or was refunded |
-| `Payout` | Partner reference, status, attempts, failure reason |
+| `Payout` | Status (PENDING, SUCCEEDED, FAILED, UNKNOWN, REVERSED), idempotency key, partner ID and bank reference, attempts, next check, last error |
+| `PayoutEvent` | Every partner answer and webhook, for audit |
+| `OpsAction` | Operator actions: who, what, why |
 | `IndexerCursor` | Last processed block per contract and chain |
 
 All money is stored as integers in minor units: USDC base units (6 decimals) and THB satang (2 decimals). Exchange rates are fixed-point integers scaled by 1e8 (`rateE8`).
@@ -285,6 +299,8 @@ All money is stored as integers in minor units: USDC base units (6 decimals) and
 | GET | `/me/balance` | USDC balance, read from the chain | 4 ✅ |
 | GET | `/me/payments` | Payment history, newest first | 4 ✅ |
 | GET | `/docs`, `/docs/json` | OpenAPI docs and spec | 3 ✅ |
+| POST | `/webhooks/payouts/:partner` | Partner webhooks (not in the app's spec) | 6 ✅ |
+| GET, POST | `/ops`, `/ops/api/*` | Operator console, with `OPS_API_TOKEN` (not in the app's spec) | 6 ✅ |
 
 Each route declares zod schemas. The same schemas validate requests, shape responses, and generate the OpenAPI spec. Every operation has an `operationId`, and the main schemas have names (`QuoteResponse`, `Payment`, …), so generated clients get readable methods and classes.
 
@@ -303,7 +319,9 @@ Errors are `{ "error": "<code>", "message": "…" }` with a stable code, for exa
 - **Received-amount check:** `pay` reverts with `UnexpectedTokenTransfer` unless the contract received exactly the quoted amount.
 - **Exact money maths:** amounts are integers everywhere and never floating point, and token amounts round up. Even the rate feed's decimal strings are parsed without floats.
 - **No sign-in replay:** each sign-in nonce is bound to one address and consumed atomically, after the signature is checked, so nobody can use up another wallet's nonce.
-- **Testnet keys only:** keys live in a gitignored `.env` and are never committed.
+- **Payout safety:** an idempotency key stored before calling the partner, lookup before any retry, settle only with a reference, refund only on a definite failure, webhooks re-fetched before use ([ADR 0008](adr/0008-payout-outcomes-and-reconciliation.md)).
+- **Operator actions are constrained and audited:** a separate token, allowed only from UNKNOWN, partner re-checked first, a cooling-off period before refunds, every action logged.
+- **Testnet keys only:** keys live in a gitignored `.env` and are never committed. The Xendit sandbox script refuses live keys, and `PAYOUT_TEST_DESTINATIONS` is refused in production.
 
 ## Configuration
 
