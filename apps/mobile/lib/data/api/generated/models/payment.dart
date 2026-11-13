@@ -5,6 +5,7 @@
 import 'package:json_annotation/json_annotation.dart';
 
 import 'payment_merchant.dart';
+import 'payment_payout.dart';
 import 'payment_status.dart';
 import 'payment_transactions.dart';
 
@@ -25,6 +26,7 @@ class Payment {
     required this.quoteExpiresAt,
     required this.createdAt,
     required this.updatedAt,
+    this.payout,
     this.failureReason,
   });
   
@@ -45,6 +47,7 @@ class Payment {
   final String tokenAmount;
   final PaymentMerchant merchant;
   final PaymentTransactions transactions;
+  final PaymentPayout? payout;
   final String? failureReason;
   final DateTime quoteExpiresAt;
   final DateTime createdAt;

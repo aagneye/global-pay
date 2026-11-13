@@ -49,6 +49,7 @@ class PaymentTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final color = switch (payment.status) {
+      _ when payment.needsReview => theme.colorScheme.error,
       PaymentStatus.settled => theme.colorScheme.primary,
       PaymentStatus.failed || PaymentStatus.refunded => theme.colorScheme.error,
       _ => theme.colorScheme.tertiary,
@@ -64,7 +65,7 @@ class PaymentTile extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.end,
         children: [
           Text(payment.fiatAmount.format(), style: theme.textTheme.titleSmall),
-          Text(payment.status.label, style: theme.textTheme.labelSmall?.copyWith(color: color)),
+          Text(payment.statusLabel, style: theme.textTheme.labelSmall?.copyWith(color: color)),
         ],
       ),
     );

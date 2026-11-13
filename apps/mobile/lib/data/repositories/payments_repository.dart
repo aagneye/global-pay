@@ -96,5 +96,13 @@ Payment paymentFromDto(dto.Payment response) {
     payTx: link(response.transactions.pay),
     settleTx: link(response.transactions.settle),
     refundTx: link(response.transactions.refund),
+    payout: switch (response.payout) {
+      null => null,
+      final payout => Payout(
+        status: PayoutStatus.fromApi(payout.status.json),
+        provider: payout.provider,
+        reference: payout.reference,
+      ),
+    },
   );
 }

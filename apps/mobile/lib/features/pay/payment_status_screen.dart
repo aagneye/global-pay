@@ -12,6 +12,9 @@ import 'package:globalpay/features/home/account_providers.dart';
 /// How often to check a payment that isn't final yet.
 const statusPollInterval = Duration(seconds: 1);
 
+/// How often to check a payment people are reviewing: that takes minutes, not seconds.
+const reviewPollInterval = Duration(seconds: 10);
+
 /// Follows a payment until it's SETTLED, REFUNDED or FAILED.
 class PaymentStatusScreen extends ConsumerStatefulWidget {
   const PaymentStatusScreen({super.key, required this.paymentId});
@@ -57,7 +60,7 @@ class _PaymentStatusScreenState extends ConsumerState<PaymentStatusScreen> {
       setState(() => _error = error);
     }
     // Keep polling after errors too: a dropped connection shouldn't end the screen.
-    _timer = Timer(statusPollInterval, _poll);
+    _timer = Timer(_payment?.needsReview ?? false ? reviewPollInterval : statusPollInterval, _poll);
   }
 
   @override
@@ -81,6 +84,7 @@ class _PaymentStatusScreenState extends ConsumerState<PaymentStatusScreen> {
                         DetailRow('Merchant', payment.merchantName),
                         DetailRow('Merchant gets', payment.fiatAmount.format()),
                         DetailRow('You paid', payment.tokenAmount.format()),
+                        if (payment.payout?.reference case final reference?) DetailRow('Bank reference', reference),
                         if (payment.failureReason != null) DetailRow('Reason', payment.failureReason!),
                       ],
                     ),
@@ -129,12 +133,18 @@ class _Headline extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final (icon, color, text) = switch (payment.status) {
-      PaymentStatus.settled => (Icons.check_circle, theme.colorScheme.primary, 'Paid'),
+      _ when payment.needsReview => (Icons.support_agent, theme.colorScheme.error, 'Needs review'),
+      PaymentStatus.settled => (Icons.check_circle, theme.colorScheme.primary, 'Merchant paid'),
       PaymentStatus.refunded => (Icons.undo, theme.colorScheme.error, 'Refunded'),
       PaymentStatus.failed => (Icons.cancel, theme.colorScheme.error, 'Payment failed'),
       _ => (Icons.hourglass_top, theme.colorScheme.tertiary, 'Processing'),
     };
     final detail = switch (payment.status) {
+      _ when payment.payout?.status == PayoutStatus.reversed =>
+        "The merchant's bank returned the payment. We're looking into it and will contact you.",
+      _ when payment.needsReview =>
+        "We're confirming with our payout partner whether the merchant was paid. "
+            "You won't pay twice: if the merchant wasn't paid, your USDC comes back.",
       PaymentStatus.settled => 'The merchant received ${payment.fiatAmount.format()}.',
       PaymentStatus.refunded => 'The merchant payout failed, so your USDC was returned.',
       PaymentStatus.failed => 'No money moved.',

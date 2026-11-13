@@ -6,10 +6,14 @@ import 'package:dio/dio.dart';
 /// A canned GlobalPay backend for widget tests, plugged into Dio below the generated client.
 /// Responses follow packages/openapi/openapi.json.
 class FakeBackend implements HttpClientAdapter {
-  FakeBackend({this.balanceUnits = '10000000000', this.finalStatus = 'SETTLED'});
+  FakeBackend({this.balanceUnits = '10000000000', this.finalStatus = 'SETTLED', this.payoutStatus = 'PENDING'});
 
   final String balanceUnits;
   final String finalStatus;
+
+  /// The payout's status while the payment is PAYOUT_PENDING, e.g. UNKNOWN.
+  final String payoutStatus;
+  static const bankReference = 'SIM0A1B2C3D4E5F';
   final requests = <({String method, String path, Object? body, String? auth})>[];
   String kycStatus = 'NOT_STARTED';
   int _statusPolls = 0;
@@ -184,6 +188,18 @@ class FakeBackend implements HttpClientAdapter {
         if (status == 'REFUNDED')
           'refund': {'hash': '0x${'44' * 32}', 'url': 'https://explorer.test/tx/0x${'44' * 32}'},
       },
+      if (switch (status) {
+        'SETTLED' => 'SUCCEEDED',
+        'REFUNDED' => 'FAILED',
+        'PAYOUT_PENDING' => payoutStatus,
+        _ => null,
+      }
+          case final payout?)
+        'payout': {
+          'status': payout,
+          'provider': 'simulated-promptpay',
+          if (payout == 'SUCCEEDED') 'reference': bankReference,
+        },
       if (status == 'REFUNDED') 'failureReason': 'Simulated payout failure (PAYOUT_FAILURE_RATE)',
       'quoteExpiresAt': now,
       'createdAt': now,

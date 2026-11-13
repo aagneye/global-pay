@@ -1,4 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:globalpay/data/repositories/payments_repository.dart' show thb, usdc;
 import 'package:globalpay/domain/models/money.dart';
 import 'package:globalpay/domain/models/payment.dart';
 
@@ -29,6 +30,36 @@ void main() {
       expect(PaymentStatus.refunded.isTerminal, isTrue);
       expect(PaymentStatus.failed.isTerminal, isTrue);
       expect(PaymentStatus.paid.isTerminal, isFalse);
+    });
+  });
+
+  group('Payout', () {
+    Payment payment(PaymentStatus status, Payout? payout) => Payment(
+      id: 'p1',
+      quoteId: '0x01',
+      status: status,
+      fiatAmount: thb('25000'),
+      tokenAmount: usdc('7477454'),
+      merchantName: 'Cafe',
+      createdAt: DateTime(2026, 11, 13),
+      payout: payout,
+    );
+
+    test('maps backend names, and treats a new one as unknown', () {
+      expect(PayoutStatus.fromApi('SUCCEEDED'), PayoutStatus.succeeded);
+      expect(PayoutStatus.fromApi('REVERSED'), PayoutStatus.reversed);
+      expect(PayoutStatus.fromApi('SOMETHING_NEW'), PayoutStatus.unknown);
+      expect(PayoutStatus.fromApi(null), PayoutStatus.unknown);
+    });
+
+    test('labels an unclear or reversed payout "Needs review"', () {
+      const unclear = Payout(status: PayoutStatus.unknown, provider: 'xendit');
+      const reversed = Payout(status: PayoutStatus.reversed, provider: 'xendit');
+      const paid = Payout(status: PayoutStatus.succeeded, provider: 'xendit', reference: 'BANK-1');
+      expect(payment(PaymentStatus.payoutPending, unclear).statusLabel, 'Needs review');
+      expect(payment(PaymentStatus.settled, reversed).statusLabel, 'Needs review');
+      expect(payment(PaymentStatus.settled, paid).statusLabel, 'Merchant paid');
+      expect(payment(PaymentStatus.paid, null).statusLabel, 'Received');
     });
   });
 }

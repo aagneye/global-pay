@@ -21,6 +21,9 @@ Payment _$PaymentFromJson(Map<String, dynamic> json) => Payment(
   quoteExpiresAt: DateTime.parse(json['quoteExpiresAt'] as String),
   createdAt: DateTime.parse(json['createdAt'] as String),
   updatedAt: DateTime.parse(json['updatedAt'] as String),
+  payout: json['payout'] == null
+      ? null
+      : PaymentPayout.fromJson(json['payout'] as Map<String, dynamic>),
   failureReason: json['failureReason'] as String?,
 );
 
@@ -34,6 +37,7 @@ Map<String, dynamic> _$PaymentToJson(Payment instance) => <String, dynamic>{
   'tokenAmount': instance.tokenAmount,
   'merchant': instance.merchant,
   'transactions': instance.transactions,
+  'payout': ?instance.payout,
   'failureReason': ?instance.failureReason,
   'quoteExpiresAt': instance.quoteExpiresAt.toIso8601String(),
   'createdAt': instance.createdAt.toIso8601String(),

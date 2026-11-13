@@ -99,8 +99,10 @@ void main() {
     expect(submitted['validAfter'], '0');
     expect(submitted['signature'], matches(RegExp(r'^0x[0-9a-f]{130}$')));
 
-    await pumpUntil(tester, find.text('Paid'), maxFrames: 50);
-    expect(find.text('The merchant received ฿250.00.'), findsOneWidget);
+    await pumpUntil(tester, find.byKey(const Key('status-headline')), maxFrames: 50);
+    await pumpUntil(tester, find.text('The merchant received ฿250.00.'), maxFrames: 50);
+    expect(find.text('Merchant paid'), findsWidgets);
+    expect(find.text(FakeBackend.bankReference), findsOneWidget);
     expect(find.text('Settlement transaction'), findsOneWidget);
 
     await tap(tester, 'Done');
@@ -131,6 +133,32 @@ void main() {
     expect(find.text('The merchant payout failed, so your USDC was returned.'), findsOneWidget);
     expect(find.text('Simulated payout failure (PAYOUT_FAILURE_RATE)'), findsOneWidget);
     expect(find.text('USDC refunded'), findsOneWidget);
+  });
+
+  testWidgets('shows "Needs review", never "paid", while the payout outcome is unclear', (tester) async {
+    tester.view.physicalSize = const Size(1080, 2400);
+    tester.view.devicePixelRatio = 2.5;
+    addTearDown(tester.view.reset);
+    final backend = FakeBackend(finalStatus: 'PAYOUT_PENDING', payoutStatus: 'UNKNOWN')..kycStatus = 'APPROVED';
+    final store = MemorySecureStore();
+
+    await tester.pumpWidget(app(backend, store));
+    await pumpUntil(tester, find.text('Continue with dev wallet'));
+    await tap(tester, 'Continue with dev wallet');
+    await pumpUntil(tester, find.text('Scan & pay'));
+
+    await tap(tester, 'Scan & pay');
+    await pumpUntil(tester, find.byKey(const Key('qr-text')));
+    await tester.enterText(find.byKey(const Key('qr-text')), qr250);
+    await tap(tester, 'Continue');
+    await pumpUntil(tester, find.text('Pay 7.477454 USDC'));
+    await tap(tester, 'Pay 7.477454 USDC');
+
+    await pumpUntil(tester, find.text('Needs review'), maxFrames: 50);
+    expect(find.textContaining("You won't pay twice"), findsOneWidget);
+    expect(tester.widget<Text>(find.byKey(const Key('status-headline'))).data, 'Needs review');
+    expect(find.text('Bank reference'), findsNothing);
+    expect(find.text('Done'), findsNothing);
   });
 
   testWidgets('stays signed in across restarts', (tester) async {
