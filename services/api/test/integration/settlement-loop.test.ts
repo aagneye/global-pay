@@ -161,6 +161,43 @@ describe.skipIf(!anvilBin || !forgeBin)('settlement loop on anvil', () => {
     expect(await reader.getPaymentStatus(quote.quote.quoteId)).toBe('Refunded');
   }, 60_000);
 
+  it('holds an unclear payout until an operator confirms it, then settles', async () => {
+    const opsToken = 'integration-ops-token-0123456789abcdef';
+    const { app, container, reader, balance } = await stack({ PAYOUT_UNKNOWN_RATE: '1', OPS_API_TOKEN: opsToken });
+    const session = await signInVerified(app, PAYER_KEY);
+    const before = { treasury: await balance(TREASURY) };
+    const { quote, response } = await payQuote(app, session, PAYER_KEY, 120_00n);
+    const id: string = response.json().id;
+    const get = async () => (await app.inject({ method: 'GET', url: `/payments/${id}`, headers: session.auth })).json();
+
+    for (let i = 0; i < 5; i++) {
+      await container.workers.indexer.tick();
+      await container.workers.payouts.tick();
+    }
+    // Neither settled nor refunded: the USDC waits in the contract.
+    expect(await get()).toMatchObject({ status: 'PAYOUT_PENDING', payout: { status: 'UNKNOWN' } });
+    expect(await reader.getPaymentStatus(quote.quote.quoteId)).toBe('Paid');
+
+    const ops = { 'x-ops-token': opsToken };
+    const exceptions = (await app.inject({ method: 'GET', url: '/ops/api/exceptions', headers: ops })).json();
+    expect(exceptions.items).toEqual([expect.objectContaining({ kind: 'payout_unknown', paymentId: id })]);
+    const marked = await app.inject({
+      method: 'POST',
+      url: `/ops/api/payouts/${id}/mark-paid`,
+      headers: ops,
+      payload: { actor: 'integration', note: 'Partner support confirmed', reference: 'KBANK-INT-0001' },
+    });
+    expect(marked.statusCode).toBe(200);
+
+    await container.workers.payouts.tick();
+    expect(await get()).toMatchObject({
+      status: 'SETTLED',
+      payout: { status: 'SUCCEEDED', reference: 'KBANK-INT-0001' },
+    });
+    expect(await reader.getPaymentStatus(quote.quote.quoteId)).toBe('Settled');
+    expect(await balance(TREASURY)).toBe(before.treasury + BigInt(quote.quote.tokenAmount));
+  }, 60_000);
+
   it('rejects a payment the contract would revert, without sending it', async () => {
     const { app } = await stack();
     const brokeKey = generatePrivateKey(); // no USDC
