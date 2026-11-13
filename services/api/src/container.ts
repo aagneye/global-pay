@@ -3,6 +3,7 @@ import { ViemSettlementGateway } from './adapters/chain/viem-settlement-gateway.
 import { createPrismaClient, createPrismaRepositories } from './adapters/db/prisma-repositories.js';
 import { MockKycProvider } from './adapters/kyc/mock-kyc-provider.js';
 import { SimulatedPromptPayProvider } from './adapters/payouts/simulated-promptpay-provider.js';
+import { XenditPayoutProvider } from './adapters/payouts/xendit-provider.js';
 import { FixedRateProvider } from './adapters/rates/fixed-rate-provider.js';
 import { PublicFeedRateProvider } from './adapters/rates/public-feed-rate-provider.js';
 import type { Env } from './config/env.js';
@@ -82,13 +83,7 @@ export function buildContainer(env: Env, overrides: Partial<Adapters> = {}): Con
   const rates =
     overrides.rates ??
     (env.RATE_SOURCE === 'fixed' ? new FixedRateProvider(env.FIXED_USDC_THB_RATE) : new PublicFeedRateProvider());
-  const payoutProvider =
-    overrides.payouts ??
-    new SimulatedPromptPayProvider({
-      delayMs: env.PAYOUT_DELAY_MS,
-      failureRate: env.PAYOUT_FAILURE_RATE,
-      unknownRate: env.PAYOUT_UNKNOWN_RATE,
-    });
+  const payoutProvider = overrides.payouts ?? buildPayoutProvider(env);
   const payoutTracker = new PayoutTracker({
     payouts: repositories.payouts,
     provider: payoutProvider,
@@ -168,3 +163,20 @@ export function buildContainer(env: Env, overrides: Partial<Adapters> = {}): Con
   };
 }
 
+/** The payout partner chosen by PAYOUT_PROVIDER. */
+function buildPayoutProvider(env: Env): PayoutProvider {
+  if (env.PAYOUT_PROVIDER === 'xendit') {
+    return new XenditPayoutProvider({
+      secretKey: env.XENDIT_SECRET_KEY ?? '',
+      baseUrl: env.XENDIT_BASE_URL,
+      ...(env.XENDIT_CALLBACK_TOKEN ? { callbackToken: env.XENDIT_CALLBACK_TOKEN } : {}),
+      ...(env.XENDIT_PROMPTPAY_CHANNEL ? { promptPayChannelCode: env.XENDIT_PROMPTPAY_CHANNEL } : {}),
+      ...(env.PAYOUT_TEST_DESTINATIONS ? { testDestinations: env.PAYOUT_TEST_DESTINATIONS } : {}),
+    });
+  }
+  return new SimulatedPromptPayProvider({
+    delayMs: env.PAYOUT_DELAY_MS,
+    failureRate: env.PAYOUT_FAILURE_RATE,
+    unknownRate: env.PAYOUT_UNKNOWN_RATE,
+  });
+}

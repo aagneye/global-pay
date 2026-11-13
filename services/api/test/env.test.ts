@@ -20,4 +20,17 @@ describe('loadEnv', () => {
     expect(() => testEnv({ USDC_ADDRESS: '0x1234' })).toThrow(/USDC_ADDRESS/);
     expect(() => loadEnv({ JWT_SECRET: 'short' })).toThrow(/JWT_SECRET/);
   });
+
+  it('checks payout settings that only make sense together', () => {
+    expect(() => testEnv({ PAYOUT_PROVIDER: 'xendit' })).toThrow(/needs XENDIT_SECRET_KEY/);
+    const destinations = '{"099999999999901":{"channelCode":"TH_KBANK","accountNumber":"1","accountHolderName":"Cafe"}}';
+    const sandbox = testEnv({ PAYOUT_PROVIDER: 'xendit', XENDIT_SECRET_KEY: 'xnd_development_x', PAYOUT_TEST_DESTINATIONS: destinations });
+    expect(sandbox.PAYOUT_TEST_DESTINATIONS?.['099999999999901']?.channelCode).toBe('TH_KBANK');
+
+    const production = { NODE_ENV: 'production', PAYOUT_PROVIDER: 'xendit', XENDIT_SECRET_KEY: 'xnd_production_x' };
+    expect(() => testEnv({ ...production, PAYOUT_TEST_DESTINATIONS: destinations })).toThrow(/refused in production/);
+    expect(() => testEnv({ ...production, PAYOUT_PROVIDER: 'simulated' })).toThrow(/real payout partner/);
+    expect(() => testEnv({ PAYOUT_TEST_DESTINATIONS: 'not json' })).toThrow(/JSON map/);
+  });
+
 });

@@ -2,6 +2,11 @@ import { z } from 'zod';
 import { RATE_DECIMALS, parseDecimal } from '../domain/money.js';
 import { addressSchema, privateKeySchema } from '../shared/schemas.js';
 
+const testDestinationsSchema = z.record(
+  z.string(),
+  z.object({ channelCode: z.string(), accountNumber: z.string(), accountHolderName: z.string() }),
+);
+
 export const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   HOST: z.string().default('0.0.0.0'),
@@ -49,6 +54,8 @@ export const envSchema = z.object({
       return rateE8;
     }),
 
+  /** `simulated`: no money moves (local and tests). `xendit`: Xendit payouts (sandbox first). */
+  PAYOUT_PROVIDER: z.enum(['simulated', 'xendit']).default('simulated'),
   PAYOUT_POLL_MS: z.coerce.number().int().min(200).default(2_000),
   /** How often to ask the partner about a pending payout. */
   PAYOUT_RECHECK_MS: z.coerce.number().int().min(0).default(5_000),
@@ -62,6 +69,29 @@ export const envSchema = z.object({
   /** 0..1. Set to 1 to make every outcome unclear and exercise the operator flow. */
   PAYOUT_UNKNOWN_RATE: z.coerce.number().min(0).max(1).default(0),
 
+  // Xendit
+  XENDIT_SECRET_KEY: z.string().min(1).optional(),
+  XENDIT_CALLBACK_TOKEN: z.string().min(1).optional(),
+  XENDIT_BASE_URL: z.url().default('https://api.xendit.co'),
+  /** Xendit's THB channel for PromptPay IDs, from GET /payouts_channels?currency=THB. */
+  XENDIT_PROMPTPAY_CHANNEL: z.string().min(1).optional(),
+  /**
+   * Sandbox only: JSON map from PromptPay target ID to a Xendit test destination,
+   * e.g. {"099999999999901":{"channelCode":"TH_KBANK","accountNumber":"...","accountHolderName":"..."}}.
+   */
+  PAYOUT_TEST_DESTINATIONS: z
+    .string()
+    .optional()
+    .transform((value, ctx) => {
+      if (value === undefined) return undefined;
+      try {
+        return testDestinationsSchema.parse(JSON.parse(value));
+      } catch {
+        ctx.addIssue({ code: 'custom', message: 'PAYOUT_TEST_DESTINATIONS must be a JSON map of destinations' });
+        return z.NEVER;
+      }
+    }),
+
   INDEXER_POLL_MS: z.coerce.number().int().min(200).default(4_000),
   INDEXER_CONFIRMATIONS: z.coerce.number().int().min(0).default(2),
   /** First block to index: the settlement contract's deployment block. */
@@ -70,12 +100,29 @@ export const envSchema = z.object({
 
 export type Env = z.infer<typeof envSchema>;
 
+/** Settings that only make sense together. */
+function checkCombinations(env: Env, ctx: z.RefinementCtx): void {
+  if (env.PAYOUT_PROVIDER === 'xendit' && !env.XENDIT_SECRET_KEY) {
+    ctx.addIssue({ code: 'custom', path: ['XENDIT_SECRET_KEY'], message: 'PAYOUT_PROVIDER=xendit needs XENDIT_SECRET_KEY' });
+  }
+  if (env.NODE_ENV === 'production' && env.PAYOUT_TEST_DESTINATIONS) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['PAYOUT_TEST_DESTINATIONS'],
+      message: 'PAYOUT_TEST_DESTINATIONS is for the sandbox and is refused in production',
+    });
+  }
+  if (env.NODE_ENV === 'production' && env.PAYOUT_PROVIDER === 'simulated') {
+    ctx.addIssue({ code: 'custom', path: ['PAYOUT_PROVIDER'], message: 'Production needs a real payout partner' });
+  }
+}
+
 /** Validates configuration at startup. Empty strings count as unset. */
 export function loadEnv(source: Record<string, string | undefined> = process.env): Env {
   const cleaned = Object.fromEntries(
     Object.entries(source).filter(([, value]) => value !== undefined && value !== ''),
   );
-  const result = envSchema.safeParse(cleaned);
+  const result = envSchema.superRefine(checkCombinations).safeParse(cleaned);
   if (!result.success) {
     throw new Error(`Invalid environment configuration:\n${z.prettifyError(result.error)}`);
   }
