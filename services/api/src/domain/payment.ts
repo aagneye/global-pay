@@ -70,16 +70,77 @@ export interface Payment {
   updatedAt: Date;
 }
 
-export type PayoutStatus = 'PENDING' | 'SUCCEEDED' | 'FAILED';
+/**
+ * The merchant payout's outcome, as the partner reports it.
+ *
+ *   PENDING ──▶ SUCCEEDED ──▶ REVERSED
+ *      │  ▲
+ *      ▼  │
+ *    UNKNOWN ──▶ SUCCEEDED | FAILED
+ *      │
+ *      ▼
+ *    FAILED
+ *
+ * - SUCCEEDED: the partner confirmed the merchant was paid, with a bank reference. Only this settles.
+ * - FAILED: the partner definitely didn't pay. Only this refunds.
+ * - UNKNOWN: we can't tell (timeouts, errors, pending too long, success without a reference).
+ *   Nothing happens automatically: it's re-checked, then an operator decides.
+ * - REVERSED: the partner undid a payout it had reported as paid. An operator case.
+ */
+export const PAYOUT_STATUSES = ['PENDING', 'SUCCEEDED', 'FAILED', 'UNKNOWN', 'REVERSED'] as const;
+
+export type PayoutStatus = (typeof PAYOUT_STATUSES)[number];
+
+const PAYOUT_TRANSITIONS: Record<PayoutStatus, readonly PayoutStatus[]> = {
+  PENDING: ['SUCCEEDED', 'FAILED', 'UNKNOWN'],
+  UNKNOWN: ['PENDING', 'SUCCEEDED', 'FAILED'],
+  SUCCEEDED: ['REVERSED'],
+  FAILED: [],
+  REVERSED: [],
+};
+
+export function canTransitionPayout(from: PayoutStatus, to: PayoutStatus): boolean {
+  return PAYOUT_TRANSITIONS[from].includes(to);
+}
+
+export function assertPayoutTransition(from: PayoutStatus, to: PayoutStatus): void {
+  if (!canTransitionPayout(from, to)) {
+    throw new AppError('invalid_payout_transition', `Payout cannot move from ${from} to ${to}`, 409);
+  }
+}
 
 /** The local-currency payout to the merchant, one per payment. */
 export interface Payout {
   paymentId: string;
   provider: string;
+  /** Sent with every create call, so retrying can never pay twice. */
+  idempotencyKey: string;
   /** The partner's ID for the payout, once it accepted it. */
   providerRef?: string;
+  /** The bank or rail reference proving the merchant was paid (Thai equivalent of a UTR). */
+  providerReference?: string;
+  /** The partner's own status word, for audit. */
+  providerStatus?: string;
   status: PayoutStatus;
   amount: FiatAmount;
   attempts: number;
   failureReason?: string;
+  /** The last error while handling this payout (partner or chain), for operators. */
+  lastError?: string;
+  lastCheckedAt?: Date;
+  /** When to ask the partner again (backoff). */
+  nextCheckAt?: Date;
+  /** When it became UNKNOWN; after a while it goes to an operator. */
+  unknownSince?: Date;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+/** One partner response, webhook or operator action on a payout, kept for audit. */
+export interface PayoutEvent {
+  paymentId: string;
+  source: 'create' | 'check' | 'webhook' | 'ops';
+  providerStatus?: string;
+  payload: unknown;
+  createdAt: Date;
 }

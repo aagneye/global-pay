@@ -1,7 +1,15 @@
 import { PrismaPg } from '@prisma/adapter-pg';
 import { type Address, type Hex, getAddress } from 'viem';
 import type { FiatCurrency } from '../../domain/money.js';
-import { type Payment, type PaymentStatus, type Payout, assertTransition } from '../../domain/payment.js';
+import {
+  type Payment,
+  type PaymentStatus,
+  type Payout,
+  type PayoutEvent,
+  type PayoutStatus,
+  assertPayoutTransition,
+  assertTransition,
+} from '../../domain/payment.js';
 import type { SignedQuote } from '../../domain/quote.js';
 import type { KycRecord, KycTier, User } from '../../domain/user.js';
 import {
@@ -15,9 +23,12 @@ import { parsePromptPayQr } from '../../lib/promptpay/parse.js';
 import type {
   CursorRepository,
   KycRepository,
+  OpsAction,
+  OpsActionRepository,
   PaymentFields,
   PaymentRepository,
   PaymentWithQuote,
+  PayoutFields,
   PayoutRepository,
   QuoteRepository,
   Repositories,
@@ -44,6 +55,7 @@ export function createPrismaRepositories(prisma: PrismaClient): Repositories {
     payments: new PrismaPaymentRepository(prisma),
     payouts: new PrismaPayoutRepository(prisma),
     cursors: new PrismaCursorRepository(prisma),
+    opsActions: new PrismaOpsActionRepository(prisma),
   };
 }
 
@@ -292,12 +304,23 @@ export class PrismaPayoutRepository implements PayoutRepository {
     return row && toPayout(row);
   }
 
-  async createForPayment(payout: { paymentId: string; provider: string; amount: Payout['amount'] }): Promise<Payout> {
+  async findByIdempotencyKey(idempotencyKey: string): Promise<Payout | null> {
+    const row = await this.prisma.payout.findUnique({ where: { idempotencyKey } });
+    return row && toPayout(row);
+  }
+
+  async createForPayment(payout: {
+    paymentId: string;
+    provider: string;
+    amount: Payout['amount'];
+    idempotencyKey: string;
+  }): Promise<Payout> {
     const row = await this.prisma.payout.upsert({
       where: { paymentId: payout.paymentId },
       create: {
         paymentId: payout.paymentId,
         provider: payout.provider,
+        idempotencyKey: payout.idempotencyKey,
         currency: payout.amount.currency,
         amount: payout.amount.minor,
       },
@@ -306,12 +329,55 @@ export class PrismaPayoutRepository implements PayoutRepository {
     return toPayout(row);
   }
 
-  async update(
-    paymentId: string,
-    fields: Partial<Pick<Payout, 'providerRef' | 'status' | 'failureReason' | 'attempts'>>,
-  ): Promise<Payout> {
+  async update(paymentId: string, fields: PayoutFields): Promise<Payout> {
     const row = await this.prisma.payout.update({ where: { paymentId }, data: fields });
     return toPayout(row);
+  }
+
+  async transition(paymentId: string, from: PayoutStatus, to: PayoutStatus, fields: PayoutFields = {}): Promise<boolean> {
+    assertPayoutTransition(from, to);
+    // Conditional on the current status, so a webhook and the worker can't both move it.
+    const { count } = await this.prisma.payout.updateMany({
+      where: { paymentId, status: from },
+      data: { ...fields, status: to },
+    });
+    return count === 1;
+  }
+
+  async listByStatus(statuses: readonly PayoutStatus[], limit: number): Promise<Payout[]> {
+    const rows = await this.prisma.payout.findMany({
+      where: { status: { in: [...statuses] } },
+      orderBy: { createdAt: 'asc' },
+      take: limit,
+    });
+    return rows.map(toPayout);
+  }
+
+  async recordEvent(paymentId: string, event: Omit<PayoutEvent, 'paymentId' | 'createdAt'>): Promise<void> {
+    const payout = await this.prisma.payout.findUniqueOrThrow({ where: { paymentId }, select: { id: true } });
+    await this.prisma.payoutEvent.create({
+      data: {
+        payoutId: payout.id,
+        source: event.source,
+        providerStatus: event.providerStatus ?? null,
+        payload: toJson(event.payload),
+      },
+    });
+  }
+
+  async listEvents(paymentId: string, limit: number): Promise<PayoutEvent[]> {
+    const rows = await this.prisma.payoutEvent.findMany({
+      where: { payout: { paymentId } },
+      orderBy: { createdAt: 'desc' },
+      take: limit,
+    });
+    return rows.map((row) => ({
+      paymentId,
+      source: row.source as PayoutEvent['source'],
+      ...(row.providerStatus === null ? {} : { providerStatus: row.providerStatus }),
+      payload: row.payload,
+      createdAt: row.createdAt,
+    }));
   }
 }
 
@@ -319,11 +385,74 @@ function toPayout(row: PayoutRow): Payout {
   return {
     paymentId: row.paymentId,
     provider: row.provider,
+    idempotencyKey: row.idempotencyKey,
     ...(row.providerRef === null ? {} : { providerRef: row.providerRef }),
+    ...(row.providerReference === null ? {} : { providerReference: row.providerReference }),
+    ...(row.providerStatus === null ? {} : { providerStatus: row.providerStatus }),
     status: row.status,
     amount: { currency: row.currency as FiatCurrency, minor: row.amount },
     attempts: row.attempts,
     ...(row.failureReason === null ? {} : { failureReason: row.failureReason }),
+    ...(row.lastError === null ? {} : { lastError: row.lastError }),
+    ...(row.lastCheckedAt === null ? {} : { lastCheckedAt: row.lastCheckedAt }),
+    ...(row.nextCheckAt === null ? {} : { nextCheckAt: row.nextCheckAt }),
+    ...(row.unknownSince === null ? {} : { unknownSince: row.unknownSince }),
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+  };
+}
+
+/** Partner payloads can hold bigints; store them as strings. */
+function toJson(value: unknown): Prisma.InputJsonValue {
+  return JSON.parse(JSON.stringify(value ?? null, (_key, v) => (typeof v === 'bigint' ? v.toString() : v)));
+}
+
+export class PrismaOpsActionRepository implements OpsActionRepository {
+  constructor(private readonly prisma: PrismaClient) {}
+
+  async record(action: Omit<OpsAction, 'id' | 'createdAt'>): Promise<OpsAction> {
+    const row = await this.prisma.opsAction.create({
+      data: {
+        action: action.action,
+        targetType: action.targetType,
+        targetId: action.targetId,
+        actor: action.actor,
+        note: action.note ?? null,
+        ...(action.details === undefined ? {} : { details: toJson(action.details) }),
+      },
+    });
+    return toOpsAction(row);
+  }
+
+  async list(limit: number, target?: { type: string; id: string }): Promise<OpsAction[]> {
+    const rows = await this.prisma.opsAction.findMany({
+      where: target ? { targetType: target.type, targetId: target.id } : {},
+      orderBy: { createdAt: 'desc' },
+      take: limit,
+    });
+    return rows.map(toOpsAction);
+  }
+}
+
+function toOpsAction(row: {
+  id: string;
+  action: string;
+  targetType: string;
+  targetId: string;
+  actor: string;
+  note: string | null;
+  details: unknown;
+  createdAt: Date;
+}): OpsAction {
+  return {
+    id: row.id,
+    action: row.action,
+    targetType: row.targetType,
+    targetId: row.targetId,
+    actor: row.actor,
+    ...(row.note === null ? {} : { note: row.note }),
+    ...(row.details === null ? {} : { details: row.details }),
+    createdAt: row.createdAt,
   };
 }
 

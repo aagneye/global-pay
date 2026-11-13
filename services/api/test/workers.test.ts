@@ -260,6 +260,31 @@ describe('payout worker', () => {
     expect(status(first.id)).toBe('SETTLED');
   });
 
+  it('never settles or refunds while the payout outcome is unclear', async () => {
+    const { chain, indexer, payouts, repos, pay, status } = await setup({ PAYOUT_UNKNOWN_RATE: '1' });
+    const { id } = await pay();
+    await indexer.tick();
+
+    for (let i = 0; i < 5; i++) await payouts.tick();
+    expect(status(id)).toBe('PAYOUT_PENDING');
+    expect(repos.state.payouts.get(id)).toMatchObject({
+      status: 'UNKNOWN',
+      lastError: 'Simulated unclear outcome (PAYOUT_UNKNOWN_RATE)',
+    });
+    expect(repos.state.payouts.get(id)?.unknownSince).toBeInstanceOf(Date);
+    expect(chain.sent.filter((s) => s.functionName !== 'pay')).toHaveLength(0);
+  });
+
+  it('records the settlement error on the payout for operators', async () => {
+    const { chain, indexer, payouts, repos, pay } = await setup();
+    const { id } = await pay();
+    await indexer.tick();
+    await payouts.tick();
+    chain.failNextWrite = new TransactionRejectedError('EnforcedPause');
+    await payouts.tick();
+    expect(repos.state.payouts.get(id)?.lastError).toMatch(/EnforcedPause/);
+  });
+
   it('does nothing if the chain shows no payment to settle', async () => {
     const { chain, indexer, payouts, pay, status } = await setup();
     const { id, quoteId } = await pay();
@@ -274,6 +299,7 @@ describe('payout worker', () => {
 
 describe('SimulatedPromptPayProvider', () => {
   const request = {
+    idempotencyKey: 'payment_1',
     paymentId: 'payment_1',
     merchant: { raw: '', initiation: 'dynamic', kind: 'merchant', targetType: 'biller', targetId: '1' },
     amount: { currency: 'THB', minor: 100n },
@@ -298,7 +324,7 @@ describe('SimulatedPromptPayProvider', () => {
       const provider = new SimulatedPromptPayProvider({ delayMs: 0, failureRate: rate });
       const results = [];
       for (let i = 0; i < 200; i++) {
-        const { providerRef } = await provider.createPayout({ ...request, paymentId: `p${i}` });
+        const { providerRef } = await provider.createPayout({ ...request, paymentId: `p${i}`, idempotencyKey: `p${i}` });
         results.push((await provider.getPayout(providerRef!)).status);
       }
       return results;
@@ -312,8 +338,24 @@ describe('SimulatedPromptPayProvider', () => {
     expect(failed).toBeLessThan(140);
   });
 
-  it('fails an unknown reference', async () => {
+  it("treats a reference it doesn't know as unknown, never as failed", async () => {
     const provider = new SimulatedPromptPayProvider({ delayMs: 0, failureRate: 0 });
-    await expect(provider.getPayout('nope')).resolves.toMatchObject({ status: 'failed' });
+    await expect(provider.getPayout('nope')).resolves.toMatchObject({ status: 'unknown' });
+  });
+
+  it('finds a payout by idempotency key, and makes outcomes unclear on request', async () => {
+    const provider = new SimulatedPromptPayProvider({ delayMs: 0, failureRate: 0, unknownRate: 1 });
+    await expect(provider.findByIdempotencyKey('payment_1')).resolves.toBeNull();
+    await provider.createPayout(request);
+    await expect(provider.findByIdempotencyKey('payment_1')).resolves.toMatchObject({ status: 'unknown' });
+  });
+
+  it('gives a success a bank-like reference', async () => {
+    const provider = new SimulatedPromptPayProvider({ delayMs: 0, failureRate: 0 });
+    const { providerRef } = await provider.createPayout(request);
+    await expect(provider.getPayout(providerRef!)).resolves.toMatchObject({
+      status: 'succeeded',
+      reference: expect.stringMatching(/^SIM[0-9A-F]{12}$/),
+    });
   });
 });

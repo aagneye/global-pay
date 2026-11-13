@@ -1,5 +1,5 @@
 import type { Payment } from '../domain/payment.js';
-import type { PayoutProvider, PayoutResult } from '../ports/payout-provider.js';
+import type { PayoutTracker } from '../modules/payouts/payout-tracker.js';
 import type { PaymentRepository, PaymentWithQuote, PayoutRepository } from '../ports/repositories.js';
 import type { SettlementGateway } from '../ports/settlement-gateway.js';
 import { PollingLoop, type WorkerLogger, silentLogger } from './loop.js';
@@ -7,7 +7,7 @@ import { PollingLoop, type WorkerLogger, silentLogger } from './loop.js';
 export interface PayoutWorkerDeps {
   payments: PaymentRepository;
   payouts: PayoutRepository;
-  provider: PayoutProvider;
+  tracker: PayoutTracker;
   gateway: SettlementGateway;
   pollMs: number;
   /** False when there's no relayer key: settling and refunding need one. */
@@ -20,11 +20,13 @@ type Resolution = 'settle' | 'refund';
 /**
  * Drives each paid payment to its end:
  *
- *   PAID → (create payout) → PAYOUT_PENDING → (partner pays the merchant) → markSettled → SETTLED
- *                                           → (partner fails)            → refund      → REFUNDED
+ *   PAID → (payout row) → PAYOUT_PENDING → partner SUCCEEDED, with a reference → markSettled → SETTLED
+ *                                         → partner FAILED, definitely         → refund      → REFUNDED
+ *                                         → UNKNOWN or REVERSED: nothing automatic; re-checked, then an operator
  *
- * Every step is safe to repeat after a crash: the payout is created once per payment, the partner
- * call is idempotent per payment ID, and the on-chain status is checked before settling or refunding.
+ * Every step is safe to repeat after a crash: the payout row and its idempotency key exist before the
+ * partner is called, a retry looks the payout up before creating it again (PayoutTracker), and the
+ * on-chain status is checked before settling or refunding.
  */
 export class PayoutWorker {
   private readonly deps: PayoutWorkerDeps;
@@ -67,47 +69,25 @@ export class PayoutWorker {
       await step();
     } catch (error) {
       this.log.error({ err: error, paymentId: payment.id }, 'payout step failed; will retry');
+      // Shown to operators. The payout may not exist yet if the step failed before creating it.
+      const message = error instanceof Error ? (error.message.split('\n')[0] ?? error.message) : String(error);
+      await this.deps.payouts.update(payment.id, { lastError: message }).catch(() => undefined);
     }
   }
 
-  private async startPayout({ payment, quote }: PaymentWithQuote): Promise<void> {
-    await this.deps.payouts.createForPayment({
-      paymentId: payment.id,
-      provider: this.deps.provider.name,
-      amount: quote.quote.fiat,
-    });
-    await this.deps.payments.transition(payment.id, 'PAID', 'PAYOUT_PENDING');
+  private async startPayout(item: PaymentWithQuote): Promise<void> {
+    await this.deps.tracker.ensurePayout(item);
+    await this.deps.payments.transition(item.payment.id, 'PAID', 'PAYOUT_PENDING');
   }
 
-  private async advance({ payment, quote }: PaymentWithQuote): Promise<void> {
-    const { payouts, provider } = this.deps;
-    let payout =
-      (await payouts.findByPaymentId(payment.id)) ??
-      (await payouts.createForPayment({ paymentId: payment.id, provider: provider.name, amount: quote.quote.fiat }));
-
-    if (payout.status === 'PENDING') {
-      let result: PayoutResult;
-      if (payout.providerRef) {
-        result = await provider.getPayout(payout.providerRef);
-      } else {
-        await payouts.update(payment.id, { attempts: payout.attempts + 1 });
-        result = await provider.createPayout({ paymentId: payment.id, merchant: quote.quote.merchant, amount: payout.amount });
-      }
-      const providerRef = result.providerRef ?? payout.providerRef;
-      if (result.status === 'pending') {
-        if (providerRef !== payout.providerRef) await payouts.update(payment.id, { providerRef: result.providerRef });
-        return;
-      }
-      payout = await payouts.update(payment.id, {
-        ...(providerRef === undefined ? {} : { providerRef }),
-        status: result.status === 'succeeded' ? 'SUCCEEDED' : 'FAILED',
-        ...(result.status === 'failed' ? { failureReason: result.reason } : {}),
-      });
-      this.log.info({ paymentId: payment.id, payout: payout.status }, 'payout finished');
+  private async advance(item: PaymentWithQuote): Promise<void> {
+    const payout = await this.deps.tracker.check(item);
+    if (payout.status === 'SUCCEEDED') {
+      await this.resolve(item.payment, 'settle');
+    } else if (payout.status === 'FAILED') {
+      await this.resolve(item.payment, 'refund', payout.failureReason ?? 'Payout failed');
     }
-
-    if (payout.status === 'SUCCEEDED') await this.resolve(payment, 'settle');
-    else await this.resolve(payment, 'refund', payout.failureReason ?? 'Payout failed');
+    // PENDING: wait. UNKNOWN or REVERSED: an operator decides (see /ops).
   }
 
   /** markSettled or refund on-chain, then record it once the transaction is in a block. */
@@ -137,6 +117,7 @@ export class PayoutWorker {
     }
     if (onChain !== 'Paid') {
       this.log.error({ paymentId: payment.id, onChain, action }, 'cannot resolve payment: unexpected on-chain status');
+      await this.deps.payouts.update(payment.id, { lastError: `Cannot ${action}: on-chain status is ${onChain}` });
       return;
     }
 
@@ -148,6 +129,7 @@ export class PayoutWorker {
       this.log.info({ paymentId: payment.id, txHash, status: target }, 'payment resolved on-chain');
     } else {
       this.log.warn({ paymentId: payment.id, txHash, action }, 'transaction reverted; will check again');
+      await this.deps.payouts.update(payment.id, { lastError: `${action === 'settle' ? 'markSettled' : 'refund'} transaction reverted` });
     }
   }
 }

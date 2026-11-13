@@ -1,6 +1,6 @@
 import type { Address, Hex } from 'viem';
 import type { FiatAmount } from '../domain/money.js';
-import type { Payment, PaymentStatus, Payout } from '../domain/payment.js';
+import type { Payment, PaymentStatus, Payout, PayoutEvent, PayoutStatus } from '../domain/payment.js';
 import type { Quote, SignedQuote } from '../domain/quote.js';
 import type { KycRecord, User } from '../domain/user.js';
 
@@ -68,14 +68,58 @@ export interface PaymentRepository {
   transition(id: string, from: PaymentStatus, to: PaymentStatus, fields?: PaymentFields): Promise<boolean>;
 }
 
+/** Payout fields that change alongside, or without, a status change. `null` clears a field. */
+export type PayoutFields = {
+  [K in
+    | 'providerRef'
+    | 'providerReference'
+    | 'providerStatus'
+    | 'failureReason'
+    | 'lastError'
+    | 'lastCheckedAt'
+    | 'nextCheckAt'
+    | 'unknownSince']?: Exclude<Payout[K], undefined> | null;
+} & { attempts?: number };
+
 export interface PayoutRepository {
   findByPaymentId(paymentId: string): Promise<Payout | null>;
+  findByIdempotencyKey(idempotencyKey: string): Promise<Payout | null>;
   /** Creates the payment's PENDING payout, or returns the existing one. */
-  createForPayment(payout: { paymentId: string; provider: string; amount: FiatAmount }): Promise<Payout>;
-  update(
-    paymentId: string,
-    fields: Partial<Pick<Payout, 'providerRef' | 'status' | 'failureReason' | 'attempts'>>,
-  ): Promise<Payout>;
+  createForPayment(payout: {
+    paymentId: string;
+    provider: string;
+    amount: FiatAmount;
+    idempotencyKey: string;
+  }): Promise<Payout>;
+  update(paymentId: string, fields: PayoutFields): Promise<Payout>;
+  /**
+   * Moves the payout from `from` to `to` (setting `fields`) only if it's still in `from`.
+   * Returns false if something else moved it first. Throws on a transition the domain forbids.
+   */
+  transition(paymentId: string, from: PayoutStatus, to: PayoutStatus, fields?: PayoutFields): Promise<boolean>;
+  /** Oldest first. */
+  listByStatus(statuses: readonly PayoutStatus[], limit: number): Promise<Payout[]>;
+  recordEvent(paymentId: string, event: Omit<PayoutEvent, 'paymentId' | 'createdAt'>): Promise<void>;
+  /** Newest first. */
+  listEvents(paymentId: string, limit: number): Promise<PayoutEvent[]>;
+}
+
+/** Something an operator did, for the audit log. */
+export interface OpsAction {
+  id: string;
+  action: string;
+  targetType: string;
+  targetId: string;
+  actor: string;
+  note?: string;
+  details?: unknown;
+  createdAt: Date;
+}
+
+export interface OpsActionRepository {
+  record(action: Omit<OpsAction, 'id' | 'createdAt'>): Promise<OpsAction>;
+  /** Newest first, optionally for one target. */
+  list(limit: number, target?: { type: string; id: string }): Promise<OpsAction[]>;
 }
 
 /** Where each indexer stopped, so it resumes there after a restart. */
@@ -93,4 +137,5 @@ export interface Repositories {
   payments: PaymentRepository;
   payouts: PayoutRepository;
   cursors: CursorRepository;
+  opsActions: OpsActionRepository;
 }

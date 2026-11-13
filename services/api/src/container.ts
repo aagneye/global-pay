@@ -11,6 +11,7 @@ import { AccountService } from './modules/account/service.js';
 import { AuthService } from './modules/auth/service.js';
 import { AccessTokens } from './modules/auth/tokens.js';
 import { KycService } from './modules/kyc/service.js';
+import { PayoutTracker } from './modules/payouts/payout-tracker.js';
 import { PaymentService } from './modules/payments/service.js';
 import { QuoteService } from './modules/quotes/service.js';
 import type { KycProvider } from './ports/kyc-provider.js';
@@ -83,7 +84,17 @@ export function buildContainer(env: Env, overrides: Partial<Adapters> = {}): Con
     (env.RATE_SOURCE === 'fixed' ? new FixedRateProvider(env.FIXED_USDC_THB_RATE) : new PublicFeedRateProvider());
   const payoutProvider =
     overrides.payouts ??
-    new SimulatedPromptPayProvider({ delayMs: env.PAYOUT_DELAY_MS, failureRate: env.PAYOUT_FAILURE_RATE });
+    new SimulatedPromptPayProvider({
+      delayMs: env.PAYOUT_DELAY_MS,
+      failureRate: env.PAYOUT_FAILURE_RATE,
+      unknownRate: env.PAYOUT_UNKNOWN_RATE,
+    });
+  const payoutTracker = new PayoutTracker({
+    payouts: repositories.payouts,
+    provider: payoutProvider,
+    recheckMs: env.PAYOUT_RECHECK_MS,
+    pendingDeadlineMs: env.PAYOUT_PENDING_DEADLINE_MS,
+  });
 
   const tokens = new AccessTokens({ secret: env.JWT_SECRET, ttlSeconds: env.JWT_TTL_SECONDS });
   const payments = new PaymentService({
@@ -145,7 +156,7 @@ export function buildContainer(env: Env, overrides: Partial<Adapters> = {}): Con
       payouts: new PayoutWorker({
         payments: repositories.payments,
         payouts: repositories.payouts,
-        provider: payoutProvider,
+        tracker: payoutTracker,
         gateway,
         pollMs: env.PAYOUT_POLL_MS,
         enabled: Boolean(env.SETTLEMENT_ADDRESS && env.RELAYER_PRIVATE_KEY),
@@ -156,3 +167,4 @@ export function buildContainer(env: Env, overrides: Partial<Adapters> = {}): Con
     },
   };
 }
+

@@ -68,7 +68,7 @@ describe.skipIf(!anvilBin || !forgeBin)('settlement loop on anvil', () => {
     const prisma = createPrismaClient(url, 1);
     databases.push(prisma);
     await prisma.$executeRawUnsafe(
-      'TRUNCATE "Payout", "Payment", "Quote", "KycRecord", "SiweNonce", "User", "IndexerCursor" CASCADE',
+      'TRUNCATE "OpsAction", "PayoutEvent", "Payout", "Payment", "Quote", "KycRecord", "SiweNonce", "User", "IndexerCursor" CASCADE',
     );
     return createPrismaRepositories(prisma);
   }
@@ -88,6 +88,7 @@ describe.skipIf(!anvilBin || !forgeBin)('settlement loop on anvil', () => {
         FIXED_USDC_THB_RATE: '33.00',
         INDEXER_CONFIRMATIONS: '0',
         PAYOUT_DELAY_MS: '0',
+        PAYOUT_RECHECK_MS: '0',
         ...env,
       }),
       { repositories: await repositories() },

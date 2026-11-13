@@ -32,6 +32,7 @@ export async function buildTestApp(
     QUOTE_SIGNER_PRIVATE_KEY: ANVIL.accounts.quoteSigner.privateKey,
     RATE_SOURCE: 'fixed',
     FIXED_USDC_THB_RATE: '32.50',
+    PAYOUT_RECHECK_MS: '0',
     ...options.env,
   });
   const chain = new FakeChain();

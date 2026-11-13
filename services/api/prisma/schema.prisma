@@ -107,27 +107,69 @@ model Payment {
   @@index([status])
 }
 
+/// See src/domain/payment.ts: only SUCCEEDED settles, only FAILED refunds
 enum PayoutStatus {
   PENDING
   SUCCEEDED
   FAILED
+  UNKNOWN
+  REVERSED
 }
 
 model Payout {
-  id            String       @id @default(cuid())
-  paymentId     String       @unique
-  payment       Payment      @relation(fields: [paymentId], references: [id])
-  provider      String
-  providerRef   String?
-  status        PayoutStatus @default(PENDING)
-  currency      String       @db.Char(3)
-  amount        BigInt
-  attempts      Int          @default(0)
-  failureReason String?
-  createdAt     DateTime     @default(now())
-  updatedAt     DateTime     @updatedAt
+  id                String        @id @default(cuid())
+  paymentId         String        @unique
+  payment           Payment       @relation(fields: [paymentId], references: [id])
+  provider          String
+  /// Sent with every create call to the partner, so a retry can never pay twice
+  idempotencyKey    String        @unique
+  /// The partner's ID for the payout
+  providerRef       String?
+  /// Bank or rail reference proving the merchant was paid
+  providerReference String?
+  providerStatus    String?
+  status            PayoutStatus  @default(PENDING)
+  currency          String        @db.Char(3)
+  amount            BigInt
+  attempts          Int           @default(0)
+  failureReason     String?
+  lastError         String?
+  lastCheckedAt     DateTime?
+  nextCheckAt       DateTime?
+  unknownSince      DateTime?
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+  events            PayoutEvent[]
 
   @@index([status])
+}
+
+/// Every partner response, webhook and operator action on a payout, for audit
+model PayoutEvent {
+  id             String   @id @default(cuid())
+  payoutId       String
+  payout         Payout   @relation(fields: [payoutId], references: [id])
+  /// create | check | webhook | ops
+  source         String
+  providerStatus String?
+  payload        Json
+  createdAt      DateTime @default(now())
+
+  @@index([payoutId, createdAt])
+}
+
+/// What an operator did, why, and to what
+model OpsAction {
+  id         String   @id @default(cuid())
+  action     String
+  targetType String
+  targetId   String
+  actor      String
+  note       String?
+  details    Json?
+  createdAt  DateTime @default(now())
+
+  @@index([targetType, targetId])
 }
 
 /// Last processed block per contract, so the indexer resumes where it stopped

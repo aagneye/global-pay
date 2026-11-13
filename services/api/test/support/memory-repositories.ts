@@ -1,9 +1,22 @@
 import { type Address, type Hex, keccak256, toHex } from 'viem';
-import { type Payment, type Payout, assertTransition } from '../../src/domain/payment.js';
+import {
+  type Payment,
+  type Payout,
+  type PayoutEvent,
+  assertPayoutTransition,
+  assertTransition,
+} from '../../src/domain/payment.js';
 import type { KycRecord, User } from '../../src/domain/user.js';
 import { buildPromptPayQr } from '../../src/lib/promptpay/build.js';
 import { parsePromptPayQr } from '../../src/lib/promptpay/parse.js';
-import type { PaymentFields, PaymentWithQuote, Repositories, StoredQuote } from '../../src/ports/repositories.js';
+import type {
+  OpsAction,
+  PaymentFields,
+  PaymentWithQuote,
+  PayoutFields,
+  Repositories,
+  StoredQuote,
+} from '../../src/ports/repositories.js';
 
 /** In-memory repositories with the same behaviour as the Prisma ones, for fast unit tests. */
 export function createMemoryRepositories() {
@@ -14,6 +27,8 @@ export function createMemoryRepositories() {
   const payments = new Map<string, Payment>();
   const payouts = new Map<string, Payout>();
   const cursors = new Map<string, bigint>();
+  const payoutEvents: PayoutEvent[] = [];
+  const opsActions: OpsAction[] = [];
   let nextUserId = 1;
   let nextPaymentId = 1;
   let clock = 0;
@@ -136,10 +151,24 @@ export function createMemoryRepositories() {
         const payout = payouts.get(paymentId);
         return payout ? { ...payout } : null;
       },
-      async createForPayment({ paymentId, provider, amount }) {
+      async findByIdempotencyKey(idempotencyKey) {
+        const payout = [...payouts.values()].find((p) => p.idempotencyKey === idempotencyKey);
+        return payout ? { ...payout } : null;
+      },
+      async createForPayment({ paymentId, provider, amount, idempotencyKey }) {
         let payout = payouts.get(paymentId);
         if (!payout) {
-          payout = { paymentId, provider, status: 'PENDING', amount, attempts: 0 };
+          const at = now();
+          payout = {
+            paymentId,
+            provider,
+            idempotencyKey,
+            status: 'PENDING',
+            amount,
+            attempts: 0,
+            createdAt: at,
+            updatedAt: at,
+          };
           payouts.set(paymentId, payout);
         }
         return { ...payout };
@@ -147,8 +176,48 @@ export function createMemoryRepositories() {
       async update(paymentId, fields) {
         const payout = payouts.get(paymentId);
         if (!payout) throw new Error(`no payout for ${paymentId}`);
-        Object.assign(payout, fields);
+        applyPayoutFields(payout, fields);
+        payout.updatedAt = now();
         return { ...payout };
+      },
+      async transition(paymentId, from, to, fields = {}) {
+        assertPayoutTransition(from, to);
+        const payout = payouts.get(paymentId);
+        if (!payout || payout.status !== from) return false;
+        applyPayoutFields(payout, fields);
+        payout.status = to;
+        payout.updatedAt = now();
+        return true;
+      },
+      async listByStatus(statuses, limit) {
+        return [...payouts.values()]
+          .filter((p) => statuses.includes(p.status))
+          .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime())
+          .slice(0, limit)
+          .map((p) => ({ ...p }));
+      },
+      async recordEvent(paymentId, event) {
+        if (!payouts.has(paymentId)) throw new Error(`no payout for ${paymentId}`);
+        payoutEvents.push({ ...event, paymentId, createdAt: now() });
+      },
+      async listEvents(paymentId, limit) {
+        return payoutEvents
+          .filter((e) => e.paymentId === paymentId)
+          .reverse()
+          .slice(0, limit);
+      },
+    },
+    opsActions: {
+      async record(action) {
+        const recorded: OpsAction = { ...action, id: `ops_${opsActions.length + 1}`, createdAt: now() };
+        opsActions.push(recorded);
+        return recorded;
+      },
+      async list(limit, target) {
+        return opsActions
+          .filter((a) => !target || (a.targetType === target.type && a.targetId === target.id))
+          .reverse()
+          .slice(0, limit);
       },
     },
     cursors: {
@@ -164,8 +233,17 @@ export function createMemoryRepositories() {
   return {
     ...repositories,
     /** Test-only views of the stored data. */
-    state: { users, nonces, kyc, quotes, payments, payouts, cursors },
+    state: { users, nonces, kyc, quotes, payments, payouts, cursors, payoutEvents, opsActions },
   };
+}
+
+/** Applies fields like the database would: `null` clears, `undefined` leaves alone. */
+function applyPayoutFields(payout: Payout, fields: PayoutFields): void {
+  for (const [key, value] of Object.entries(fields)) {
+    if (value === undefined) continue;
+    if (value === null) delete (payout as unknown as Record<string, unknown>)[key];
+    else (payout as unknown as Record<string, unknown>)[key] = value;
+  }
 }
 
 function lowerFields(fields: PaymentFields): PaymentFields {

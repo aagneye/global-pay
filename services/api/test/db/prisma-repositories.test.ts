@@ -31,7 +31,7 @@ describe.skipIf(!url)('Prisma repositories (Postgres)', () => {
 
   beforeEach(async () => {
     await prisma.$executeRawUnsafe(
-      'TRUNCATE "Payout", "Payment", "Quote", "KycRecord", "SiweNonce", "User", "IndexerCursor" CASCADE',
+      'TRUNCATE "OpsAction", "PayoutEvent", "Payout", "Payment", "Quote", "KycRecord", "SiweNonce", "User", "IndexerCursor" CASCADE',
     );
   });
 
@@ -221,7 +221,7 @@ describe.skipIf(!url)('Prisma repositories (Postgres)', () => {
     expect((await repos.payments.listByStatus(['FAILED'], 10))[0]?.payment.failureReason).toBe('test');
   });
 
-  it('creates one payout per payment and updates it', async () => {
+  it('creates one payout per payment, moves it only from the expected status, and keeps an audit trail', async () => {
     const user = await repos.users.upsertByWallet(PAYER);
     const quoteId = `0x${'cd'.repeat(32)}` as const;
     await storeQuote(user.id, quoteId, 100_00n);
@@ -229,19 +229,59 @@ describe.skipIf(!url)('Prisma repositories (Postgres)', () => {
     const amount = { currency: 'THB' as const, minor: 100_00n };
 
     await expect(repos.payouts.findByPaymentId(payment.id)).resolves.toBeNull();
-    const created = await repos.payouts.createForPayment({ paymentId: payment.id, provider: 'sim', amount });
-    expect(created).toEqual({ paymentId: payment.id, provider: 'sim', status: 'PENDING', amount, attempts: 0 });
-    await expect(
-      repos.payouts.createForPayment({ paymentId: payment.id, provider: 'other', amount }),
-    ).resolves.toEqual(created);
-
-    const updated = await repos.payouts.update(payment.id, {
-      providerRef: 'ref-1',
-      status: 'FAILED',
-      failureReason: 'no',
-      attempts: 1,
+    const created = await repos.payouts.createForPayment({
+      paymentId: payment.id,
+      provider: 'sim',
+      amount,
+      idempotencyKey: payment.id,
     });
-    expect(updated).toMatchObject({ providerRef: 'ref-1', status: 'FAILED', failureReason: 'no', attempts: 1 });
+    expect(created).toMatchObject({
+      paymentId: payment.id,
+      provider: 'sim',
+      idempotencyKey: payment.id,
+      status: 'PENDING',
+      amount,
+      attempts: 0,
+    });
+    await expect(
+      repos.payouts.createForPayment({ paymentId: payment.id, provider: 'other', amount, idempotencyKey: 'other' }),
+    ).resolves.toMatchObject({ provider: 'sim', idempotencyKey: payment.id });
+
+    const unknownSince = new Date('2026-11-13T00:00:00Z');
+    await repos.payouts.update(payment.id, { providerRef: 'po-1', attempts: 1, lastError: 'timeout' });
+    await expect(repos.payouts.transition(payment.id, 'SUCCEEDED', 'REVERSED')).resolves.toBe(false);
+    await expect(repos.payouts.transition(payment.id, 'PENDING', 'UNKNOWN', { unknownSince })).resolves.toBe(true);
+    await expect(repos.payouts.transition(payment.id, 'FAILED', 'PENDING')).rejects.toThrow(/cannot move/);
+    expect(await repos.payouts.listByStatus(['UNKNOWN'], 10)).toHaveLength(1);
+
+    await repos.payouts.transition(payment.id, 'UNKNOWN', 'SUCCEEDED', {
+      providerReference: 'BANKREF123',
+      unknownSince: null,
+      lastError: null,
+    });
+    const settled = await repos.payouts.findByPaymentId(payment.id);
+    expect(settled).toMatchObject({ status: 'SUCCEEDED', providerRef: 'po-1', providerReference: 'BANKREF123' });
+    expect(settled?.unknownSince).toBeUndefined();
+    expect(settled?.lastError).toBeUndefined();
+
+    await repos.payouts.recordEvent(payment.id, { source: 'create', providerStatus: 'ACCEPTED', payload: { amount: 1n } });
+    await repos.payouts.recordEvent(payment.id, { source: 'webhook', providerStatus: 'SUCCEEDED', payload: { ok: true } });
+    const events = await repos.payouts.listEvents(payment.id, 10);
+    expect(events.map((e) => e.source)).toEqual(['webhook', 'create']);
+    expect(events[1]?.payload).toEqual({ amount: '1' });
+
+    const action = await repos.opsActions.record({
+      action: 'mark-paid',
+      targetType: 'payout',
+      targetId: payment.id,
+      actor: 'ops',
+      note: 'checked with the bank',
+      details: { reference: 'BANKREF123' },
+    });
+    expect(action.id).toBeTruthy();
+    await expect(repos.opsActions.list(10, { type: 'payout', id: payment.id })).resolves.toMatchObject([
+      { action: 'mark-paid', note: 'checked with the bank', details: { reference: 'BANKREF123' } },
+    ]);
   });
 
   it('saves the indexer cursor', async () => {

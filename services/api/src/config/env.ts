@@ -49,9 +49,18 @@ export const envSchema = z.object({
       return rateE8;
     }),
 
-  PAYOUT_DELAY_MS: z.coerce.number().int().min(0).default(3_000),
-  PAYOUT_FAILURE_RATE: z.coerce.number().min(0).max(1).default(0),
   PAYOUT_POLL_MS: z.coerce.number().int().min(200).default(2_000),
+  /** How often to ask the partner about a pending payout. */
+  PAYOUT_RECHECK_MS: z.coerce.number().int().min(0).default(5_000),
+  /** A payout still pending after this long becomes UNKNOWN. */
+  PAYOUT_PENDING_DEADLINE_MS: z.coerce.number().int().min(60_000).default(30 * 60_000),
+
+  // Simulated partner
+  PAYOUT_DELAY_MS: z.coerce.number().int().min(0).default(3_000),
+  /** 0..1. Set to 1 to force failures and exercise refunds. */
+  PAYOUT_FAILURE_RATE: z.coerce.number().min(0).max(1).default(0),
+  /** 0..1. Set to 1 to make every outcome unclear and exercise the operator flow. */
+  PAYOUT_UNKNOWN_RATE: z.coerce.number().min(0).max(1).default(0),
 
   INDEXER_POLL_MS: z.coerce.number().int().min(200).default(4_000),
   INDEXER_CONFIRMATIONS: z.coerce.number().int().min(0).default(2),
