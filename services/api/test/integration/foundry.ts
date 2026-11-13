@@ -40,13 +40,16 @@ export interface Anvil {
   stop(): void;
 }
 
-/** Starts a fresh anvil (chain 31337, automine) on a free port and waits until it answers. */
-export async function startAnvil(bin: string): Promise<Anvil> {
+/**
+ * Starts anvil (automine) on a free port and waits until it answers: a fresh chain 31337 by default,
+ * or a fork with e.g. `['--fork-url', url, '--chain-id', '84532']`.
+ */
+export async function startAnvil(bin: string, extraArgs: string[] = []): Promise<Anvil> {
   const port = await freePort();
   const rpcUrl = `http://127.0.0.1:${port}`;
-  const child: ChildProcess = spawn(bin, ['--port', String(port), '--silent'], { stdio: 'ignore' });
+  const child: ChildProcess = spawn(bin, ['--port', String(port), '--silent', ...extraArgs], { stdio: 'ignore' });
 
-  const deadline = Date.now() + 20_000;
+  const deadline = Date.now() + (extraArgs.includes('--fork-url') ? 90_000 : 20_000);
   while (Date.now() < deadline) {
     try {
       const response = await fetch(rpcUrl, {
@@ -78,5 +81,26 @@ export function deployLocal(forge: string, rpcUrl: string): void {
   } catch (error) {
     const { stdout, stderr } = error as { stdout?: string; stderr?: string };
     throw new Error(`DeployLocal failed:\n${stdout ?? ''}\n${stderr ?? ''}`);
+  }
+}
+
+/**
+ * Runs the real contracts/script/Deploy.s.sol with the given settings (as in contracts/.env).
+ * Its broadcast record goes to `broadcastDir`, never to contracts/broadcast, where real testnet
+ * deployments are recorded. Returns the forge output.
+ */
+export function deployScript(forge: string, rpcUrl: string, env: Record<string, string>, broadcastDir: string): string {
+  try {
+    return execFileSync(forge, ['script', 'script/Deploy.s.sol', '--rpc-url', rpcUrl, '--broadcast'], {
+      cwd: CONTRACTS_DIR,
+      encoding: 'utf8',
+      env: { ...process.env, ...env, FOUNDRY_BROADCAST: broadcastDir },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+  } catch (error) {
+    const { stdout, stderr } = error as { stdout?: string; stderr?: string };
+    throw new Error(`Deploy.s.sol failed:
+${stdout ?? ''}
+${stderr ?? ''}`);
   }
 }
