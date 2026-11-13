@@ -169,6 +169,7 @@ export function buildContainer(env: Env, overrides: Partial<Adapters> = {}): Con
         pollMs: env.INDEXER_POLL_MS,
         confirmations: env.INDEXER_CONFIRMATIONS,
         startBlock: env.INDEXER_START_BLOCK,
+        maxBlockRange: env.INDEXER_MAX_BLOCK_RANGE,
       }),
       payouts: new PayoutWorker({
         payments: repositories.payments,

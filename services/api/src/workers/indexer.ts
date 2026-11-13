@@ -3,6 +3,9 @@ import type { CursorRepository, PaymentRepository, PaymentWithQuote, QuoteReposi
 import type { PaymentReceivedEvent, SettlementGateway } from '../ports/settlement-gateway.js';
 import { PollingLoop, type WorkerLogger, silentLogger } from './loop.js';
 
+/** Anvil's chain, where starting from block 0 is normal. */
+const LOCAL_CHAIN_ID = 31337;
+
 export interface IndexerDeps {
   gateway: SettlementGateway;
   payments: PaymentRepository;
@@ -51,6 +54,12 @@ export class IndexerWorker {
     if (!this.deps.settlementAddress) {
       log.warn({ worker: 'indexer' }, 'SETTLEMENT_ADDRESS is not set; indexer not started');
       return;
+    }
+    if (this.deps.startBlock === 0n && this.deps.chainId !== LOCAL_CHAIN_ID) {
+      log.warn(
+        { worker: 'indexer', chainId: this.deps.chainId },
+        'INDEXER_START_BLOCK is 0: the first run scans the whole chain. Set it to the deployment block.',
+      );
     }
     this.loop.start(log);
   }

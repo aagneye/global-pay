@@ -130,6 +130,8 @@ export const envSchema = z.object({
   INDEXER_CONFIRMATIONS: z.coerce.number().int().min(0).default(2),
   /** First block to index: the settlement contract's deployment block. */
   INDEXER_START_BLOCK: z.coerce.bigint().nonnegative().default(0n),
+  /** Blocks per log query. Base's public RPCs allow 200; providers usually allow more. */
+  INDEXER_MAX_BLOCK_RANGE: z.coerce.bigint().positive().default(200n),
 });
 
 export type Env = z.infer<typeof envSchema>;

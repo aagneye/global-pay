@@ -8,6 +8,7 @@ describe('loadEnv', () => {
     expect(env.CHAIN_ID).toBe(84532);
     expect(env.QUOTE_TTL_SECONDS).toBe(60);
     expect(env.MERCHANT_QR_ONLY).toBe(false);
+    expect(env.INDEXER_MAX_BLOCK_RANGE).toBe(200n); // Base's public RPCs cap eth_getLogs at 200 blocks
   });
 
   it('treats empty strings as unset', () => {

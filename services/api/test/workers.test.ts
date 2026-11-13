@@ -83,6 +83,29 @@ describe('indexer', () => {
     expect(status(id)).toBe('PAID');
   });
 
+  it('warns when a public chain would be scanned from block 0', async () => {
+    const { chain, repos } = await setup();
+    const make = (chainId: number, startBlock: bigint) =>
+      new IndexerWorker({
+        gateway: chain,
+        payments: repos.payments,
+        quotes: repos.quotes,
+        cursors: repos.cursors,
+        chainId,
+        settlementAddress: ANVIL.settlement,
+        pollMs: 60_000,
+        confirmations: 0,
+        startBlock,
+      });
+    for (const [chainId, startBlock, warned] of [[84532, 0n, true], [84532, 58_000_000n, false], [31337, 0n, false]] as const) {
+      const { logger, lines } = recordingLogger();
+      const worker = make(chainId, startBlock);
+      worker.start(logger);
+      await worker.stop();
+      expect(lines.some((l) => l.message.includes('INDEXER_START_BLOCK is 0'))).toBe(warned);
+    }
+  });
+
   it('reads long block ranges in chunks', async () => {
     const { chain, repos, pay, status } = await setup();
     const { id } = await pay();
