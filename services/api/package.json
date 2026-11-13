@@ -11,6 +11,8 @@
     "postinstall": "prisma generate",
     "dev": "tsx watch src/main.ts",
     "start": "tsx src/main.ts",
+    "dev:testnet": "tsx watch src/main.ts --env .env.base-sepolia",
+    "start:testnet": "tsx src/main.ts --env .env.base-sepolia",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
@@ -20,6 +22,7 @@
     "db:migrate:dev": "prisma migrate dev",
     "qr:make": "tsx scripts/make-promptpay-qr.ts",
     "xendit:sandbox": "tsx scripts/xendit-sandbox.ts",
+    "testnet": "tsx scripts/testnet.ts",
     "openapi": "tsx scripts/export-openapi.ts"
   },
   "dependencies": {

@@ -3,7 +3,13 @@ import { buildApp } from './app.js';
 import { loadEnv } from './config/env.js';
 import { buildContainer } from './container.js';
 
-if (existsSync('.env')) process.loadEnvFile('.env');
+// `--env <path>` loads that settings file instead of .env, e.g. .env.base-sepolia (from `npm run testnet -- init`).
+// Only one file is loaded, so two setups never mix. (Not --env-file: Node takes that one for itself.)
+const flag = process.argv.indexOf('--env');
+const envFile = flag === -1 ? '.env' : process.argv[flag + 1];
+if (!envFile) throw new Error('--env needs a path');
+if (existsSync(envFile)) process.loadEnvFile(envFile);
+else if (flag !== -1) throw new Error(`No such env file: ${envFile}`);
 
 const env = loadEnv();
 const container = buildContainer(env);
