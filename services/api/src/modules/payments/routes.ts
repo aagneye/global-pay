@@ -9,6 +9,7 @@ import {
   out,
 } from '../../shared/schemas.js';
 import { requireUserId } from '../../shared/request-user.js';
+import { PAYOUT_STATUSES } from '../../domain/payment.js';
 import type { PaymentService } from './service.js';
 
 const SubmitBody = z.object({
@@ -38,6 +39,18 @@ export const PaymentDto = z.object({
   transactions: z
     .object({ pay: txLink.optional(), settle: txLink.optional(), refund: txLink.optional() })
     .meta({ id: 'PaymentTransactions' }),
+  payout: z
+    .object({
+      status: z.enum(PAYOUT_STATUSES).meta({
+        description:
+          'PENDING: being paid. SUCCEEDED: the merchant was paid (see reference). FAILED: not paid; the user is refunded. ' +
+          'UNKNOWN: unclear, being checked; never settled or refunded until it is clear. REVERSED: paid, then undone.',
+      }),
+      provider: z.string(),
+      reference: z.string().optional().meta({ description: 'Bank or partner reference, once paid' }),
+    })
+    .optional()
+    .meta({ id: 'PaymentPayout', description: 'Paying the merchant in THB. Absent until the payment is paid on-chain.' }),
   failureReason: z.string().optional(),
   quoteExpiresAt: out.dateTime,
   createdAt: out.dateTime,

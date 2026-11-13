@@ -41,7 +41,8 @@ export function createMemoryRepositories() {
   const withQuote = (payment: Payment): PaymentWithQuote => {
     const quote = quotes.get(payment.quoteId.toLowerCase());
     if (!quote) throw new Error(`payment ${payment.id} has no quote`);
-    return { payment: { ...payment }, quote };
+    const payout = payouts.get(payment.id);
+    return { payment: { ...payment }, quote, ...(payout ? { payout: { ...payout } } : {}) };
   };
 
   const repositories: Repositories = {

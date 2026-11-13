@@ -1,5 +1,5 @@
 import type { Address, Hex } from 'viem';
-import type { PaymentStatus } from '../../domain/payment.js';
+import type { PaymentStatus, PayoutStatus } from '../../domain/payment.js';
 import type { PaymentWithQuote } from '../../ports/repositories.js';
 
 /** A payment as the app sees it. Amounts are integer strings in minor units. */
@@ -13,6 +13,8 @@ export interface PaymentView {
   tokenAmount: string;
   merchant: { kind: string; targetId: string; name?: string };
   transactions: { pay?: TxLink; settle?: TxLink; refund?: TxLink };
+  /** Paying the merchant in THB. Only SUCCEEDED, with a reference, means the merchant was paid. */
+  payout?: { status: PayoutStatus; provider: string; reference?: string };
   failureReason?: string;
   quoteExpiresAt: string;
   createdAt: string;
@@ -24,7 +26,7 @@ export interface TxLink {
   url: string;
 }
 
-export function toPaymentView({ payment, quote: { quote } }: PaymentWithQuote, explorerUrl: string): PaymentView {
+export function toPaymentView({ payment, quote: { quote }, payout }: PaymentWithQuote, explorerUrl: string): PaymentView {
   const link = (hash: Hex | undefined) => (hash ? { hash, url: `${explorerUrl.replace(/\/$/, '')}/tx/${hash}` } : undefined);
   const pay = link(payment.payTxHash);
   const settle = link(payment.settleTxHash);
@@ -47,6 +49,15 @@ export function toPaymentView({ payment, quote: { quote } }: PaymentWithQuote, e
       ...(settle ? { settle } : {}),
       ...(refund ? { refund } : {}),
     },
+    ...(payout
+      ? {
+          payout: {
+            status: payout.status,
+            provider: payout.provider,
+            ...(payout.status === 'SUCCEEDED' && payout.providerReference ? { reference: payout.providerReference } : {}),
+          },
+        }
+      : {}),
     ...(payment.failureReason === undefined ? {} : { failureReason: payment.failureReason }),
     quoteExpiresAt: quote.expiresAt.toISOString(),
     createdAt: payment.createdAt.toISOString(),

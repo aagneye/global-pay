@@ -223,7 +223,7 @@ export class PrismaPaymentRepository implements PaymentRepository {
   }
 
   async findById(id: string): Promise<PaymentWithQuote | null> {
-    const row = await this.prisma.payment.findUnique({ where: { id }, include: { quote: true } });
+    const row = await this.prisma.payment.findUnique({ where: { id }, include: { quote: true, payout: true } });
     return row && withQuote(row);
   }
 
@@ -237,7 +237,7 @@ export class PrismaPaymentRepository implements PaymentRepository {
       where: { userId },
       orderBy: { createdAt: 'desc' },
       take: limit,
-      include: { quote: true },
+      include: { quote: true, payout: true },
     });
     return rows.map(withQuote);
   }
@@ -247,7 +247,7 @@ export class PrismaPaymentRepository implements PaymentRepository {
       where: { status: { in: [...statuses] } },
       orderBy: { createdAt: 'asc' },
       take: limit,
-      include: { quote: true },
+      include: { quote: true, payout: true },
     });
     return rows.map(withQuote);
   }
@@ -283,8 +283,12 @@ function toPayment(row: PaymentRow): Payment {
   };
 }
 
-function withQuote(row: PaymentRow & { quote: QuoteRow }): PaymentWithQuote {
-  return { payment: toPayment(row), quote: toStoredQuote(row.quote) };
+function withQuote(row: PaymentRow & { quote: QuoteRow; payout: PayoutRow | null }): PaymentWithQuote {
+  return {
+    payment: toPayment(row),
+    quote: toStoredQuote(row.quote),
+    ...(row.payout ? { payout: toPayout(row.payout) } : {}),
+  };
 }
 
 function toPaymentData(fields: PaymentFields) {

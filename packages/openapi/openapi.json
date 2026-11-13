@@ -333,6 +333,9 @@
           "transactions": {
             "$ref": "#/components/schemas/PaymentTransactions"
           },
+          "payout": {
+            "$ref": "#/components/schemas/PaymentPayout"
+          },
           "failureReason": {
             "type": "string"
           },
@@ -399,6 +402,35 @@
         "required": [
           "kind",
           "targetId"
+        ],
+        "additionalProperties": false
+      },
+      "PaymentPayout": {
+        "description": "Paying the merchant in THB. Absent until the payment is paid on-chain.",
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "PENDING",
+              "SUCCEEDED",
+              "FAILED",
+              "UNKNOWN",
+              "REVERSED"
+            ],
+            "description": "PENDING: being paid. SUCCEEDED: the merchant was paid (see reference). FAILED: not paid; the user is refunded. UNKNOWN: unclear, being checked; never settled or refunded until it is clear. REVERSED: paid, then undone."
+          },
+          "provider": {
+            "type": "string"
+          },
+          "reference": {
+            "description": "Bank or partner reference, once paid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "provider"
         ],
         "additionalProperties": false
       },

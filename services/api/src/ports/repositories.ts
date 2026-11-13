@@ -42,6 +42,8 @@ export interface QuoteRepository {
 export interface PaymentWithQuote {
   payment: Payment;
   quote: StoredQuote;
+  /** Once the payout worker has started it. */
+  payout?: Payout;
 }
 
 /** Fields that change without a status change, or alongside one. */

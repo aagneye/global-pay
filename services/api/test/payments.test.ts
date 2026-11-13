@@ -63,6 +63,29 @@ describe('POST /payments', () => {
     expect(history.json().payments).toEqual([payment]);
   });
 
+  it('shows the payout: no reference while it is pending, the bank reference once paid', async () => {
+    testApp = await buildTestApp({ env: { INDEXER_CONFIRMATIONS: '0', PAYOUT_DELAY_MS: '0' } });
+    const { app, container } = testApp;
+    const session = await signInVerified(app, PAYER_KEY);
+    const quote = await createQuote(app, session, qr);
+    const { id } = (await submitPayment(app, session, quote, await signAuthorization(PAYER_KEY, quote))).json();
+    const get = async () => (await app.inject({ method: 'GET', url: `/payments/${id}`, headers: session.auth })).json();
+
+    expect((await get()).payout).toBeUndefined();
+    await container.workers.indexer.tick();
+    await container.workers.payouts.tick();
+    expect((await get()).payout).toEqual({ status: 'PENDING', provider: 'simulated-promptpay' });
+
+    await container.workers.payouts.tick();
+    const settled = await get();
+    expect(settled.status).toBe('SETTLED');
+    expect(settled.payout).toEqual({
+      status: 'SUCCEEDED',
+      provider: 'simulated-promptpay',
+      reference: expect.stringMatching(/^SIM[0-9A-F]{12}$/),
+    });
+  });
+
   it('returns the same payment when a quote is submitted twice', async () => {
     const { app, chain, session, quote } = await setup();
     const signature = await signAuthorization(PAYER_KEY, quote);
