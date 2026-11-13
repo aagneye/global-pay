@@ -42,6 +42,15 @@ export class PayoutTracker {
     return this.deps.provider.name;
   }
 
+  /**
+   * Checks a partner webhook's authenticity. `undefined` if the active partner doesn't send webhooks,
+   * null if this one isn't authentic.
+   */
+  parseWebhook(headers: Record<string, string | string[] | undefined>, body: unknown): PayoutWebhookRef | null | undefined {
+    const { provider } = this.deps;
+    return provider.parseWebhook ? provider.parseWebhook(headers, body) : undefined;
+  }
+
   /** The payment's payout, created (PENDING, not yet sent) if it doesn't exist. */
   async ensurePayout({ payment, quote }: PaymentWithQuote): Promise<Payout> {
     return (

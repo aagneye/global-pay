@@ -42,6 +42,7 @@ export interface Container {
     quotes: QuoteService;
     payments: PaymentService;
     account: AccountService;
+    payouts: PayoutTracker;
   };
   workers: {
     indexer: IndexerWorker;
@@ -127,8 +128,11 @@ export function buildContainer(env: Env, overrides: Partial<Adapters> = {}): Con
         quoteTtlSeconds: env.QUOTE_TTL_SECONDS,
         spreadBps: env.SPREAD_BPS,
         merchantQrOnly: env.MERCHANT_QR_ONLY,
+        payoutRail: payoutProvider,
+        payoutFloatBufferMinor: env.PAYOUT_FLOAT_BUFFER_THB,
       }),
       payments,
+      payouts: payoutTracker,
       account: new AccountService({
         users: repositories.users,
         gateway,

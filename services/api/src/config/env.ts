@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { RATE_DECIMALS, parseDecimal } from '../domain/money.js';
+import { FIAT_DECIMALS, RATE_DECIMALS, parseDecimal } from '../domain/money.js';
 import { addressSchema, privateKeySchema } from '../shared/schemas.js';
 
 const testDestinationsSchema = z.record(
@@ -61,6 +61,18 @@ export const envSchema = z.object({
   PAYOUT_RECHECK_MS: z.coerce.number().int().min(0).default(5_000),
   /** A payout still pending after this long becomes UNKNOWN. */
   PAYOUT_PENDING_DEADLINE_MS: z.coerce.number().int().min(60_000).default(30 * 60_000),
+  /** Refuse quotes when the partner's float minus the amount would go below this (THB). */
+  PAYOUT_FLOAT_BUFFER_THB: z
+    .string()
+    .default('0')
+    .transform((value, ctx) => {
+      const minor = parseDecimal(value, FIAT_DECIMALS.THB);
+      if (minor === null) {
+        ctx.addIssue({ code: 'custom', message: 'PAYOUT_FLOAT_BUFFER_THB must be a THB amount, e.g. 5000 or 5000.00' });
+        return z.NEVER;
+      }
+      return minor;
+    }),
 
   // Simulated partner
   PAYOUT_DELAY_MS: z.coerce.number().int().min(0).default(3_000),

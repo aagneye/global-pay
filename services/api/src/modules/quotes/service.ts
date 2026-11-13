@@ -6,6 +6,7 @@ import type { AuthorizationToSign, Quote, QuoteRequest, SignedQuote } from '../.
 import { merchantRef, merchantRefHash } from '../../lib/promptpay/merchant-ref.js';
 import { parsePromptPayQr } from '../../lib/promptpay/parse.js';
 import { toUnixSeconds } from '../../lib/typed-data.js';
+import type { PayoutProvider } from '../../ports/payout-provider.js';
 import type { QuoteSigner } from '../../ports/quote-signer.js';
 import type { RateProvider } from '../../ports/rate-provider.js';
 import type { KycRepository, PaymentRepository, QuoteRepository, UserRepository } from '../../ports/repositories.js';
@@ -27,6 +28,10 @@ export interface QuoteServiceDeps {
   quoteTtlSeconds: number;
   spreadBps: number;
   merchantQrOnly: boolean;
+  /** The active payout rail: can it pay this QR, and is there enough float? */
+  payoutRail: Pick<PayoutProvider, 'supports' | 'getBalance'>;
+  /** Refuse quotes that would leave less than this in the payout float (THB satang). */
+  payoutFloatBufferMinor: bigint;
   now?: () => Date;
   newQuoteId?: () => Hex;
 }
@@ -39,7 +44,9 @@ export interface QuoteResponse extends SignedQuote {
 
 /**
  * Turns a scanned PromptPay QR into a signed, short-lived quote:
- * parse QR → policy (merchant-only, amount, payer, KYC limits) → rate + spread → sign → store.
+ * parse QR → policy (merchant-only, payout rail, amount, payer, KYC limits, float) → rate + spread → sign → store.
+ *
+ * Everything that would stop the payout is checked here, before the user pays anything.
  */
 export class QuoteService {
   private readonly deps: QuoteServiceDeps;
@@ -64,6 +71,9 @@ export class QuoteService {
     if (deps.merchantQrOnly && merchant.kind === 'personal') {
       throw new AppError('personal_qr_not_allowed', 'Only merchant PromptPay QRs can be paid', 422);
     }
+    if (!deps.payoutRail.supports(merchant)) {
+      throw new AppError('merchant_not_supported', "This kind of PromptPay QR can't be paid yet", 422);
+    }
     const fiatMinor = resolveAmount(merchant.amount?.minor, request.fiatAmountMinor);
 
     // 2. Who pays, and whether they may.
@@ -74,6 +84,7 @@ export class QuoteService {
     }
     const now = this.now();
     await enforceSpendingLimit(deps, user.id, fiatMinor, now);
+    await this.ensureFloat(fiatMinor);
 
     // 3. Price it.
     const rate = await deps.rates.getRate('USDC', 'THB');
@@ -121,6 +132,19 @@ export class QuoteService {
         },
       },
     };
+  }
+
+  /** The partner must hold enough THB to pay this, plus a buffer. Unreadable float: refuse, to be safe. */
+  private async ensureFloat(fiatMinor: bigint): Promise<void> {
+    let float;
+    try {
+      float = await this.deps.payoutRail.getBalance();
+    } catch {
+      throw new AppError('payouts_unavailable', "Payouts are unavailable right now; you haven't been charged", 503);
+    }
+    if (float && float.minor - fiatMinor < this.deps.payoutFloatBufferMinor) {
+      throw new AppError('payouts_unavailable', "Payouts are unavailable right now; you haven't been charged", 503);
+    }
   }
 }
 

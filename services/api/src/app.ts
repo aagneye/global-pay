@@ -15,6 +15,7 @@ import { accountRoutes } from './modules/account/routes.js';
 import { authRoutes } from './modules/auth/routes.js';
 import { kycRoutes } from './modules/kyc/routes.js';
 import { paymentRoutes } from './modules/payments/routes.js';
+import { payoutWebhookRoutes } from './modules/payouts/webhook-routes.js';
 import { quoteRoutes } from './modules/quotes/routes.js';
 import { AppError } from './shared/errors.js';
 import { namedSchemasTransform } from './shared/openapi.js';
@@ -107,6 +108,7 @@ export async function buildApp({ container, logger = true }: BuildAppOptions): P
   await app.register(quoteRoutes, { quotes: services.quotes });
   await app.register(paymentRoutes, { payments: services.payments });
   await app.register(accountRoutes, { account: services.account });
+  await app.register(payoutWebhookRoutes, { tracker: services.payouts });
 
   return app;
 }
