@@ -20,16 +20,17 @@ export interface NearRelayerClient {
 
 export interface NearTestnetFaucetOptions {
   relayer: NearRelayerClient;
-  /** The test USDC contract; the relayer must be its owner, which may mint. */
+  /** The test USDC contract; the relayer must be its minter (`new({owner_id, minter_id: relayer})`). */
   usdcContract: string;
   fundYocto?: bigint;
   mintUnits?: bigint;
 }
 
 /**
- * Testnet onboarding (NEAR_TESTNET_FAUCET=true), after each NEAR sign-in, doing only what's missing:
+ * Testnet onboarding (NEAR_TESTNET_FAUCET=true), at each NEAR sign-in, doing only what's missing:
  * 1. the account doesn't exist: the relayer sends it 0.05 NEAR, which creates the implicit account;
- * 2. it isn't registered with the test USDC: `storage_deposit` for it, then `mint` 1,000 USDC, in one transaction.
+ * 2. it isn't registered with the test USDC: `storage_deposit` for it, then `mint` 1,000 USDC (the relayer
+ *    is the token's minter), in one transaction.
  * A user who already has both gets nothing. Failures are logged, never thrown: signing in still works.
  */
 export class NearTestnetFaucet implements NearOnboarding {

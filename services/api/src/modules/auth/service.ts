@@ -19,8 +19,10 @@ export interface AuthServiceDeps {
   domain: string;
   /** `evm` (default): Sign-In with Ethereum. `near`: NEP-413 with a NEAR implicit account. */
   rail?: SettlementRail;
-  /** NEAR rail: run after each sign-in, without waiting for it (testnet faucet). */
+  /** NEAR rail: run after each sign-in, before the token is returned (testnet faucet). */
   onboarding?: NearOnboarding;
+  /** How long sign-in waits for onboarding (25 s); after that it finishes in the background. */
+  onboardingTimeoutMs?: number;
   /** How long a nonce can be used. */
   nonceTtlSeconds?: number;
   now?: () => Date;
@@ -170,9 +172,24 @@ export class AuthService {
     if (!valid) throw new AppError('invalid_signature', 'The signature does not match the account', 401);
 
     const response = await this.signIn(fields.nonce, fields.account as Address, now);
-    // Not awaited: onboarding sends transactions, and never throws.
-    void this.deps.onboarding?.onboard(response.user.walletAddress);
+    await this.onboard(response.user.walletAddress);
     return response;
+  }
+
+  /**
+   * Testnet onboarding before the token is returned, so the first quote finds the account funded. It does
+   * nothing for an onboarded account, never throws, and is waited for at most `onboardingTimeoutMs`
+   * (then it carries on in the background).
+   */
+  private async onboard(accountId: string): Promise<void> {
+    const { onboarding } = this.deps;
+    if (!onboarding) return;
+    let timer: NodeJS.Timeout | undefined;
+    const timeout = new Promise<void>((resolve) => {
+      timer = setTimeout(resolve, this.deps.onboardingTimeoutMs ?? 25_000);
+    });
+    await Promise.race([onboarding.onboard(accountId), timeout]);
+    clearTimeout(timer);
   }
 
   private async signIn(nonce: string, address: Address, now: Date): Promise<SignInResponse> {

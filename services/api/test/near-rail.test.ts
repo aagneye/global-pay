@@ -3,6 +3,9 @@ import { KeyPairSigner, baseDecode } from 'near-api-js';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { publicKeyOfImplicitAccount } from '../src/adapters/near/keys.js';
 import { buildPromptPayQr } from '../src/lib/promptpay/build.js';
+import { AuthService } from '../src/modules/auth/service.js';
+import { AccessTokens } from '../src/modules/auth/tokens.js';
+import { createMemoryRepositories } from './support/memory-repositories.js';
 import { ANVIL } from './support/anvil.js';
 import { type TestApp, buildTestApp } from './support/app.js';
 import { FakeNearGateway, RecordingOnboarding } from './support/fake-near.js';
@@ -238,6 +241,41 @@ describe('NEAR rail: payments', () => {
     expect(p2p.json().error).toBe('not_configured');
     const onramp = await app.inject({ method: 'POST', url: '/onramp/orders', headers: session.auth, payload: { fiatAmountMinor: '100000' } });
     expect(onramp.statusCode).toBe(503);
+  });
+});
+
+describe('NEAR rail: onboarding at sign-in', () => {
+  async function signInWith(onboard: (accountId: string) => Promise<void>) {
+    const auth = new AuthService({
+      ...createMemoryRepositories(),
+      tokens: new AccessTokens({ secret: 'x'.repeat(32), ttlSeconds: 3600 }),
+      chainId: 1,
+      domain: 'globalpay.local',
+      rail: 'near',
+      onboarding: { onboard },
+      onboardingTimeoutMs: 50,
+    });
+    const { message, nonce } = await auth.createNonce(PAYER as never);
+    const signed = await new KeyPairSigner(NEAR.payerKey).signNep413Message(PAYER, {
+      message,
+      recipient: 'globalpay.local',
+      nonce: Buffer.from(nonce, 'hex'),
+    });
+    return auth.verify(message, Buffer.from(signed.signature).toString('base64'), PAYER_PUBLIC_KEY);
+  }
+
+  it('waits for the faucet before returning the token', async () => {
+    let funded = false;
+    await signInWith(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      funded = true;
+    });
+    expect(funded).toBe(true);
+  });
+
+  it('gives up waiting after the timeout', async () => {
+    const response = await signInWith(() => new Promise(() => undefined));
+    expect(response.user.walletAddress).toBe(PAYER);
   });
 });
 

@@ -111,7 +111,7 @@ export const envSchema = z.object({
   NEAR_TREASURY_ACCOUNT_ID: nearAccountIdSchema.optional(),
   /**
    * Testnet only: on a NEAR user's first sign-in, the relayer creates their account with 0.05 NEAR,
-   * registers it with the token and mints 1,000 test USDC (the relayer must own the test token).
+   * registers it with the token and mints 1,000 test USDC (the relayer must be the test token's minter).
    */
   NEAR_TESTNET_FAUCET: z.stringbool().default(false),
   NEAR_EXPLORER_URL: z.url().default('https://testnet.nearblocks.io'),
