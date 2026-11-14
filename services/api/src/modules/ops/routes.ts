@@ -51,7 +51,8 @@ export const opsRoutes: FastifyPluginAsyncZod<{ ops: OpsService; token: string |
   await app.register(async (scope) => {
     const api = scope.withTypeProvider<ZodTypeProvider>();
     api.setReplySerializer(serialize);
-    api.addHook('onRequest', async (request, reply) => {
+    // preValidation, not onRequest: the rate limit (a route onRequest hook) runs first, so wrong tokens count.
+    api.addHook('preValidation', async (request, reply) => {
       const given = request.headers[TOKEN_HEADER];
       const actual = Buffer.from(typeof given === 'string' ? given : '');
       if (actual.length !== expected.length || !timingSafeEqual(actual, expected)) {

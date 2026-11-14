@@ -57,7 +57,7 @@ src/
   workers/            indexer (chain events), payout worker (pay out, then settle or refund),
                       onramp worker (Add-money orders), deposit watcher (incoming USDC),
                       p2p worker (tap-to-pay expiry and receipts)
-  shared/             errors, zod schemas, auth hook
+  shared/             errors, zod schemas, auth hook, rate limits
   generated/prisma/   Prisma client (generated on npm install, gitignored)
 prisma/               schema and migrations
 scripts/              developer tools (demo QR generator, Xendit sandbox check, OpenAPI export)
@@ -160,11 +160,31 @@ An order is COMPLETED only once a confirmed transfer of the reported amount reac
 
 Push needs `FCM_SERVICE_ACCOUNT_FILE`; without it the apps poll. The rules are in [ADR 0010](../../docs/adr/0010-tap-to-pay.md).
 
+## Hardening
+
+**Rate limits** (`src/shared/rate-limits.ts`, `RATE_LIMIT_*` settings). Every route has a limit per window (`RATE_LIMIT_WINDOW_MS`, a minute by default):
+
+| Routes | Keyed by | Setting (default) |
+|---|---|---|
+| `POST /auth/nonce`, `POST /auth/verify` | IP | `RATE_LIMIT_AUTH_MAX` (30) |
+| `POST /quotes`, `POST /payments` | signed-in user, else IP | `RATE_LIMIT_PAYMENTS_MAX` (30) |
+| `POST /onramp/orders` | signed-in user, else IP | `RATE_LIMIT_ONRAMP_MAX` (10) |
+| `POST /p2p/requests`, `.../tap`, `.../claim`, `.../approve` | signed-in user, else IP | `RATE_LIMIT_P2P_MAX` (30) |
+| `POST /devices` | signed-in user, else IP | `RATE_LIMIT_DEVICES_MAX` (10) |
+| `POST /webhooks/*` | IP | `RATE_LIMIT_WEBHOOKS_MAX` (1200) |
+| `/ops/api/*` (wrong tokens count too) | IP | `RATE_LIMIT_OPS_MAX` (120) |
+| everything else, including unknown URLs (shared budget) | IP | `RATE_LIMIT_MAX` (600) |
+
+- Each route in the table has its own counter. `/health` is never limited.
+- Over the limit, the API answers `429 {"error":"rate_limited","message":"…"}` with `Retry-After` (seconds). Every response carries `X-RateLimit-Limit`, `-Remaining` and `-Reset`.
+- Counters live in memory, per process. Run several instances and each one counts on its own; a shared store (Redis) is the step after that.
+- Behind a load balancer, set `TRUST_PROXY` (e.g. `1`), or every client shares the balancer's IP.
+
 ## Conventions
 
 - **Money:** integers in minor units (`bigint`). Over HTTP, amounts are integer strings (`"10000"` = 100.00 THB).
 - **Rates:** fixed-point `rateE8`, meaning fiat major units per 1 token × 1e8.
 - **Rounding:** token amounts round up, so GlobalPay never receives less than it pays out.
 - **Hex values:** addresses and hashes are 0x-prefixed. Store them lowercase; return addresses checksummed.
-- **Errors:** `{ "error": "<code>", "message": "…" }` with a stable code, e.g. `kyc_required`, `invalid_qr`.
+- **Errors:** `{ "error": "<code>", "message": "…" }` with a stable code, e.g. `kyc_required`, `invalid_qr`, `rate_limited`, `not_found`.
 - **Partners:** a new partner is a new adapter for an existing port.

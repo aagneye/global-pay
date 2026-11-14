@@ -24,6 +24,7 @@ import { payoutWebhookRoutes } from './modules/payouts/webhook-routes.js';
 import { quoteRoutes } from './modules/quotes/routes.js';
 import { AppError } from './shared/errors.js';
 import { namedSchemasTransform } from './shared/openapi.js';
+import { registerRateLimits } from './shared/rate-limits.js';
 import { authHook } from './shared/request-user.js';
 
 export interface BuildAppOptions {
@@ -32,7 +33,10 @@ export interface BuildAppOptions {
 }
 
 export async function buildApp({ container, logger = true }: BuildAppOptions): Promise<FastifyInstance> {
-  const app = Fastify({ logger }).withTypeProvider<ZodTypeProvider>();
+  const { http } = container;
+  const hops = http.trustProxy;
+  const trustProxy = typeof hops === 'number' ? (_address: string, hop: number) => hop < hops : hops;
+  const app = Fastify({ logger, trustProxy }).withTypeProvider<ZodTypeProvider>();
 
   // Route schemas are zod: they validate requests, shape responses, and generate the OpenAPI spec.
   app.setValidatorCompiler(validatorCompiler);
@@ -66,6 +70,12 @@ export async function buildApp({ container, logger = true }: BuildAppOptions): P
     request.log.error(error);
     return reply.code(500).send({ error: 'internal_error', message: 'Something went wrong' });
   });
+
+  // Before any route, so every route gets its limit.
+  const rateLimited = http.rateLimits ? await registerRateLimits(app, http.rateLimits) : undefined;
+  app.setNotFoundHandler(rateLimited ? { preHandler: rateLimited } : {}, (request, reply) =>
+    reply.code(404).send({ error: 'not_found', message: `Route ${request.method} ${request.url.split('?')[0]} not found` }),
+  );
 
   await app.register(fastifySwagger, {
     openapi: {

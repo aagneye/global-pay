@@ -26,6 +26,40 @@ export const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   HOST: z.string().default('0.0.0.0'),
   PORT: z.coerce.number().int().positive().default(3000),
+  /**
+   * Proxies trusted to report the client's IP (X-Forwarded-For), which rate limits key on.
+   * Unset: none (clients connect directly). A hop count (e.g. 1 behind one load balancer), or the proxies'
+   * addresses/CIDRs, comma-separated. `true` trusts any X-Forwarded-For, which clients can forge.
+   */
+  TRUST_PROXY: z
+    .string()
+    .optional()
+    .transform((value): boolean | number | string[] => {
+      if (value === undefined || value === 'false') return false;
+      if (value === 'true') return true;
+      if (/^\d+$/.test(value)) return Number(value);
+      return value.split(',').map((item) => item.trim()).filter(Boolean);
+    }),
+
+  // Rate limits: requests per RATE_LIMIT_WINDOW_MS. Each limited route has its own budget.
+  RATE_LIMIT_ENABLED: z.stringbool().default(true),
+  RATE_LIMIT_WINDOW_MS: z.coerce.number().int().min(1_000).default(60_000),
+  /** Any route without its own limit, per IP (shared by those routes). */
+  RATE_LIMIT_MAX: z.coerce.number().int().min(1).default(600),
+  /** POST /auth/nonce and /auth/verify, per IP. */
+  RATE_LIMIT_AUTH_MAX: z.coerce.number().int().min(1).default(30),
+  /** POST /quotes and POST /payments, per signed-in user (else IP). */
+  RATE_LIMIT_PAYMENTS_MAX: z.coerce.number().int().min(1).default(30),
+  /** POST /onramp/orders, per signed-in user (else IP). */
+  RATE_LIMIT_ONRAMP_MAX: z.coerce.number().int().min(1).default(10),
+  /** Tap-to-pay request, tap, claim and approve, per signed-in user (else IP). */
+  RATE_LIMIT_P2P_MAX: z.coerce.number().int().min(1).default(30),
+  /** POST /devices, per signed-in user (else IP). */
+  RATE_LIMIT_DEVICES_MAX: z.coerce.number().int().min(1).default(10),
+  /** Partner webhooks, per IP. Generous: partners retry and burst. */
+  RATE_LIMIT_WEBHOOKS_MAX: z.coerce.number().int().min(1).default(1_200),
+  /** The operator API (/ops/api/*), per IP. */
+  RATE_LIMIT_OPS_MAX: z.coerce.number().int().min(1).default(120),
 
   DATABASE_URL: z.string().min(1),
   /** Connections to Postgres. Set 1 with `prisma dev`, which can only serve one at a time. */

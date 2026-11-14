@@ -34,6 +34,7 @@ import type { RateProvider } from './ports/rate-provider.js';
 import type { Repositories } from './ports/repositories.js';
 import type { SettlementGateway } from './ports/settlement-gateway.js';
 import type { TokenReader } from './ports/token-reader.js';
+import type { RateLimitSettings } from './shared/rate-limits.js';
 import { DepositWorker } from './workers/deposit-worker.js';
 import { IndexerWorker } from './workers/indexer.js';
 import { OnrampWorker } from './workers/onramp-worker.js';
@@ -56,8 +57,17 @@ export interface Adapters {
   push: PushSender;
 }
 
+/** How the HTTP server protects itself. */
+export interface HttpSettings {
+  /** TRUST_PROXY: which proxies may report the client's IP. */
+  trustProxy: boolean | number | string[];
+  /** Null when RATE_LIMIT_ENABLED=false. */
+  rateLimits: RateLimitSettings | null;
+}
+
 export interface Container {
   tokens: AccessTokens;
+  http: HttpSettings;
   /** OPS_API_TOKEN: without it, the operator console is off. */
   opsToken: string | undefined;
   services: {
@@ -169,6 +179,7 @@ export function buildContainer(env: Env, overrides: Partial<Adapters> = {}): Con
 
   return {
     tokens,
+    http: httpSettings(env),
     opsToken: env.OPS_API_TOKEN,
     services: {
       auth: new AuthService({
@@ -271,6 +282,25 @@ export function buildContainer(env: Env, overrides: Partial<Adapters> = {}): Con
     async close() {
       await prisma?.$disconnect();
     },
+  };
+}
+
+function httpSettings(env: Env): HttpSettings {
+  return {
+    trustProxy: env.TRUST_PROXY,
+    rateLimits: env.RATE_LIMIT_ENABLED
+      ? {
+          windowMs: env.RATE_LIMIT_WINDOW_MS,
+          global: env.RATE_LIMIT_MAX,
+          auth: env.RATE_LIMIT_AUTH_MAX,
+          payments: env.RATE_LIMIT_PAYMENTS_MAX,
+          onramp: env.RATE_LIMIT_ONRAMP_MAX,
+          p2p: env.RATE_LIMIT_P2P_MAX,
+          devices: env.RATE_LIMIT_DEVICES_MAX,
+          webhooks: env.RATE_LIMIT_WEBHOOKS_MAX,
+          ops: env.RATE_LIMIT_OPS_MAX,
+        }
+      : null,
   };
 }
 
