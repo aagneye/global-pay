@@ -372,12 +372,13 @@ The [launch checklist](launch-checklist.md) breaks these down into checks and si
 
 ## After the demo (product)
 
-- USDT support (Permit2 or ERC-4337 paymaster)
+- More stablecoins than USDC, starting with USDT (on Base: Permit2 or an ERC-4337 paymaster)
 - Partner debit card
 - Disputes ("merchant not paid"), spending limits and wallet recovery screens
 - Invoices, income statements and CSV export
-- Bank-card tap as an alternative to phone-to-phone (only after a PCI review)
-- More countries: Indonesia (QRIS), Vietnam (VietQR), then India via the offshore + prepaid-wallet structure
+- Tap the phone at a shop's card terminal (POS), through an approved card-emulation partner and only after a PCI review
+- A card key bound by the issuer (tokenisation or dynamic cryptograms) instead of a salted hash checked on the phone
+- More QR rails: Indonesia (QRIS), Vietnam (VietQR) and others. India's UPI already runs on NEAR testnet with a simulated payout; going live needs a licensed partner, the offshore + prepaid-wallet structure, and India's rules (TDS, FEMA, RBI/NPCI)
 
 ## Steps that need the project owner
 
