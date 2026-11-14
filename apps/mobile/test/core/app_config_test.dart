@@ -72,6 +72,55 @@ void main() {
     });
   });
 
+  group('settlement rail', () {
+    test('defaults to EVM, with no NEAR contracts and the default sign-in recipient', () {
+      final config = AppConfig.fromEnvironment(release: false);
+      expect(config.settlementRail, SettlementRail.evm);
+      expect(config.isNear, isFalse);
+      expect(config.nearUsdcContract, isNull);
+      expect(config.nearSettlementContract, isNull);
+      expect(config.nearSignInRecipient, 'globalpay.local');
+      expect(const AppConfig(apiBaseUrl: 'http://x', chainId: 1).settlementRail, SettlementRail.evm);
+    });
+
+    test('reads the NEAR rail and its contracts; empty means unset', () {
+      final config = AppConfig.checked(
+        apiBaseUrl: 'http://10.0.2.2:3001',
+        chainId: 84532,
+        settlementRail: 'near',
+        nearUsdcContract: 'usdc.globalpay.testnet',
+        nearSettlementContract: 'settle.globalpay.testnet',
+        nearSignInRecipient: 'globalpay.example',
+        release: false,
+      );
+      expect(config.isNear, isTrue);
+      expect(config.nearUsdcContract, 'usdc.globalpay.testnet');
+      expect(config.nearSettlementContract, 'settle.globalpay.testnet');
+      expect(config.nearSignInRecipient, 'globalpay.example');
+
+      final empty = AppConfig.checked(
+        apiBaseUrl: 'http://10.0.2.2:3001',
+        chainId: 84532,
+        settlementRail: '',
+        nearUsdcContract: '',
+        nearSettlementContract: '',
+        nearSignInRecipient: '',
+        release: false,
+      );
+      expect(empty.settlementRail, SettlementRail.evm);
+      expect(empty.nearUsdcContract, isNull);
+      expect(empty.nearSettlementContract, isNull);
+      expect(empty.nearSignInRecipient, 'globalpay.local');
+    });
+
+    test('refuses an unknown rail', () {
+      expect(
+        () => AppConfig.checked(apiBaseUrl: 'http://x', chainId: 1, settlementRail: 'solana', release: false),
+        throwsA(isA<ArgumentError>().having((e) => e.name, 'name', 'SETTLEMENT_RAIL')),
+      );
+    });
+  });
+
   test('isHttps', () {
     expect(AppConfig.isHttps('https://api.globalpay.example/v1'), isTrue);
     expect(AppConfig.isHttps('HTTPS://api.globalpay.example'), isTrue);
