@@ -1,11 +1,11 @@
 import type { FiatAmount } from '../domain/money.js';
-import type { PromptPayQr } from '../domain/promptpay.js';
+import type { Merchant } from '../domain/merchant.js';
 
 export interface PayoutRequest {
   /** Sent as the partner's idempotency key and our reference, so a retry can never pay twice. */
   idempotencyKey: string;
   paymentId: string;
-  merchant: PromptPayQr;
+  merchant: Merchant;
   amount: FiatAmount;
 }
 
@@ -55,7 +55,7 @@ export interface PayoutWebhookRef {
 export interface PayoutProvider {
   readonly name: string;
   /** Whether this rail can pay this QR at all. Checked when quoting, before any money moves. */
-  supports(merchant: PromptPayQr): boolean;
+  supports(merchant: Merchant): boolean;
   /** Must be idempotent per `idempotencyKey`. */
   createPayout(request: PayoutRequest): Promise<PayoutResult>;
   getPayout(providerRef: string): Promise<PayoutResult>;

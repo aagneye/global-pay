@@ -1,5 +1,6 @@
 import type { Address, Hex } from 'viem';
 import type { PaymentStatus, PayoutStatus } from '../../domain/payment.js';
+import type { Merchant } from '../../domain/merchant.js';
 import type { PaymentWithQuote } from '../../ports/repositories.js';
 
 /** A payment as the app sees it. Amounts are integer strings in minor units. */
@@ -45,11 +46,7 @@ export function toPaymentView(
     fiatAmount: quote.fiat.minor.toString(),
     token: quote.token,
     tokenAmount: quote.tokenAmount.toString(),
-    merchant: {
-      kind: quote.merchant.kind,
-      targetId: quote.merchant.targetId,
-      ...(quote.merchant.merchantName === undefined ? {} : { name: quote.merchant.merchantName }),
-    },
+    merchant: merchantView(quote.merchant),
     transactions: {
       ...(pay ? { pay } : {}),
       ...(settle ? { settle } : {}),
@@ -68,5 +65,17 @@ export function toPaymentView(
     quoteExpiresAt: quote.expiresAt.toISOString(),
     createdAt: payment.createdAt.toISOString(),
     updatedAt: payment.updatedAt.toISOString(),
+  };
+}
+
+/** PromptPay: the QR's kind, target and name. UPI: `{ kind: 'upi', targetId: <vpa>, name }`. */
+function merchantView(merchant: Merchant): PaymentView['merchant'] {
+  if (merchant.kind === 'upi') {
+    return { kind: 'upi', targetId: merchant.vpa, ...(merchant.name === undefined ? {} : { name: merchant.name }) };
+  }
+  return {
+    kind: merchant.kind,
+    targetId: merchant.targetId,
+    ...(merchant.merchantName === undefined ? {} : { name: merchant.merchantName }),
   };
 }

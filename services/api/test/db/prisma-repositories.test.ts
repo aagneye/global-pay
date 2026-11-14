@@ -4,6 +4,8 @@ import type { PrismaClient } from '../../src/generated/prisma/client.js';
 import { buildPromptPayQr } from '../../src/lib/promptpay/build.js';
 import { merchantRef, merchantRefHash } from '../../src/lib/promptpay/merchant-ref.js';
 import { parsePromptPayQr } from '../../src/lib/promptpay/parse.js';
+import { upiMerchantRef } from '../../src/lib/upi/merchant-ref.js';
+import { parseUpiQr } from '../../src/lib/upi/parse.js';
 import type { Repositories } from '../../src/ports/repositories.js';
 import { ANVIL } from '../support/anvil.js';
 
@@ -134,6 +136,40 @@ describe.skipIf(!url)('Prisma repositories (Postgres)', () => {
       qrPayload: qr.raw,
       signature: `0x${'ab'.repeat(65)}`,
     });
+  });
+
+  it('stores a UPI quote in INR and reads its merchant back from the payload', async () => {
+    const user = await repos.users.upsertByWallet(PAYER);
+    const id = `0x${'C1'.repeat(32)}` as `0x${string}`;
+    const merchant = parseUpiQr('upi://pay?pa=Chai.Stall@okaxis&pn=Ravi%20Chai&am=250.00&cu=INR&mc=5812&tr=ORD-42');
+    const ref = upiMerchantRef(merchant.vpa);
+    await repos.quotes.create(user.id, {
+      quote: {
+        quoteId: id,
+        payer: PAYER,
+        token: ANVIL.usdc,
+        tokenAmount: 2_869_319n,
+        fiat: { currency: 'INR', minor: 250_00n },
+        rateE8: 88_00000000n,
+        spreadBps: 100,
+        merchantRef: ref,
+        merchantRefHash: merchantRefHash(ref),
+        merchant,
+        expiresAt: new Date('2026-11-12T00:01:00Z'),
+      },
+      signature: `0x${'AB'.repeat(65)}`,
+    });
+    const row = await prisma.quote.findUniqueOrThrow({ where: { id: id.toLowerCase() } });
+    expect(row).toMatchObject({
+      fiatCurrency: 'INR',
+      merchantKind: 'upi',
+      merchantRef: 'upi:chai.stall@okaxis',
+      merchantName: 'Ravi Chai',
+      qrPayload: merchant.raw,
+    });
+    const stored = await repos.quotes.findById(id);
+    expect(stored?.quote.merchant).toEqual(merchant);
+    expect(stored?.quote.fiat).toEqual({ currency: 'INR', minor: 250_00n });
   });
 
   it("sums the last 24 hours' payments, excluding failed and refunded ones", async () => {

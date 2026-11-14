@@ -3,6 +3,21 @@ import { FIAT_DECIMALS, RATE_DECIMALS, TOKEN_DECIMALS, parseDecimal } from '../d
 import { addressSchema, nearAccountIdSchema, nearPrivateKeySchema, privateKeySchema } from '../shared/schemas.js';
 import { ANVIL_CHAIN_ID, isPublicTestKey } from './public-test-keys.js';
 
+/** A fixed exchange rate like "35.00" (fiat per 1 USDC), as rateE8. */
+function fixedRate(name: string, fallback: string) {
+  return z
+    .string()
+    .default(fallback)
+    .transform((value, ctx) => {
+      const rateE8 = parseDecimal(value, RATE_DECIMALS);
+      if (rateE8 === null || rateE8 <= 0n) {
+        ctx.addIssue({ code: 'custom', message: `${name} must be a positive decimal, e.g. ${fallback}` });
+        return z.NEVER;
+      }
+      return rateE8;
+    });
+}
+
 /** A THB amount like "5000" or "5000.00", as satang. */
 function thbAmount(name: string, fallback: string) {
   return z
@@ -120,20 +135,12 @@ export const envSchema = z.object({
   SPREAD_BPS: z.coerce.number().int().min(0).max(1_000).default(100),
   MERCHANT_QR_ONLY: z.stringbool().default(false),
 
-  /** `public`: Coinbase's public USDC rates. `fixed`: FIXED_USDC_THB_RATE (offline development and tests). */
+  /** `public`: Coinbase's public USDC rates. `fixed`: FIXED_USDC_THB_RATE and FIXED_USDC_INR_RATE (offline development and tests). */
   RATE_SOURCE: z.enum(['public', 'fixed']).default('public'),
   /** THB per 1 USDC, as a decimal. Becomes rateE8. */
-  FIXED_USDC_THB_RATE: z
-    .string()
-    .default('35.00')
-    .transform((value, ctx) => {
-      const rateE8 = parseDecimal(value, RATE_DECIMALS);
-      if (rateE8 === null || rateE8 <= 0n) {
-        ctx.addIssue({ code: 'custom', message: 'FIXED_USDC_THB_RATE must be a positive decimal, e.g. 35.00' });
-        return z.NEVER;
-      }
-      return rateE8;
-    }),
+  FIXED_USDC_THB_RATE: fixedRate('FIXED_USDC_THB_RATE', '35.00'),
+  /** INR per 1 USDC, as a decimal (card terminal charges). Becomes rateE8. */
+  FIXED_USDC_INR_RATE: fixedRate('FIXED_USDC_INR_RATE', '88.00'),
 
   /** `simulated`: no money moves (local and tests). `xendit`: Xendit payouts (sandbox first). */
   PAYOUT_PROVIDER: z.enum(['simulated', 'xendit']).default('simulated'),

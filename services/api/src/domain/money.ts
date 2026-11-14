@@ -3,16 +3,16 @@
  * Never use floating point for amounts or rates.
  */
 
-export type FiatCurrency = 'THB';
+export type FiatCurrency = 'THB' | 'INR';
 export type TokenSymbol = 'USDC';
 
-export const FIAT_DECIMALS: Record<FiatCurrency, number> = { THB: 2 };
+export const FIAT_DECIMALS: Record<FiatCurrency, number> = { THB: 2, INR: 2 };
 export const TOKEN_DECIMALS: Record<TokenSymbol, number> = { USDC: 6 };
 
 /** ISO 4217 numeric codes, as used in EMVCo QR tag 53. */
-export const ISO_4217_NUMERIC: Record<FiatCurrency, string> = { THB: '764' };
+export const ISO_4217_NUMERIC: Record<FiatCurrency, string> = { THB: '764', INR: '356' };
 
-/** Fiat amount in minor units, e.g. THB satang (10000n = 100.00 THB). */
+/** Fiat amount in minor units, e.g. THB satang (10000n = 100.00 THB) or INR paise. */
 export interface FiatAmount {
   currency: FiatCurrency;
   minor: bigint;

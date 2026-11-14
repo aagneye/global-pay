@@ -20,7 +20,7 @@ import {
   type Payout as PayoutRow,
   type Quote as QuoteRow,
 } from '../../generated/prisma/client.js';
-import { parsePromptPayQr } from '../../lib/promptpay/parse.js';
+import { parseMerchantQr } from '../../lib/merchant.js';
 import { afterCursor } from './paging.js';
 import { PrismaDepositRepository, PrismaOnrampOrderRepository } from './prisma-onramp-repositories.js';
 import { PrismaDeviceRepository, PrismaPaymentRequestRepository } from './prisma-p2p-repositories.js';
@@ -191,7 +191,7 @@ export class PrismaQuoteRepository implements QuoteRepository {
         merchantKind: quote.merchant.kind,
         merchantRef: quote.merchantRef,
         merchantRefHash: lower(quote.merchantRefHash),
-        merchantName: quote.merchant.merchantName ?? null,
+        merchantName: (quote.merchant.kind === 'upi' ? quote.merchant.name : quote.merchant.merchantName) ?? null,
         qrPayload: quote.merchant.raw,
         signature: lowerHex(signature),
         expiresAt: quote.expiresAt,
@@ -219,7 +219,7 @@ function toStoredQuote(row: QuoteRow): StoredQuote {
       spreadBps: row.spreadBps,
       merchantRef: row.merchantRef,
       merchantRefHash: row.merchantRefHash as Hex,
-      merchant: parsePromptPayQr(row.qrPayload),
+      merchant: parseMerchantQr(row.qrPayload),
       expiresAt: row.expiresAt,
     },
   };

@@ -169,7 +169,9 @@ export function buildContainer(env: Env, overrides: Partial<Adapters> = {}): Con
   const kycProvider = overrides.kyc ?? new MockKycProvider();
   const rates =
     overrides.rates ??
-    (env.RATE_SOURCE === 'fixed' ? new FixedRateProvider(env.FIXED_USDC_THB_RATE) : new PublicFeedRateProvider());
+    (env.RATE_SOURCE === 'fixed'
+      ? new FixedRateProvider({ THB: env.FIXED_USDC_THB_RATE, INR: env.FIXED_USDC_INR_RATE })
+      : new PublicFeedRateProvider());
   const payoutProvider = overrides.payouts ?? buildPayoutProvider(env);
   const payoutTracker = new PayoutTracker({
     payouts: repositories.payouts,

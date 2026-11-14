@@ -160,6 +160,8 @@ function nearPaymentDto(payment: NearPaymentToSign): z.infer<typeof NearPayment>
 function toDto({ quote, signature, pricing, authorizationToSign, nearPayment }: QuoteResponse): z.infer<typeof QuoteDto> {
   const struct = quoteStruct(quote);
   const { merchant } = quote;
+  // Quotes are for PromptPay QRs in THB; UPI card charges never come through here.
+  if (merchant.kind === 'upi' || quote.fiat.currency !== 'THB') throw new Error('Only PromptPay quotes in THB have a QuoteResponse');
   return {
     quote: {
       quoteId: struct.quoteId,

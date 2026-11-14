@@ -1,6 +1,6 @@
 import type { Address, Hex } from 'viem';
 import type { FiatAmount } from './money.js';
-import type { PromptPayQr } from './promptpay.js';
+import type { Merchant } from './merchant.js';
 
 /**
  * A price quote for paying a PromptPay QR with a stablecoin.
@@ -20,11 +20,11 @@ export interface Quote {
   /** Fiat major units per 1 token, scaled by RATE_SCALE (1e8), before the spread. */
   rateE8: bigint;
   spreadBps: number;
-  /** Normalised payee reference, e.g. "promptpay:biller:099999999999901". */
+  /** Normalised payee reference, e.g. "promptpay:biller:099999999999901" or "upi:chai@okaxis". */
   merchantRef: string;
   /** keccak256 of `merchantRef`. */
   merchantRefHash: Hex;
-  merchant: PromptPayQr;
+  merchant: Merchant;
   expiresAt: Date;
 }
 

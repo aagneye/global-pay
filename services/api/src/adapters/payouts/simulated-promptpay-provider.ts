@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import type { Merchant } from '../../domain/merchant.js';
 import type { FiatAmount } from '../../domain/money.js';
 import type { PayoutProvider, PayoutRequest, PayoutResult } from '../../ports/payout-provider.js';
 
@@ -35,8 +36,9 @@ export class SimulatedPromptPayProvider implements PayoutProvider {
     this.now = options.now ?? Date.now;
   }
 
-  supports(): boolean {
-    return true;
+  /** Any PromptPay QR; UPI merchants go to SimulatedUpiProvider. */
+  supports(merchant: Merchant): boolean {
+    return merchant.kind !== 'upi';
   }
 
   async createPayout(request: PayoutRequest): Promise<PayoutResult> {

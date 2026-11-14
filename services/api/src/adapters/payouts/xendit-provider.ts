@@ -1,7 +1,7 @@
 import { timingSafeEqual } from 'node:crypto';
 import { z } from 'zod';
 import { FIAT_DECIMALS, type FiatAmount, formatMinor, parseDecimal } from '../../domain/money.js';
-import type { PromptPayQr } from '../../domain/promptpay.js';
+import type { Merchant } from '../../domain/merchant.js';
 import type {
   PayoutProvider,
   PayoutRequest,
@@ -72,7 +72,7 @@ export class XenditPayoutProvider implements PayoutProvider {
     this.now = options.now ?? Date.now;
   }
 
-  supports(merchant: PromptPayQr): boolean {
+  supports(merchant: Merchant): boolean {
     return this.destinationFor(merchant) !== null;
   }
 
@@ -180,7 +180,9 @@ export class XenditPayoutProvider implements PayoutProvider {
     return ref.providerRef || ref.idempotencyKey ? ref : null;
   }
 
-  private destinationFor(merchant: PromptPayQr): XenditDestination | null {
+  /** PromptPay only: UPI merchants have no Xendit destination. */
+  private destinationFor(merchant: Merchant): XenditDestination | null {
+    if (merchant.kind === 'upi') return null;
     const test = this.options.testDestinations?.[merchant.targetId];
     if (test) return test;
     if (merchant.kind === 'personal' && this.options.promptPayChannelCode) {
