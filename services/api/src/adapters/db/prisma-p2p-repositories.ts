@@ -107,6 +107,17 @@ export class PrismaPaymentRequestRepository implements PaymentRequestRepository 
     return count === 1;
   }
 
+  async transitionIfUnsent(id: string, from: P2pStatus, to: P2pStatus): Promise<boolean> {
+    assertP2pTransition(from, to);
+    const { count } = await this.prisma.paymentRequest.updateMany({ where: { id, status: from, txHash: null }, data: { status: to } });
+    return count === 1;
+  }
+
+  async recordTxHash(id: string, status: P2pStatus, txHash: Hex): Promise<boolean> {
+    const { count } = await this.prisma.paymentRequest.updateMany({ where: { id, status }, data: { txHash: lower(txHash) } });
+    return count === 1;
+  }
+
   async countOpenByReceiver(receiverId: string): Promise<number> {
     return this.prisma.paymentRequest.count({ where: { receiverId, status: { in: ['CREATED', 'SENDER_IDENTIFIED'] } } });
   }

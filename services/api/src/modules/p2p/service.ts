@@ -7,7 +7,7 @@ import { isP256PublicKey, verifyTapSignature } from '../../lib/p256.js';
 import { TRANSFER_WITH_AUTHORIZATION_TYPES } from '../../lib/typed-data.js';
 import type { PushMessage, PushSender } from '../../ports/push-sender.js';
 import type { DeviceRepository, KycRepository, PaymentRequestRepository, UserRepository } from '../../ports/repositories.js';
-import { ChainUnavailableError, type SettlementGateway } from '../../ports/settlement-gateway.js';
+import type { SettlementGateway } from '../../ports/settlement-gateway.js';
 import { AppError } from '../../shared/errors.js';
 
 export interface P2pServiceDeps {
@@ -66,7 +66,6 @@ export class P2pService {
   private readonly deps: P2pServiceDeps;
   private readonly now: () => Date;
   private readonly random32: () => Hex;
-  private readonly approving = new Set<string>();
 
   constructor(deps: P2pServiceDeps) {
     this.deps = deps;
@@ -171,20 +170,30 @@ export class P2pService {
     return this.typedData(request);
   }
 
-  /** The sender approved: check the signature against the stored request, then relay the transfer. */
+  /**
+   * The sender approved: check the signature against the stored request, then relay the transfer.
+   *
+   * The request is claimed first (SENDER_IDENTIFIED → APPROVING, conditionally), so the receiver can't
+   * cancel it and the worker can't expire it while the transfer goes out. The transfer's hash is stored
+   * before it's broadcast, and only while the request is still APPROVING. So a request without a hash
+   * has had nothing sent, and goes back to SENDER_IDENTIFIED on an error (the sender can try again);
+   * one with a hash becomes SUBMITTED, and the worker reads its receipt.
+   */
   async approve(senderId: string, requestId: string, signature: Hex): Promise<P2pRequestView> {
+    const { requests, gateway } = this.deps;
     const request = await this.awaitingSender(senderId, requestId);
     await this.requireVerified(senderId);
     const typed = await this.typedData(request);
     const valid = await verifyTypedData({ address: request.senderAddress!, signature, ...typed }).catch(() => false);
     if (!valid) throw new AppError('invalid_signature', "The signature doesn't match this request", 422);
 
-    if (this.approving.has(requestId)) throw new AppError('request_in_progress', 'This request is already being approved', 409);
-    this.approving.add(requestId);
+    if (!(await requests.transition(requestId, 'SENDER_IDENTIFIED', 'APPROVING'))) {
+      throw new AppError('request_unavailable', 'This request was just cancelled, expired or approved', 409);
+    }
+    let txHash: Hex;
     try {
-      let txHash: Hex;
-      try {
-        txHash = await this.deps.gateway.submitTransfer({
+      txHash = await gateway.submitTransfer(
+        {
           token: request.token,
           from: request.senderAddress!,
           to: request.receiverAddress,
@@ -193,22 +202,30 @@ export class P2pService {
           validBefore: request.validBefore,
           nonce: request.nonce,
           signature,
-        });
-      } catch (error) {
-        // Signed and maybe sent: record it, and let the worker find out from the receipt.
-        if (error instanceof ChainUnavailableError && error.txHash) txHash = error.txHash;
-        else throw error;
-      }
-      await this.deps.requests.transition(requestId, 'SENDER_IDENTIFIED', 'SUBMITTED', { txHash });
-    } finally {
-      this.approving.delete(requestId);
+        },
+        {
+          beforeBroadcast: async (hash) => {
+            if (!(await requests.recordTxHash(requestId, 'APPROVING', hash))) {
+              throw new AppError('request_unavailable', 'This request changed while it was being approved; nothing was sent', 409);
+            }
+          },
+        },
+      );
+    } catch (error) {
+      // Nothing stored, nothing sent: hand it back. Otherwise it may have been sent: the receipt decides.
+      if (await requests.transitionIfUnsent(requestId, 'APPROVING', 'SENDER_IDENTIFIED')) throw error;
+      const current = await requests.findById(requestId);
+      if (!current?.txHash) throw error;
+      await requests.transition(requestId, 'APPROVING', 'SUBMITTED');
+      return this.view((await requests.findById(requestId)) ?? current, senderId);
     }
-    return this.view((await this.deps.requests.findById(requestId)) ?? request, senderId);
+    await requests.transition(requestId, 'APPROVING', 'SUBMITTED', { txHash });
+    return this.view((await requests.findById(requestId)) ?? request, senderId);
   }
 
   async decline(senderId: string, requestId: string): Promise<P2pRequestView> {
     const request = await this.awaitingSender(senderId, requestId);
-    await this.deps.requests.transition(requestId, 'SENDER_IDENTIFIED', 'DECLINED');
+    if (!(await this.deps.requests.transition(requestId, 'SENDER_IDENTIFIED', 'DECLINED'))) throw changedMeanwhile();
     return this.view((await this.deps.requests.findById(requestId)) ?? request, senderId);
   }
 
@@ -217,7 +234,8 @@ export class P2pService {
     if (request.status !== 'CREATED' && request.status !== 'SENDER_IDENTIFIED') {
       throw new AppError('request_unavailable', `The request is ${request.status}`, 409);
     }
-    await this.deps.requests.transition(requestId, request.status, 'CANCELLED');
+    // Conditional: a request the sender has just started approving can't be cancelled any more.
+    if (!(await this.deps.requests.transition(requestId, request.status, 'CANCELLED'))) throw changedMeanwhile();
     return this.view((await this.deps.requests.findById(requestId)) ?? request, receiverId);
   }
 
@@ -307,6 +325,10 @@ export class P2pService {
       },
     };
   }
+}
+
+function changedMeanwhile(): AppError {
+  return new AppError('request_unavailable', 'The request changed meanwhile (approved, cancelled or expired)', 409);
 }
 
 function usdc(units: bigint): string {

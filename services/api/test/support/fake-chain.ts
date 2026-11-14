@@ -2,6 +2,7 @@ import { type Address, type Hex, keccak256, toHex } from 'viem';
 import type { TransferAuthorization } from '../../src/domain/p2p.js';
 import type { ReceiveAuthorization, SignedQuote } from '../../src/domain/quote.js';
 import {
+  type BroadcastOptions,
   ChainUnavailableError,
   type OnChainPaymentStatus,
   type PaymentReceivedEvent,
@@ -66,7 +67,7 @@ export class FakeChain implements SettlementGateway {
   }
 
   /** Moves the tokens like USDC would; `quoteId` in `sent` is the authorization nonce. Signatures aren't checked. */
-  async submitTransfer(auth: TransferAuthorization): Promise<Hex> {
+  async submitTransfer(auth: TransferAuthorization, options: BroadcastOptions = {}): Promise<Hex> {
     const key = `${auth.from.toLowerCase()}:${auth.nonce.toLowerCase()}`;
     return this.write('transferWithAuthorization', auth.nonce, () => {
       if (this.usedNonces.has(key)) return 'AuthorizationAlreadyUsed';
@@ -78,7 +79,7 @@ export class FakeChain implements SettlementGateway {
       const to = auth.to.toLowerCase();
       this.balances.set(from, (this.balances.get(from) ?? 0n) - auth.value);
       this.balances.set(to, (this.balances.get(to) ?? 0n) + auth.value);
-    });
+    }, options.beforeBroadcast);
   }
 
   async markSettled(quoteId: Hex): Promise<Hex> {
@@ -154,6 +155,7 @@ export class FakeChain implements SettlementGateway {
     quoteId: Hex,
     check: () => string | null,
     effect: (hash: Hex) => void,
+    beforeBroadcast?: (hash: Hex) => Promise<void>,
   ): Promise<Hex> {
     if (this.failNextWrite) {
       const error = this.failNextWrite;
@@ -164,6 +166,7 @@ export class FakeChain implements SettlementGateway {
     if (rejection) throw new TransactionRejectedError(rejection);
 
     const hash = keccak256(toHex(`tx-${++this.txCount}`));
+    if (beforeBroadcast) await beforeBroadcast(hash);
     this.sent.push({ functionName, quoteId, hash });
     const reverts = this.revertNextWrite;
     this.revertNextWrite = false;

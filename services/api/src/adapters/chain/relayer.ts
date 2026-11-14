@@ -15,7 +15,7 @@ import {
   encodeFunctionData,
   keccak256,
 } from 'viem';
-import { ChainUnavailableError, TransactionRejectedError } from '../../ports/settlement-gateway.js';
+import { type BroadcastOptions, ChainUnavailableError, TransactionRejectedError } from '../../ports/settlement-gateway.js';
 
 export interface ContractCall {
   address: Address;
@@ -77,14 +77,18 @@ export class Relayer {
     return this.wallet.account.address;
   }
 
-  /** Simulates, signs and broadcasts `call`. Resolves with the hash once a node has accepted it. */
-  send(call: ContractCall): Promise<Hex> {
-    const result = this.queue.then(() => this.sendNow(call));
+  /**
+   * Simulates, signs and broadcasts `call`. Resolves with the hash once a node has accepted it.
+   * `beforeBroadcast` runs with each signed transaction's hash before it's broadcast; if it throws, the
+   * transaction isn't broadcast and its error is passed on.
+   */
+  send(call: ContractCall, options: BroadcastOptions = {}): Promise<Hex> {
+    const result = this.queue.then(() => this.sendNow(call, options));
     this.queue = result.catch(() => undefined);
     return result;
   }
 
-  private async sendNow(call: ContractCall): Promise<Hex> {
+  private async sendNow(call: ContractCall, { beforeBroadcast }: BroadcastOptions): Promise<Hex> {
     await this.checkChain();
     await this.simulate(call);
     const data = encodeFunctionData(call);
@@ -102,6 +106,8 @@ export class Relayer {
         await this.sleep(this.retryDelayMs * round);
         continue;
       }
+      // Not sent yet, so the tracked nonce is still right if this throws.
+      if (beforeBroadcast) await beforeBroadcast(signed.hash);
       lastHash = signed.hash;
       const outcome = await this.broadcast(signed);
       if (outcome === 'sent') {

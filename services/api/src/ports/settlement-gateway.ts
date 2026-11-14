@@ -54,6 +54,11 @@ export class ChainUnavailableError extends AppError {
   }
 }
 
+export interface BroadcastOptions {
+  /** Called with a signed transaction's hash before it's broadcast, e.g. to store it first. Throw to stop. */
+  beforeBroadcast?: (txHash: Hex) => Promise<void>;
+}
+
 /**
  * Everything the backend does on-chain, through the GlobalPaySettlement contract.
  * Writes are simulated first: a call that would revert throws TransactionRejectedError and sends nothing.
@@ -62,8 +67,12 @@ export interface SettlementGateway {
   /** Relayer submits `pay()` and pays the gas. Returns the transaction hash once the node accepted it. */
   submitPayment(signed: SignedQuote, authorization: ReceiveAuthorization): Promise<Hex>;
   markSettled(quoteId: Hex): Promise<Hex>;
-  /** Relayer submits USDC `transferWithAuthorization` (person-to-person) and pays the gas. */
-  submitTransfer(authorization: TransferAuthorization): Promise<Hex>;
+  /**
+   * Relayer submits USDC `transferWithAuthorization` (person-to-person) and pays the gas.
+   * `beforeBroadcast` gets each signed transaction's hash before it's broadcast; if it throws, that
+   * transaction is never broadcast and the error is passed on.
+   */
+  submitTransfer(authorization: TransferAuthorization, options?: BroadcastOptions): Promise<Hex>;
   refund(quoteId: Hex): Promise<Hex>;
   /** Waits until the transaction is in a block. */
   waitForReceipt(txHash: Hex): Promise<TxReceipt>;

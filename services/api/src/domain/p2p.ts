@@ -6,14 +6,21 @@ import { AppError } from '../shared/errors.js';
  * is identified by tapping phones (or scanning the receiver's QR), approves on their own phone, and signs
  * a gasless USDC transfer that the backend relays.
  *
- *   CREATED ──▶ SENDER_IDENTIFIED ──▶ SUBMITTED ──▶ COMPLETED
- *      │               │                   └──────▶ FAILED (the transfer reverted)
- *      │               ├──▶ DECLINED (by the sender)
+ *   CREATED ──▶ SENDER_IDENTIFIED ──▶ APPROVING ──▶ SUBMITTED ──▶ COMPLETED
+ *      │               │    ▲             │                └──────▶ FAILED (the transfer reverted)
+ *      │               │    └─────────────┤ (nothing was sent: the sender can try again)
+ *      │               ├──▶ DECLINED      └──▶ COMPLETED / FAILED / EXPIRED (see below)
  *      └───────────────┴──▶ EXPIRED (not approved in time) / CANCELLED (by the receiver)
+ *
+ * APPROVING claims the request while its transfer is relayed, so the receiver can't cancel it and the
+ * worker can't expire it under a transfer that lands. The transfer's hash is stored before it's
+ * broadcast, so an APPROVING request without a hash has had nothing sent: only then may it go back to
+ * SENDER_IDENTIFIED (or EXPIRED). With a hash, its receipt decides, as for SUBMITTED.
  */
 export const P2P_STATUSES = [
   'CREATED',
   'SENDER_IDENTIFIED',
+  'APPROVING',
   'SUBMITTED',
   'COMPLETED',
   'FAILED',
@@ -25,7 +32,8 @@ export type P2pStatus = (typeof P2P_STATUSES)[number];
 
 const P2P_TRANSITIONS: Record<P2pStatus, readonly P2pStatus[]> = {
   CREATED: ['SENDER_IDENTIFIED', 'EXPIRED', 'CANCELLED'],
-  SENDER_IDENTIFIED: ['SUBMITTED', 'EXPIRED', 'DECLINED', 'CANCELLED'],
+  SENDER_IDENTIFIED: ['APPROVING', 'EXPIRED', 'DECLINED', 'CANCELLED'],
+  APPROVING: ['SUBMITTED', 'SENDER_IDENTIFIED', 'EXPIRED', 'COMPLETED', 'FAILED'],
   SUBMITTED: ['COMPLETED', 'FAILED'],
   COMPLETED: [],
   FAILED: [],

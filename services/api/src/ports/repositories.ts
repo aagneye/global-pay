@@ -253,6 +253,13 @@ export interface PaymentRequestRepository {
   identifySender(id: string, sender: { senderId: string; senderAddress: string; senderDeviceId?: string }, now: Date): Promise<boolean>;
   /** Moves the request only if it's still in `from`; false if something else moved it first. */
   transition(id: string, from: P2pStatus, to: P2pStatus, fields?: P2pFields): Promise<boolean>;
+  /**
+   * Like `transition`, but only if no transfer hash is stored: hashes are stored before broadcasting, so
+   * then nothing was sent. Used to hand an APPROVING request back (or expire it).
+   */
+  transitionIfUnsent(id: string, from: P2pStatus, to: P2pStatus): Promise<boolean>;
+  /** Stores the hash of a transfer about to be broadcast, only while the request is in `status`. */
+  recordTxHash(id: string, status: P2pStatus, txHash: Hex): Promise<boolean>;
   /** CREATED or SENDER_IDENTIFIED requests this user is receiving. */
   countOpenByReceiver(receiverId: string): Promise<number>;
   /** Unexpired requests waiting for this sender's approval, newest first. */

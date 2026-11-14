@@ -153,6 +153,132 @@ describe('tap to pay', () => {
     expect((await call('GET', `/p2p/requests/${created.id}`, receiver)).json().status).toBe('EXPIRED');
   });
 
+  describe('while the transfer is being relayed', () => {
+    /** A tapped request, and a hook that runs inside the relay, between approve's checks and the send. */
+    async function approving() {
+      const t = await setup();
+      const senderPhone = await t.phone(t.sender, 'fcm-1');
+      const created = await t.request('5000000');
+      await t.tap(created.id, senderPhone.id, senderPhone.signTap(created.challenge));
+      const submit = t.chain.submitTransfer.bind(t.chain);
+      const during = (fn: () => Promise<void>) => {
+        t.chain.submitTransfer = async (auth, options) => {
+          t.chain.submitTransfer = submit;
+          await fn();
+          return submit(auth, options);
+        };
+      };
+      const stored = () => t.repos.state.paymentRequests.get(created.id)!;
+      return { ...t, created, during, stored };
+    }
+
+    it("can't be cancelled by the receiver: the transfer is recorded", async () => {
+      const t = await approving();
+      let cancel: Awaited<ReturnType<typeof t.call>> | undefined;
+      t.during(async () => {
+        cancel = await t.call('POST', `/p2p/requests/${t.created.id}/cancel`, t.receiver);
+      });
+
+      const approved = await t.approve(t.created.id);
+      expect(cancel?.statusCode).toBe(409);
+      expect(approved.json()).toMatchObject({ status: 'SUBMITTED', transaction: { hash: expect.stringMatching(/^0x/) } });
+      await t.container.workers.p2p.tick();
+      expect(t.stored()).toMatchObject({ status: 'COMPLETED', txHash: t.chain.sent.at(-1)?.hash });
+    });
+
+    it("isn't expired by the worker: the transfer is recorded", async () => {
+      const t = await approving();
+      t.during(async () => {
+        t.stored().expiresAt = new Date(Date.now() - 1_000);
+        await t.container.workers.p2p.tick();
+      });
+
+      const approved = await t.approve(t.created.id);
+      expect(approved.json()).toMatchObject({ status: 'SUBMITTED', transaction: { hash: expect.stringMatching(/^0x/) } });
+      await t.container.workers.p2p.tick();
+      expect(t.stored()).toMatchObject({ status: 'COMPLETED', txHash: t.chain.sent.at(-1)?.hash });
+    });
+
+    it("is approved once, even if the sender's phone sends approve twice", async () => {
+      const t = await approving();
+      let second: Awaited<ReturnType<typeof t.approve>> | undefined;
+      t.during(async () => {
+        second = await t.approve(t.created.id);
+      });
+      expect((await t.approve(t.created.id)).json().status).toBe('SUBMITTED');
+      expect(second?.statusCode).toBe(409);
+      expect(t.chain.sent.filter((s) => s.functionName === 'transferWithAuthorization')).toHaveLength(1);
+    });
+
+    it('is never broadcast once the worker has handed the request back', async () => {
+      const t = await approving();
+      t.during(async () => {
+        // The approval looked abandoned, so the worker handed it back before anything was sent.
+        expect(await t.repos.paymentRequests.transitionIfUnsent(t.created.id, 'APPROVING', 'SENDER_IDENTIFIED')).toBe(true);
+      });
+      const approved = await t.approve(t.created.id);
+      expect(approved.statusCode).toBe(409);
+      expect(t.chain.sent.filter((s) => s.functionName === 'transferWithAuthorization')).toHaveLength(0);
+      expect(t.stored()).toMatchObject({ status: 'SENDER_IDENTIFIED' });
+      expect(t.stored().txHash).toBeUndefined();
+    });
+  });
+
+  describe('the worker, for a request left APPROVING', () => {
+    async function leftApproving(txHash?: Hex) {
+      const t = await setup();
+      const senderPhone = await t.phone(t.sender, 'fcm-1');
+      const created = await t.request('5000000');
+      await t.tap(created.id, senderPhone.id, senderPhone.signTap(created.challenge));
+      await t.repos.paymentRequests.transition(created.id, 'SENDER_IDENTIFIED', 'APPROVING');
+      const stored = t.repos.state.paymentRequests.get(created.id)!;
+      if (txHash) stored.txHash = txHash;
+      return { ...t, created, stored };
+    }
+
+    it('completes it from the receipt when a transfer was sent (e.g. the API crashed after broadcasting)', async () => {
+      const t = await leftApproving();
+      const hash = await t.chain.submitTransfer({
+        token: ANVIL.usdc,
+        from: t.sender.address,
+        to: t.receiver.address,
+        value: 5_000_000n,
+        validAfter: 0n,
+        validBefore: t.stored.validBefore,
+        nonce: t.stored.nonce,
+        signature: '0x',
+      });
+      t.stored.txHash = hash;
+      await t.container.workers.p2p.tick();
+      expect(t.stored.status).toBe('COMPLETED');
+    });
+
+    it('hands it back once abandoned, if nothing was sent, or expires it if it is too late', async () => {
+      const t = await leftApproving();
+      await t.container.workers.p2p.tick();
+      expect(t.stored.status).toBe('APPROVING'); // maybe still being approved
+
+      t.stored.updatedAt = new Date(Date.now() - 3 * 60_000);
+      await t.container.workers.p2p.tick();
+      expect(t.stored.status).toBe('SENDER_IDENTIFIED');
+      expect((await t.approve(t.created.id)).json().status).toBe('SUBMITTED');
+
+      const late = await leftApproving();
+      late.stored.updatedAt = new Date(Date.now() - 3 * 60_000);
+      late.stored.expiresAt = new Date(Date.now() - 1_000);
+      await late.container.workers.p2p.tick();
+      expect(late.stored.status).toBe('EXPIRED');
+    });
+
+    it('never hands back or expires one with a transfer hash', async () => {
+      const t = await leftApproving(`0x${'ab'.repeat(32)}`);
+      t.stored.updatedAt = new Date(Date.now() - 60 * 60_000);
+      t.stored.expiresAt = new Date(Date.now() - 60 * 60_000);
+      await t.container.workers.p2p.tick();
+      expect(t.stored.status).toBe('APPROVING'); // waiting for a receipt; shown on /ops if it never comes
+    });
+  });
+
   it('works by QR too: the sender claims with the challenge', async () => {
     const { request, call, sender, receiver, approve } = await setup();
     const created = await request();

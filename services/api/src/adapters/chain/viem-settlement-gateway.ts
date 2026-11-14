@@ -16,6 +16,7 @@ import type { TransferAuthorization } from '../../domain/p2p.js';
 import type { ReceiveAuthorization, SignedQuote } from '../../domain/quote.js';
 import { quoteStruct } from '../../lib/typed-data.js';
 import {
+  type BroadcastOptions,
   ChainUnavailableError,
   type OnChainPaymentStatus,
   type PaymentReceivedEvent,
@@ -84,14 +85,17 @@ export class ViemSettlementGateway implements SettlementGateway {
     ]);
   }
 
-  async submitTransfer(auth: TransferAuthorization): Promise<Hex> {
+  async submitTransfer(auth: TransferAuthorization, options?: BroadcastOptions): Promise<Hex> {
     const { v, yParity, r, s } = parseSignature(auth.signature);
-    return this.getRelayer().send({
-      address: auth.token,
-      abi: usdcTransferAbi,
-      functionName: 'transferWithAuthorization',
-      args: [auth.from, auth.to, auth.value, auth.validAfter, auth.validBefore, auth.nonce, v === undefined ? yParity + 27 : Number(v), r, s],
-    });
+    return this.getRelayer().send(
+      {
+        address: auth.token,
+        abi: usdcTransferAbi,
+        functionName: 'transferWithAuthorization',
+        args: [auth.from, auth.to, auth.value, auth.validAfter, auth.validBefore, auth.nonce, v === undefined ? yParity + 27 : Number(v), r, s],
+      },
+      options,
+    );
   }
 
   async markSettled(quoteId: Hex): Promise<Hex> {

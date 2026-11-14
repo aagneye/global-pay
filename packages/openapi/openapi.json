@@ -612,6 +612,7 @@
             "enum": [
               "CREATED",
               "SENDER_IDENTIFIED",
+              "APPROVING",
               "SUBMITTED",
               "COMPLETED",
               "FAILED",
@@ -619,7 +620,7 @@
               "DECLINED",
               "CANCELLED"
             ],
-            "description": "CREATED: waiting for a tap or a scan. SENDER_IDENTIFIED: waiting for the sender to approve. SUBMITTED: transfer sent. COMPLETED and FAILED: the transfer was mined (or reverted). EXPIRED, DECLINED, CANCELLED: nothing moved."
+            "description": "CREATED: waiting for a tap or a scan. SENDER_IDENTIFIED: waiting for the sender to approve. APPROVING: the sender approved and the transfer is being sent; it can no longer be cancelled. SUBMITTED: transfer sent. COMPLETED and FAILED: the transfer was mined (or reverted). EXPIRED, DECLINED, CANCELLED: nothing moved."
           },
           "token": {
             "type": "string",

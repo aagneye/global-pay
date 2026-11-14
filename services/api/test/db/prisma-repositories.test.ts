@@ -493,7 +493,17 @@ describe.skipIf(!url)('Prisma repositories (Postgres)', () => {
     expect((await repos.paymentRequests.listAwaitingSender(sender.id, now)).map((r) => r.id)).toEqual([live.id]);
 
     const txHash = `0x${'ab'.repeat(32)}` as const;
-    await expect(repos.paymentRequests.transition(live.id, 'SENDER_IDENTIFIED', 'SUBMITTED', { txHash })).resolves.toBe(true);
+    await expect(repos.paymentRequests.transition(live.id, 'SENDER_IDENTIFIED', 'SUBMITTED', { txHash })).rejects.toThrow(/cannot move/);
+    // Approving claims the request; with nothing sent it can be handed back, and claimed again.
+    await expect(repos.paymentRequests.transition(live.id, 'SENDER_IDENTIFIED', 'APPROVING')).resolves.toBe(true);
+    await expect(repos.paymentRequests.transition(live.id, 'SENDER_IDENTIFIED', 'CANCELLED')).resolves.toBe(false);
+    await expect(repos.paymentRequests.recordTxHash(live.id, 'SENDER_IDENTIFIED', txHash)).resolves.toBe(false);
+    await expect(repos.paymentRequests.transitionIfUnsent(live.id, 'APPROVING', 'SENDER_IDENTIFIED')).resolves.toBe(true);
+    await expect(repos.paymentRequests.transition(live.id, 'SENDER_IDENTIFIED', 'APPROVING')).resolves.toBe(true);
+    // Once a hash is stored, something may have been sent: it can't be handed back or expired.
+    await expect(repos.paymentRequests.recordTxHash(live.id, 'APPROVING', txHash.toUpperCase().replace('0X', '0x') as typeof txHash)).resolves.toBe(true);
+    await expect(repos.paymentRequests.transitionIfUnsent(live.id, 'APPROVING', 'EXPIRED')).resolves.toBe(false);
+    await expect(repos.paymentRequests.transition(live.id, 'APPROVING', 'SUBMITTED')).resolves.toBe(true);
     await expect(repos.paymentRequests.transition(live.id, 'SUBMITTED', 'EXPIRED')).rejects.toThrow(/cannot move/);
     expect((await repos.paymentRequests.findById(live.id))?.txHash).toBe(txHash);
     expect((await repos.paymentRequests.listByUser(sender.id, 10)).map((r) => r.id)).toEqual([live.id]);

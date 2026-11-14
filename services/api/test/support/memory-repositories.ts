@@ -453,6 +453,21 @@ export function createMemoryRepositories() {
         request.updatedAt = now();
         return true;
       },
+      async transitionIfUnsent(id, from, to) {
+        assertP2pTransition(from, to);
+        const request = paymentRequests.get(id);
+        if (!request || request.status !== from || request.txHash) return false;
+        request.status = to;
+        request.updatedAt = now();
+        return true;
+      },
+      async recordTxHash(id, status, txHash) {
+        const request = paymentRequests.get(id);
+        if (!request || request.status !== status) return false;
+        request.txHash = txHash.toLowerCase() as Hex;
+        request.updatedAt = now();
+        return true;
+      },
       async countOpenByReceiver(receiverId) {
         return [...paymentRequests.values()].filter((r) => r.receiverId === receiverId && (r.status === 'CREATED' || r.status === 'SENDER_IDENTIFIED')).length;
       },

@@ -1,5 +1,6 @@
 import type { FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
 import { z } from 'zod';
+import { P2P_STATUSES } from '../../domain/p2p.js';
 import { bearerAuth, bytes32Schema, errorResponses, hexSchema, minorUnitsSchema, out } from '../../shared/schemas.js';
 import { requireUserId } from '../../shared/request-user.js';
 import type { P2pService } from './service.js';
@@ -8,9 +9,10 @@ export const P2pRequestDto = z
   .object({
     id: z.string(),
     role: z.enum(['receiver', 'sender']).meta({ description: 'Your side of the request' }),
-    status: z.enum(['CREATED', 'SENDER_IDENTIFIED', 'SUBMITTED', 'COMPLETED', 'FAILED', 'EXPIRED', 'DECLINED', 'CANCELLED']).meta({
+    status: z.enum(P2P_STATUSES).meta({
       description:
-        'CREATED: waiting for a tap or a scan. SENDER_IDENTIFIED: waiting for the sender to approve. SUBMITTED: transfer sent. ' +
+        'CREATED: waiting for a tap or a scan. SENDER_IDENTIFIED: waiting for the sender to approve. ' +
+        'APPROVING: the sender approved and the transfer is being sent; it can no longer be cancelled. SUBMITTED: transfer sent. ' +
         'COMPLETED and FAILED: the transfer was mined (or reverted). EXPIRED, DECLINED, CANCELLED: nothing moved.',
     }),
     token: out.address,

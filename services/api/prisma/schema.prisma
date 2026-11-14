@@ -273,6 +273,7 @@ model Device {
 enum PaymentRequestStatus {
   CREATED
   SENDER_IDENTIFIED
+  APPROVING
   SUBMITTED
   COMPLETED
   FAILED
