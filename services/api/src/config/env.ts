@@ -42,6 +42,9 @@ export const envSchema = z.object({
       return value.split(',').map((item) => item.trim()).filter(Boolean);
     }),
 
+  /** The largest request body accepted, in bytes (64 KiB). Bigger ones get 413. */
+  BODY_LIMIT_BYTES: z.coerce.number().int().min(1_024).max(10 * 1024 * 1024).default(64 * 1024),
+
   // Rate limits: requests per RATE_LIMIT_WINDOW_MS. Each limited route has its own budget.
   RATE_LIMIT_ENABLED: z.stringbool().default(true),
   RATE_LIMIT_WINDOW_MS: z.coerce.number().int().min(1_000).default(60_000),

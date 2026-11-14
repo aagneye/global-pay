@@ -61,6 +61,8 @@ export interface Adapters {
 export interface HttpSettings {
   /** TRUST_PROXY: which proxies may report the client's IP. */
   trustProxy: boolean | number | string[];
+  /** BODY_LIMIT_BYTES. */
+  bodyLimit: number;
   /** Null when RATE_LIMIT_ENABLED=false. */
   rateLimits: RateLimitSettings | null;
 }
@@ -288,6 +290,7 @@ export function buildContainer(env: Env, overrides: Partial<Adapters> = {}): Con
 function httpSettings(env: Env): HttpSettings {
   return {
     trustProxy: env.TRUST_PROXY,
+    bodyLimit: env.BODY_LIMIT_BYTES,
     rateLimits: env.RATE_LIMIT_ENABLED
       ? {
           windowMs: env.RATE_LIMIT_WINDOW_MS,

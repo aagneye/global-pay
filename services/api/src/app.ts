@@ -27,6 +27,7 @@ import { namedSchemasTransform } from './shared/openapi.js';
 import { type LogDestination, loggerOptions } from './shared/logging.js';
 import { registerRateLimits } from './shared/rate-limits.js';
 import { authHook } from './shared/request-user.js';
+import { securityHeaders } from './shared/security-headers.js';
 
 export interface BuildAppOptions {
   container: Container;
@@ -38,7 +39,7 @@ export async function buildApp({ container, logger = true }: BuildAppOptions): P
   const { http } = container;
   const hops = http.trustProxy;
   const trustProxy = typeof hops === 'number' ? (_address: string, hop: number) => hop < hops : hops;
-  const app = Fastify({ logger: loggerOptions(logger), trustProxy }).withTypeProvider<ZodTypeProvider>();
+  const app = Fastify({ logger: loggerOptions(logger), trustProxy, bodyLimit: http.bodyLimit }).withTypeProvider<ZodTypeProvider>();
 
   // Route schemas are zod: they validate requests, shape responses, and generate the OpenAPI spec.
   app.setValidatorCompiler(validatorCompiler);
@@ -46,6 +47,7 @@ export async function buildApp({ container, logger = true }: BuildAppOptions): P
 
   app.decorateRequest('user', null);
   app.addHook('onRequest', authHook(container.tokens));
+  app.addHook('onSend', securityHeaders);
 
   app.setErrorHandler((error, request, reply) => {
     if (hasZodFastifySchemaValidationErrors(error)) {
@@ -67,7 +69,8 @@ export async function buildApp({ container, logger = true }: BuildAppOptions): P
     }
     const statusCode = (error as { statusCode?: unknown }).statusCode;
     if (typeof statusCode === 'number' && statusCode >= 400 && statusCode < 500) {
-      return reply.code(statusCode).send({ error: 'bad_request', message: (error as Error).message });
+      const code = statusCode === 413 ? 'payload_too_large' : 'bad_request';
+      return reply.code(statusCode).send({ error: code, message: (error as Error).message });
     }
     request.log.error({ err: error }, 'request failed');
     return reply.code(500).send({ error: 'internal_error', message: 'Something went wrong' });

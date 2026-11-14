@@ -180,6 +180,8 @@ Push needs `FCM_SERVICE_ACCOUNT_FILE`; without it the apps poll. The rules are i
 - Counters live in memory, per process. Run several instances and each one counts on its own; a shared store (Redis) is the step after that.
 - Behind a load balancer, set `TRUST_PROXY` (e.g. `1`), or every client shares the balancer's IP.
 
+**Request size and headers.** Bodies over `BODY_LIMIT_BYTES` (64 KiB) get `413 {"error":"payload_too_large"}`, webhooks included. Every response carries `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer` and `X-Frame-Options: DENY` (`src/shared/security-headers.ts`). JSON responses also get `Content-Security-Policy: default-src 'none'; frame-ancestors 'none'` and `Cache-Control: no-store`. HTML pages keep their own policy: Swagger UI at `/docs` still loads, and `/ops` keeps its stricter set. Set HSTS where TLS ends (the load balancer).
+
 **Log redaction** (`src/shared/redact.ts`). Logs never contain these, wherever they appear in a log entry (top level, or up to two levels down, e.g. `req.headers.authorization` or `body.signature`). Each is replaced with `[Redacted]`:
 - headers: `authorization`, `cookie`, `set-cookie`, `x-ops-token`, `x-callback-token`, `moonpay-signature-v2`;
 - fields: `signature`, `qrPayload`, `fcmToken`, `publicKey`, `displayName`, `challenge`, tokens, passwords, secret and private keys, bank account details and email.
