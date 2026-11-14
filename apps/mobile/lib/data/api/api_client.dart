@@ -62,6 +62,11 @@ class ApiClient {
         'network_error',
         "Can't reach GlobalPay. Check your connection and try again.",
       ),
+      // A non-JSON error page (e.g. a proxy's 502): show a plain message, never the HTTP library's text.
+      DioExceptionType.badResponse => AppException(
+        'http_error',
+        'GlobalPay is having trouble right now (error ${e.response?.statusCode ?? 'unknown'}). Please try again.',
+      ),
       _ => AppException('http_error', e.message ?? 'Request failed (${e.response?.statusCode})'),
     };
   }

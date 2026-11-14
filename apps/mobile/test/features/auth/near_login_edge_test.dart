@@ -182,8 +182,6 @@ void main() {
         expect(find.textContaining('validateStatus'), findsNothing);
         expect(find.textContaining('RequestOptions'), findsNothing);
       },
-      skip:
-          true, // BUG: ApiClient.toAppException falls back to DioException.message for a non-JSON error response, so the sign-in screen shows Dio's multi-line developer text ("This exception was thrown because the response has a status code of 502 and RequestOptions.validateStatus ...") instead of a plain message.
     );
 
     testWidgets("a nonce that isn't 32 bytes is refused before the wallet signs", (tester) async {
