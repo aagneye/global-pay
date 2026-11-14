@@ -16,7 +16,11 @@ It settles on **NEAR** (testnet, the NEAR Hackathon entry below) or on **Base**,
 
 **The product.** GlobalPay makes the card already in your pocket the key to your crypto wallet. Scan the QR the shop already shows (UPI in India, PromptPay in Thailand), tap your own contactless bank card on your phone, and approve with your fingerprint. You pay in USDC. The merchant receives rupees or baht and changes nothing.
 
-**How NEAR fits.** Everything below was built during the hackathon window; the repo itself starts on 2026-11-12, after the announcement.
+**What is judged, and the diff (rules Q-001 to Q-003).** The whole repo was written in the hackathon window: its first commit is on 2026-11-12, after the 2026-10-19 announcement. The earlier EVM rail is another chain (Q-002), so the part to judge is the NEAR work: every commit from tag `pre-near` (the last commit before any NEAR code) to tag `hackathon-submission`. [See the diff on GitHub](https://github.com/aagneye/global-pay/compare/pre-near...hackathon-submission).
+
+**Track hints used (Real-World Money):** stablecoins (NEP-141 USDC) and meta transactions (NEP-366, the relayer pays the gas). NEAR Intents has no testnet (Q-007), so settlement runs on our own contract (Q-011).
+
+**How NEAR fits.**
 - **A settlement contract on NEAR** ([`contracts-near/settlement`](contracts-near/settlement)), written in Rust with near-sdk 5. USDC (NEP-141) reaches it through `ft_transfer_call`, together with a quote that the backend signs with ed25519. The contract checks:
   - the signature, on-chain with `env::ed25519_verify`;
   - the payer, the amount and the expiry;
@@ -58,7 +62,7 @@ It settles on **NEAR** (testnet, the NEAR Hackathon entry below) or on **Base**,
    - the status moves through Paid, Merchant paid and Settled, with nearblocks links.
 5. **A UPI payment, with your card as the key.**
    - register the card key from **Home → Card key** (on the emulator, choose the **demo card**);
-   - tap **Scan & pay** and paste `upi://pay?pa=chaistall@demo&pn=Chai%20Stall&mc=5814&tr=GP0001&cu=INR`;
+   - tap **Scan & pay** and paste `upi://pay?pa=meera.chai@demo&pn=Meera%20Chai&mc=5814&tr=GP0001&cu=INR` (a made-up merchant);
    - enter ₹500 and tap **Pay**;
    - tap your card (the demo card on the emulator), then approve with your fingerprint (on the emulator, run `adb emu finger touch 1`);
    - the status moves through Paid, Merchant paid (with the UPI reference) and Settled.
@@ -71,7 +75,7 @@ It settles on **NEAR** (testnet, the NEAR Hackathon entry below) or on **Base**,
 - **Not built: tapping your phone at a shop's card terminal (POS).** That needs an approved card-emulation partner. The repo's NFC tap to pay is phone to phone, on the EVM rail only (iteration 9).
 - **India's rules are out of scope for the demo:** TDS on crypto transfers, FEMA, and RBI/NPCI rules for UPI payouts.
 - **Another rail exists.** The repo also has an earlier EVM rail (Base, Solidity, EIP-3009). It's still selectable with `SETTLEMENT_RAIL=evm`, but **only the NEAR rail is the hackathon entry** (rules Q-002).
-- **Libraries:** near-sdk and near-contract-standards (Rust), near-api-js (TypeScript), blockchain_utils (Dart), Fastify, Prisma and Flutter.
+- **Libraries:** near-sdk and near-contract-standards (Rust), near-api-js (TypeScript), blockchain_utils, nfc_manager and mobile_scanner (Dart), Fastify, Prisma and Flutter.
 - **AI assistance:** the code was written with Claude Code (Q-005).
 - **License:** MIT ([LICENSE](LICENSE)).
 
