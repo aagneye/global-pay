@@ -51,7 +51,7 @@ void main() {
       final quote = await payments.requestQuote(payer: session.walletAddress, qrPayload: withCrc(qr120));
       expect(quote.fiatAmount.minor, BigInt.from(12000));
 
-      final signature = await wallet.signTypedData(quote.authorization.typedData);
+      final signature = await wallet.signTypedData(quote.authorization!.typedData);
       var payment = await payments.submit(quote, signature);
       expect(payment.status, PaymentStatus.submitted);
 

@@ -51,7 +51,8 @@ void checkQuoteAuthorization(
   String? settlement,
   required DateTime now,
 }) {
-  final (:domain, :message) = _structure(quote.authorization.typedData, 'ReceiveWithAuthorization');
+  final authorization = quote.authorization ?? (throw _mismatch('the kind of authorisation'));
+  final (:domain, :message) = _structure(authorization.typedData, 'ReceiveWithAuthorization');
   _expectChain(domain, chainId);
   _expectAddress(domain['verifyingContract'], quote.token, 'the token');
   _expectAddress(message['from'], wallet, 'your wallet');
@@ -86,7 +87,10 @@ void checkTapAuthorization(
   _expectValidity(message, now, maxTapAuthorizationLifetime);
 }
 
-AppException _mismatch(String what) => AppException(
+AppException _mismatch(String what) => authorizationMismatch(what);
+
+/// The refusal when [what] (e.g. "the amount") doesn't match. Nothing has been signed when it's thrown.
+AppException authorizationMismatch(String what) => AppException(
   authorizationMismatchCode,
   "Stopped before signing: what GlobalPay asked your wallet to sign doesn't match this payment ($what). "
   'Nothing was signed.',

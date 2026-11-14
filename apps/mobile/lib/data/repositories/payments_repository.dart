@@ -22,20 +22,27 @@ class PaymentsRepository {
     return quoteFromDto(response);
   }
 
-  /// Sends the wallet's signature over [Quote.authorization]. The payment starts as SUBMITTED.
-  Future<Payment> submit(Quote quote, String signature) async {
-    final response = await ApiClient.call(
-      () => api.api.payments.submitPayment(
-        body: dto.PaymentRequest(
-          quoteId: quote.quoteId,
-          validAfter: quote.authorization.validAfter,
-          validBefore: quote.authorization.validBefore,
-          signature: signature,
-        ),
+  /// EVM: sends the wallet's signature over [Quote.authorization], with its validity window.
+  /// The payment starts as SUBMITTED.
+  Future<Payment> submit(Quote quote, String signature) {
+    final authorization = quote.authorization ?? (throw ArgumentError.value(quote, 'quote', 'has no authorization'));
+    return _submit(
+      dto.PaymentRequest(
+        quoteId: quote.quoteId,
+        validAfter: authorization.validAfter,
+        validBefore: authorization.validBefore,
+        signature: signature,
       ),
     );
-    return paymentFromDto(response);
   }
+
+  /// NEAR: sends the wallet's signed [Quote.nearPayment] (base64 borsh SignedDelegate) for the backend to relay.
+  /// The payment starts as SUBMITTED.
+  Future<Payment> submitSignedDelegate(Quote quote, String signedDelegate) =>
+      _submit(dto.PaymentRequest(quoteId: quote.quoteId, signedDelegate: signedDelegate));
+
+  Future<Payment> _submit(dto.PaymentRequest body) async =>
+      paymentFromDto(await ApiClient.call(() => api.api.payments.submitPayment(body: body)));
 
   Future<Payment> get(String paymentId) async =>
       paymentFromDto(await ApiClient.call(() => api.api.payments.getPayment(id: paymentId)));
@@ -46,7 +53,8 @@ TokenAmount usdc(String units) => TokenAmount(symbol: 'USDC', units: BigInt.pars
 FiatAmount thb(String minor) => FiatAmount(currency: FiatCurrency.thb, minor: BigInt.parse(minor));
 
 Quote quoteFromDto(dto.QuoteResponse response) {
-  final typed = response.authorizationToSign!;
+  final typed = response.authorizationToSign;
+  final near = response.nearPayment;
   return Quote(
     quoteId: response.quote.quoteId,
     payer: response.quote.payer,
@@ -64,23 +72,38 @@ Quote quoteFromDto(dto.QuoteResponse response) {
       reference: response.merchant.reference1,
     ),
     expiresAt: response.expiresAt,
-    authorization: AuthorizationToSign(
-      // The exact eth_signTypedData_v4 payload the backend checks the signature against.
-      typedData: {
-        'types': {
-          for (final entry in typed.types.entries)
-            entry.key: [
-              for (final field in entry.value) {'name': field.name, 'type': field.type},
-            ],
-        },
-        // Null for a type this app doesn't know, which the signing check refuses.
-        'primaryType': typed.primaryType.json,
-        'domain': typed.domain.toJson(),
-        'message': typed.message.toJson(),
-      },
-      validAfter: typed.message.validAfter,
-      validBefore: typed.message.validBefore,
-    ),
+    authorization: typed == null
+        ? null
+        : AuthorizationToSign(
+            // The exact eth_signTypedData_v4 payload the backend checks the signature against.
+            typedData: {
+              'types': {
+                for (final entry in typed.types.entries)
+                  entry.key: [
+                    for (final field in entry.value) {'name': field.name, 'type': field.type},
+                  ],
+              },
+              // Null for a type this app doesn't know, which the signing check refuses.
+              'primaryType': typed.primaryType.json,
+              'domain': typed.domain.toJson(),
+              'message': typed.message.toJson(),
+            },
+            validAfter: typed.message.validAfter,
+            validBefore: typed.message.validBefore,
+          ),
+    nearPayment: near == null
+        ? null
+        : NearPayment(
+            signerId: near.signerId,
+            publicKey: near.publicKey,
+            receiverId: near.receiverId,
+            methodName: near.methodName,
+            args: NearTransferCallArgs(receiverId: near.args.receiverId, amount: near.args.amount, msg: near.args.msg),
+            gas: near.gas,
+            deposit: near.deposit,
+            nonce: near.nonce,
+            maxBlockHeight: near.maxBlockHeight,
+          ),
   );
 }
 

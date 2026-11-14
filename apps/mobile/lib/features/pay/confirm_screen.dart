@@ -94,7 +94,7 @@ class _ConfirmScreenState extends ConsumerState<ConfirmScreen> {
       settlement: config.settlementAddress,
       now: DateTime.now(),
     );
-    final signature = await ref.read(walletServiceProvider).signTypedData(quote.authorization.typedData);
+    final signature = await ref.read(walletServiceProvider).signTypedData(quote.authorization!.typedData);
     final payment = await ref.read(paymentsRepositoryProvider).submit(quote, signature);
     if (mounted) context.pushReplacement(Routes.status(payment.id));
   });

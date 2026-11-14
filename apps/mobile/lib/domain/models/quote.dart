@@ -13,14 +13,17 @@ class Quote {
     required this.spreadBps,
     required this.merchant,
     required this.expiresAt,
-    required this.authorization,
+    this.authorization,
+    this.nearPayment,
   });
 
-  /// bytes32 hex. Also the nonce of the USDC authorisation the user signs.
+  /// bytes32 hex. Also the nonce of the USDC authorisation the user signs (EVM).
   final String quoteId;
+
+  /// The paying wallet: a 0x address (EVM) or a NEAR implicit account id.
   final String payer;
 
-  /// The USDC contract the quote is priced in.
+  /// The USDC contract the quote is priced in: a 0x address (EVM) or a NEAR account id.
   final String token;
 
   /// What the user pays, fee included.
@@ -38,8 +41,11 @@ class Quote {
   final QuoteMerchant merchant;
   final DateTime expiresAt;
 
-  /// What the wallet must sign to pay this quote.
-  final AuthorizationToSign authorization;
+  /// What the wallet must sign to pay this quote on the EVM rail. Null on the NEAR rail.
+  final AuthorizationToSign? authorization;
+
+  /// What the wallet must sign to pay this quote on the NEAR rail. Null on the EVM rail.
+  final NearPayment? nearPayment;
 
   Duration timeLeft(DateTime now) {
     final left = expiresAt.difference(now);
@@ -73,4 +79,56 @@ class AuthorizationToSign {
   final Map<String, Object?> typedData;
   final String validAfter;
   final String validBefore;
+}
+
+/// A NEP-366 meta transaction for the wallet to sign (NEAR rail): `signerId` calls `methodName`
+/// (`ft_transfer_call`) on `receiverId` (the USDC contract), and a relayer pays the gas.
+/// Numbers are decimal strings, as the backend sends them.
+class NearPayment {
+  const NearPayment({
+    required this.signerId,
+    required this.publicKey,
+    required this.receiverId,
+    required this.methodName,
+    required this.args,
+    required this.gas,
+    required this.deposit,
+    required this.nonce,
+    required this.maxBlockHeight,
+  });
+
+  /// The payer's account (implicit account id).
+  final String signerId;
+
+  /// The key that signs, `ed25519:<base58>`.
+  final String publicKey;
+
+  /// The USDC contract.
+  final String receiverId;
+  final String methodName;
+  final NearTransferCallArgs args;
+
+  /// Gas for the call.
+  final String gas;
+
+  /// Yoctonear attached (`ft_transfer_call` needs exactly 1).
+  final String deposit;
+
+  /// The access key's next nonce (u64).
+  final String nonce;
+
+  /// The last block height the meta transaction is valid for (u64).
+  final String maxBlockHeight;
+}
+
+/// `ft_transfer_call` arguments: send [amount] to [receiverId] (the settlement contract) with [msg],
+/// the backend-signed quote as JSON.
+class NearTransferCallArgs {
+  const NearTransferCallArgs({required this.receiverId, required this.amount, required this.msg});
+
+  final String receiverId;
+
+  /// Token base units.
+  final String amount;
+  final String msg;
 }
