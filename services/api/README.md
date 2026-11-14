@@ -186,6 +186,12 @@ Push needs `FCM_SERVICE_ACCOUNT_FILE`; without it the apps poll. The rules are i
 
 Fastify's request logs only show the method, URL and status anyway; redaction covers code that logs more. Don't put secrets in URLs.
 
+**Production checks** (`src/config/env.ts`). With `NODE_ENV=production` the server refuses to start with:
+- the local anvil chain (`CHAIN_ID` or `ONRAMP_CHAIN_ID` 31337), or any of anvil's ten public keys as `QUOTE_SIGNER_PRIVATE_KEY` or `RELAYER_PRIVATE_KEY`;
+- a guessable `JWT_SECRET` or `OPS_API_TOKEN` (fewer than 10 distinct characters, or words like "secret" or "change me"), or the same value for both;
+- `RATE_SOURCE=fixed` or `RATE_LIMIT_ENABLED=false`;
+- simulated partners, `PAYOUT_TEST_DESTINATIONS`, Xendit test-mode keys (`xnd_development_…`), MoonPay sandbox keys (`pk_test_`, `sk_test_`, `wk_test_`) or MoonPay's sandbox widget URL.
+
 ## Conventions
 
 - **Money:** integers in minor units (`bigint`). Over HTTP, amounts are integer strings (`"10000"` = 100.00 THB).

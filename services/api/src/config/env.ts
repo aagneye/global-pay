@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { FIAT_DECIMALS, RATE_DECIMALS, TOKEN_DECIMALS, parseDecimal } from '../domain/money.js';
 import { addressSchema, privateKeySchema } from '../shared/schemas.js';
+import { ANVIL_CHAIN_ID, isPublicTestKey } from './public-test-keys.js';
 
 /** A THB amount like "5000" or "5000.00", as satang. */
 function thbAmount(name: string, fallback: string) {
@@ -248,6 +249,45 @@ function checkCombinations(env: Env, ctx: z.RefinementCtx): void {
   }
   if (env.ONRAMP_MIN_THB > env.ONRAMP_MAX_THB) {
     ctx.addIssue({ code: 'custom', path: ['ONRAMP_MIN_THB'], message: 'ONRAMP_MIN_THB is above ONRAMP_MAX_THB' });
+  }
+  if (env.NODE_ENV === 'production') checkProduction(env, ctx);
+}
+
+/** A secret someone could guess: few distinct characters ("x" × 32), or written by a person ("change me"). */
+function looksGuessable(secret: string): boolean {
+  return new Set(secret).size < 10 || /change.?me|example|placeholder|password|secret/i.test(secret);
+}
+
+/** Local, test and sandbox settings that must never reach production. */
+function checkProduction(env: Env, ctx: z.RefinementCtx): void {
+  const refuse = (path: keyof Env, message: string) => ctx.addIssue({ code: 'custom', path: [path], message });
+
+  if (env.CHAIN_ID === ANVIL_CHAIN_ID) refuse('CHAIN_ID', 'CHAIN_ID 31337 is a local anvil chain and is refused in production');
+  if (env.ONRAMP_CHAIN_ID === ANVIL_CHAIN_ID) {
+    refuse('ONRAMP_CHAIN_ID', 'ONRAMP_CHAIN_ID 31337 is a local anvil chain and is refused in production');
+  }
+  for (const name of ['QUOTE_SIGNER_PRIVATE_KEY', 'RELAYER_PRIVATE_KEY'] as const) {
+    const key = env[name];
+    if (key && isPublicTestKey(key)) refuse(name, `${name} is one of anvil's public test keys and is refused in production`);
+  }
+
+  const generate = `generate one with: node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"`;
+  if (looksGuessable(env.JWT_SECRET)) refuse('JWT_SECRET', `JWT_SECRET looks guessable; ${generate}`);
+  if (env.OPS_API_TOKEN && looksGuessable(env.OPS_API_TOKEN)) refuse('OPS_API_TOKEN', `OPS_API_TOKEN looks guessable; ${generate}`);
+  if (env.OPS_API_TOKEN && env.OPS_API_TOKEN === env.JWT_SECRET) refuse('OPS_API_TOKEN', 'OPS_API_TOKEN must differ from JWT_SECRET');
+
+  if (env.RATE_SOURCE === 'fixed') refuse('RATE_SOURCE', 'RATE_SOURCE=fixed is for offline development; production prices at live rates');
+  if (!env.RATE_LIMIT_ENABLED) refuse('RATE_LIMIT_ENABLED', 'Rate limits cannot be turned off in production');
+
+  if (env.XENDIT_SECRET_KEY && /^xnd_(public_)?development_/.test(env.XENDIT_SECRET_KEY)) {
+    refuse('XENDIT_SECRET_KEY', 'XENDIT_SECRET_KEY is a Xendit test-mode key and is refused in production');
+  }
+  for (const name of ['MOONPAY_PUBLISHABLE_KEY', 'MOONPAY_SECRET_KEY', 'MOONPAY_WEBHOOK_KEY'] as const) {
+    const key = env[name];
+    if (key && /^[a-z]{2}_test_/.test(key)) refuse(name, `${name} is a MoonPay sandbox key and is refused in production`);
+  }
+  if (new URL(env.MOONPAY_WIDGET_URL).hostname.includes('sandbox')) {
+    refuse('MOONPAY_WIDGET_URL', "MOONPAY_WIDGET_URL is MoonPay's sandbox; production uses https://buy.moonpay.com");
   }
 }
 

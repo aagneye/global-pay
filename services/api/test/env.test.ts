@@ -1,6 +1,11 @@
+import { toHex } from 'viem';
+import { mnemonicToAccount } from 'viem/accounts';
 import { describe, expect, it } from 'vitest';
 import { loadEnv } from '../src/config/env.js';
+import { ANVIL_PRIVATE_KEYS, isPublicTestKey } from '../src/config/public-test-keys.js';
 import { testEnv } from './helpers.js';
+
+const ANVIL_MNEMONIC = 'test test test test test test test test test test test junk';
 
 describe('loadEnv', () => {
   it('applies defaults for Base Sepolia', () => {
@@ -63,5 +68,76 @@ describe('loadEnv', () => {
     expect(env.PAYOUT_FLOAT_BUFFER_THB).toBe(500_050n);
     expect(env.OPS_MIN_PAYOUT_FLOAT_THB).toBe(10_000n);
     expect(() => testEnv({ PAYOUT_FLOAT_BUFFER_THB: 'lots' })).toThrow(/THB amount/);
+  });
+
+  it('reads the HTTP hardening settings', () => {
+    const env = testEnv();
+    expect(env.TRUST_PROXY).toBe(false);
+    expect(env.RATE_LIMIT_ENABLED).toBe(true);
+    expect(env.RATE_LIMIT_AUTH_MAX).toBe(30);
+    expect(testEnv({ TRUST_PROXY: '1' }).TRUST_PROXY).toBe(1);
+    expect(testEnv({ TRUST_PROXY: 'true' }).TRUST_PROXY).toBe(true);
+    expect(testEnv({ TRUST_PROXY: '10.0.0.0/8, 127.0.0.1' }).TRUST_PROXY).toEqual(['10.0.0.0/8', '127.0.0.1']);
+    expect(() => testEnv({ RATE_LIMIT_MAX: '0' })).toThrow(/RATE_LIMIT_MAX/);
+  });
+});
+
+describe('production checks', () => {
+  /** A production configuration that passes every check. (Not real keys.) */
+  const production = {
+    NODE_ENV: 'production',
+    JWT_SECRET: 'q7Vb2mZ9xK4tR1wN8cY3hJ6pL0dF5gSa',
+    CHAIN_ID: '8453',
+    RPC_URL: 'https://mainnet.base.org',
+    PAYOUT_PROVIDER: 'xendit',
+    XENDIT_SECRET_KEY: 'xnd_production_x',
+    ONRAMP_PROVIDER: 'moonpay',
+    MOONPAY_PUBLISHABLE_KEY: 'pk_live_x',
+    MOONPAY_SECRET_KEY: 'sk_live_x',
+    MOONPAY_WEBHOOK_KEY: 'wk_live_x',
+    MOONPAY_WIDGET_URL: 'https://buy.moonpay.com',
+  };
+  const refused = (overrides: Record<string, string>) => () => testEnv({ ...production, ...overrides });
+
+  it('accepts a production configuration', () => {
+    expect(testEnv(production).NODE_ENV).toBe('production');
+  });
+
+  it("refuses the local chain and anvil's public keys", () => {
+    expect(refused({ CHAIN_ID: '31337' })).toThrow(/CHAIN_ID 31337 is a local anvil chain/);
+    expect(refused({ ONRAMP_CHAIN_ID: '31337' })).toThrow(/ONRAMP_CHAIN_ID 31337/);
+    // All ten accounts of anvil's public mnemonic, upper or lower case.
+    for (let addressIndex = 0; addressIndex < 10; addressIndex++) {
+      const key = toHex(mnemonicToAccount(ANVIL_MNEMONIC, { addressIndex }).getHdKey().privateKey as Uint8Array);
+      expect(isPublicTestKey(key)).toBe(true);
+      expect(refused({ QUOTE_SIGNER_PRIVATE_KEY: key })).toThrow(/QUOTE_SIGNER_PRIVATE_KEY is one of anvil's public test keys/);
+      expect(refused({ RELAYER_PRIVATE_KEY: `0x${key.slice(2).toUpperCase()}` })).toThrow(/RELAYER_PRIVATE_KEY is one of anvil's/);
+    }
+    const ownKey = toHex(mnemonicToAccount(ANVIL_MNEMONIC, { addressIndex: 10 }).getHdKey().privateKey as Uint8Array);
+    expect(testEnv({ ...production, QUOTE_SIGNER_PRIVATE_KEY: ownKey }).QUOTE_SIGNER_PRIVATE_KEY).toBe(ownKey);
+    // Development and tests still use them.
+    expect(testEnv({ CHAIN_ID: '31337', QUOTE_SIGNER_PRIVATE_KEY: ANVIL_PRIVATE_KEYS[2] as string }).CHAIN_ID).toBe(31337);
+  });
+
+  it('refuses guessable secrets', () => {
+    expect(refused({ JWT_SECRET: 'x'.repeat(32) })).toThrow(/JWT_SECRET looks guessable/);
+    expect(refused({ JWT_SECRET: 'test-secret-test-secret-test-secret-00' })).toThrow(/JWT_SECRET looks guessable/);
+    expect(refused({ JWT_SECRET: 'please-change-me-before-launch-2026' })).toThrow(/JWT_SECRET looks guessable/);
+    expect(refused({ JWT_SECRET: 'short' })).toThrow(/at least 32 characters/);
+    expect(refused({ OPS_API_TOKEN: 'o'.repeat(40) })).toThrow(/OPS_API_TOKEN looks guessable/);
+    expect(refused({ OPS_API_TOKEN: production.JWT_SECRET })).toThrow(/OPS_API_TOKEN must differ from JWT_SECRET/);
+    expect(testEnv({ ...production, OPS_API_TOKEN: 'Zr4Nq8Lw2Hc6Tv0Bx5Mk9Pj3Fd7Gs1Ya' }).OPS_API_TOKEN).toBeDefined();
+  });
+
+  it('refuses sandbox partners and development shortcuts', () => {
+    expect(refused({ XENDIT_SECRET_KEY: 'xnd_development_abc' })).toThrow(/Xendit test-mode key/);
+    expect(refused({ MOONPAY_PUBLISHABLE_KEY: 'pk_test_abc' })).toThrow(/MOONPAY_PUBLISHABLE_KEY is a MoonPay sandbox key/);
+    expect(refused({ MOONPAY_SECRET_KEY: 'sk_test_abc' })).toThrow(/MOONPAY_SECRET_KEY is a MoonPay sandbox key/);
+    expect(refused({ MOONPAY_WEBHOOK_KEY: 'wk_test_abc' })).toThrow(/MOONPAY_WEBHOOK_KEY is a MoonPay sandbox key/);
+    expect(refused({ MOONPAY_WIDGET_URL: 'https://buy-sandbox.moonpay.com' })).toThrow(/MoonPay's sandbox/);
+    const { MOONPAY_WIDGET_URL: _default, ...withDefaultWidget } = production;
+    expect(() => testEnv(withDefaultWidget)).toThrow(/MoonPay's sandbox/);
+    expect(refused({ RATE_SOURCE: 'fixed' })).toThrow(/RATE_SOURCE=fixed/);
+    expect(refused({ RATE_LIMIT_ENABLED: 'false' })).toThrow(/Rate limits cannot be turned off/);
   });
 });
