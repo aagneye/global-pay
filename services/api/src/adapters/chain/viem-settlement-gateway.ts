@@ -12,6 +12,7 @@ import {
   parseSignature,
 } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
+import type { TransferAuthorization } from '../../domain/p2p.js';
 import type { ReceiveAuthorization, SignedQuote } from '../../domain/quote.js';
 import { quoteStruct } from '../../lib/typed-data.js';
 import {
@@ -22,7 +23,7 @@ import {
   type TxReceipt,
 } from '../../ports/settlement-gateway.js';
 import { AppError } from '../../shared/errors.js';
-import { ON_CHAIN_STATUS, erc20Abi, settlementAbi } from './abi.js';
+import { ON_CHAIN_STATUS, erc20Abi, settlementAbi, usdcTransferAbi } from './abi.js';
 import { Relayer } from './relayer.js';
 
 export interface ViemSettlementGatewayOptions {
@@ -81,6 +82,16 @@ export class ViemSettlementGateway implements SettlementGateway {
         s,
       },
     ]);
+  }
+
+  async submitTransfer(auth: TransferAuthorization): Promise<Hex> {
+    const { v, yParity, r, s } = parseSignature(auth.signature);
+    return this.getRelayer().send({
+      address: auth.token,
+      abi: usdcTransferAbi,
+      functionName: 'transferWithAuthorization',
+      args: [auth.from, auth.to, auth.value, auth.validAfter, auth.validBefore, auth.nonce, v === undefined ? yParity + 27 : Number(v), r, s],
+    });
   }
 
   async markSettled(quoteId: Hex): Promise<Hex> {

@@ -46,6 +46,16 @@ export const settlementAbi = parseAbi([
   'error InvalidAuthorizationSignature(address recovered, address expected)',
 ]);
 
+/** USDC's EIP-3009 transfer, which anyone may submit, plus the errors the local mock reverts with. */
+export const usdcTransferAbi = parseAbi([
+  'function transferWithAuthorization(address from, address to, uint256 value, uint256 validAfter, uint256 validBefore, bytes32 nonce, uint8 v, bytes32 r, bytes32 s)',
+  'error AuthorizationNotYetValid(uint256 validAfter)',
+  'error AuthorizationExpired(uint256 validBefore)',
+  'error AuthorizationAlreadyUsed(address authorizer, bytes32 nonce)',
+  'error InvalidAuthorizationSignature(address recovered, address expected)',
+  'error ERC20InsufficientBalance(address sender, uint256 balance, uint256 needed)',
+]);
+
 export const erc20Abi = parseAbi([
   'function balanceOf(address owner) view returns (uint256)',
   'function name() view returns (string)',

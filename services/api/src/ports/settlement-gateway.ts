@@ -1,4 +1,5 @@
 import type { Address, Hex } from 'viem';
+import type { TransferAuthorization } from '../domain/p2p.js';
 import type { ReceiveAuthorization, SignedQuote } from '../domain/quote.js';
 import { AppError } from '../shared/errors.js';
 
@@ -61,6 +62,8 @@ export interface SettlementGateway {
   /** Relayer submits `pay()` and pays the gas. Returns the transaction hash once the node accepted it. */
   submitPayment(signed: SignedQuote, authorization: ReceiveAuthorization): Promise<Hex>;
   markSettled(quoteId: Hex): Promise<Hex>;
+  /** Relayer submits USDC `transferWithAuthorization` (person-to-person) and pays the gas. */
+  submitTransfer(authorization: TransferAuthorization): Promise<Hex>;
   refund(quoteId: Hex): Promise<Hex>;
   /** Waits until the transaction is in a block. */
   waitForReceipt(txHash: Hex): Promise<TxReceipt>;

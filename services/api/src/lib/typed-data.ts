@@ -5,6 +5,7 @@ import type { Quote } from '../domain/quote.js';
  * EIP-712 definitions shared with the contracts. They must match exactly:
  * - `Quote` and the domain: contracts/src/GlobalPaySettlement.sol (QUOTE_TYPEHASH, EIP712 name/version)
  * - `ReceiveWithAuthorization`: USDC's EIP-3009 (contracts/src/interfaces/IERC3009.sol)
+ * - `TransferWithAuthorization`: USDC's EIP-3009, for person-to-person payments (tap to pay)
  */
 
 export const SETTLEMENT_DOMAIN = { name: 'GlobalPay Settlement', version: '1' } as const;
@@ -24,6 +25,17 @@ export const QUOTE_TYPES = {
 
 export const RECEIVE_WITH_AUTHORIZATION_TYPES = {
   ReceiveWithAuthorization: [
+    { name: 'from', type: 'address' },
+    { name: 'to', type: 'address' },
+    { name: 'value', type: 'uint256' },
+    { name: 'validAfter', type: 'uint256' },
+    { name: 'validBefore', type: 'uint256' },
+    { name: 'nonce', type: 'bytes32' },
+  ],
+} as const;
+
+export const TRANSFER_WITH_AUTHORIZATION_TYPES = {
+  TransferWithAuthorization: [
     { name: 'from', type: 'address' },
     { name: 'to', type: 'address' },
     { name: 'value', type: 'uint256' },

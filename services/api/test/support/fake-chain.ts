@@ -1,4 +1,5 @@
 import { type Address, type Hex, keccak256, toHex } from 'viem';
+import type { TransferAuthorization } from '../../src/domain/p2p.js';
 import type { ReceiveAuthorization, SignedQuote } from '../../src/domain/quote.js';
 import {
   ChainUnavailableError,
@@ -26,7 +27,9 @@ export class FakeChain implements SettlementGateway {
   readonly onChain = new Map<string, OnChainPayment>();
   readonly events: PaymentReceivedEvent[] = [];
   readonly receipts = new Map<Hex, TxReceipt>();
-  readonly sent: { functionName: 'pay' | 'markSettled' | 'refund'; quoteId: Hex; hash: Hex }[] = [];
+  readonly sent: { functionName: 'pay' | 'markSettled' | 'refund' | 'transferWithAuthorization'; quoteId: Hex; hash: Hex }[] = [];
+  /** EIP-3009 nonces used, per authorizer. */
+  private readonly usedNonces = new Set<string>();
   readonly balances = new Map<string, bigint>();
   /** The next write throws this instead of sending. */
   failNextWrite?: Error;
@@ -59,6 +62,22 @@ export class FakeChain implements SettlementGateway {
         blockNumber: this.block,
         logIndex: 0,
       });
+    });
+  }
+
+  /** Moves the tokens like USDC would; `quoteId` in `sent` is the authorization nonce. Signatures aren't checked. */
+  async submitTransfer(auth: TransferAuthorization): Promise<Hex> {
+    const key = `${auth.from.toLowerCase()}:${auth.nonce.toLowerCase()}`;
+    return this.write('transferWithAuthorization', auth.nonce, () => {
+      if (this.usedNonces.has(key)) return 'AuthorizationAlreadyUsed';
+      if ((this.balances.get(auth.from.toLowerCase()) ?? 0n) < auth.value) return 'ERC20InsufficientBalance';
+      return null;
+    }, () => {
+      this.usedNonces.add(key);
+      const from = auth.from.toLowerCase();
+      const to = auth.to.toLowerCase();
+      this.balances.set(from, (this.balances.get(from) ?? 0n) - auth.value);
+      this.balances.set(to, (this.balances.get(to) ?? 0n) + auth.value);
     });
   }
 
@@ -131,7 +150,7 @@ export class FakeChain implements SettlementGateway {
   }
 
   private async write(
-    functionName: 'pay' | 'markSettled' | 'refund',
+    functionName: 'pay' | 'markSettled' | 'refund' | 'transferWithAuthorization',
     quoteId: Hex,
     check: () => string | null,
     effect: (hash: Hex) => void,
