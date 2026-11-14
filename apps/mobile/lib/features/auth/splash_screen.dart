@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:globalpay/app/theme.dart';
 
 /// Shown while the saved session and KYC state load.
 class SplashScreen extends StatelessWidget {
@@ -6,15 +7,14 @@ class SplashScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Scaffold(
+    return const Scaffold(
       body: Center(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Text('GlobalPay', style: theme.textTheme.headlineMedium?.copyWith(color: theme.colorScheme.primary)),
-            const SizedBox(height: 24),
-            const CircularProgressIndicator(),
+            Wordmark(size: 34),
+            SizedBox(height: 28),
+            SizedBox.square(dimension: 20, child: CircularProgressIndicator(strokeWidth: 2)),
           ],
         ),
       ),
