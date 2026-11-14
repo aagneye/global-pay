@@ -1,36 +1,9 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:globalpay/core/errors/app_exception.dart';
 import 'package:globalpay/core/storage/secure_store.dart';
-import 'package:globalpay/services/tap/tap_services.dart';
 import 'package:globalpay/services/wallet/dev_wallet_service.dart';
 
-/// A vault that "encrypts" by reversing, and counts fingerprint prompts.
-class FakeVault implements KeyVault {
-  FakeVault({this.available = true});
-
-  final bool available;
-  final prompts = <String>[];
-  bool cancelNext = false;
-
-  @override
-  Future<bool> isAvailable() async => available;
-
-  @override
-  Future<String> seal(String secret, {required String reason}) async {
-    prompts.add(reason);
-    return secret.split('').reversed.join();
-  }
-
-  @override
-  Future<String> open(String sealed, {required String reason}) async {
-    prompts.add(reason);
-    if (cancelNext) {
-      cancelNext = false;
-      throw const AppException('biometric_cancelled', 'Cancelled');
-    }
-    return sealed.split('').reversed.join();
-  }
-}
+import '../support/fake_fingerprint.dart';
 
 const anvil4 = '0x47e179ec197488593b187f80a00eb0da91f1b9d0b13f8733639f19c30a34926a';
 
