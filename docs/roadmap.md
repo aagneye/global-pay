@@ -195,14 +195,39 @@ The rules are in [ADR 0009](adr/0009-add-money-proved-on-chain.md).
 - **A deposit on Base Sepolia:** this waits on iteration 7's funding.
 - **The Custom Tab on a device:** it's tested in widget tests only, not yet on an emulator or phone.
 
-## Iteration 9: Tap to pay
+## Iteration 9: Tap to pay ✅ (two-phone test pending)
 
-1. Person-to-person USDC payments: the receiver enters an amount, the sender holds their phone to the receiver's phone (NFC), or scans a QR as a fallback.
-2. The sender's phone proves who it is with a hardware-backed key; the backend sends a push notification carrying only the request ID.
-3. The sender sees the recipient's verified name and the amount, approves with their fingerprint, and signs a gasless USDC transfer that the backend relays.
-4. Requests are stored, expire after 2 minutes, and are rate-limited.
+The rules are in [ADR 0010](adr/0010-tap-to-pay.md).
 
-**Done when:** two Android phones complete a tap payment on Base Sepolia, with the push arriving while the app is closed.
+- [x] **Contracts:** `transferWithAuthorization` on the mock USDC, sharing nonces with `receiveWithAuthorization`. 5 new Foundry tests; all 47 pass.
+- [x] **Backend models:** `Device` (hardware P-256 key, push token) and `PaymentRequest`, plus a profile name, in migration `20261115000000_tap_to_pay`.
+- [x] **Tap check:** the payer's phone signs `"GLOBALPAY-TAP-1"` followed by the one-time challenge. The backend verifies the signature against the registered key, then sets the payer and uses up the challenge in one conditional update. The QR claim uses the same challenge.
+- [x] **Approve:** the backend builds the `TransferWithAuthorization` from the stored request, checks the signature against it, and relays it through the relayer. A worker records COMPLETED or FAILED from the receipt, and expires requests after 2 minutes.
+- [x] **Push:** FCM HTTP v1 with a service-account JWT, no SDK. The message carries only the request ID, and stale tokens are forgotten. Without credentials, push is off and the apps poll.
+- [x] **Limits:** 3 open requests per receiver, 3 waiting per payer, at most 1,000 USDC a request, KYC for both sides.
+- [x] **App:**
+  - Request: amount, then an NFC read, with the QR as fallback;
+  - Pay by tap: the phone is armed while the screen is open;
+  - Approve: the recipient's name with a verified badge, the amount, and a fingerprint;
+  - scanning a request QR;
+  - opening the approve screen from a push.
+- [x] **Android:**
+  - `TapHostApduService` (card emulation), answering only when armed and unlocked;
+  - a Keystore P-256 device key (StrongBox when available);
+  - `KeyVault`: an AES-GCM key that needs a strong biometric for every use, through `BiometricPrompt` and `CryptoObject`. The dev wallet's key moves into it.
+  - minSdk raised from 23 to 24 (Android 7), because firebase_messaging needs it.
+
+**Result:** 290 backend tests pass, against Postgres, anvil and the fork. They cover:
+- tap signatures: wrong key, reused challenge, revoked phone;
+- another user trying to approve;
+- a changed amount or recipient;
+- expiry, rate limits, the QR claim, and push token clean-up.
+
+The anvil test runs request → tap → approve → relay, checks both balances, and refuses a replay. 65 app tests pass, including both sides of a tap payment and the QR path, with fake NFC and push.
+
+**Not done yet:**
+- **On hardware:** the tap between two physical Android phones and push with the app closed need two NFC phones and a Firebase project. The native code compiles, but has only been exercised through fakes.
+- **Verified names:** mock KYC doesn't verify names, so all names show as "not verified".
 
 ## Iteration 10: Production hardening
 
@@ -241,7 +266,8 @@ The rules are in [ADR 0009](adr/0009-add-money-proved-on-chain.md).
 - **Xendit:** a test account and its secret key and callback token (iteration 6).
 - **Faucets:** Base Sepolia ETH and Circle test USDC (iteration 7).
 - **MoonPay:** a sandbox account (iteration 8).
-- **Firebase:** a project and the Android `google-services.json` (iteration 9).
+- **Firebase:** a project with an Android app (for the `FIREBASE_*` dart-defines) and a service-account key for the backend (iteration 9).
+- **Two NFC Android phones** for the tap test (iteration 9).
 - **Privy:** a dashboard account and app ID (iteration 11).
 - **Optional:** an Etherscan API key for contract verification.
 - **Business and legal:** the items under "Before real money".

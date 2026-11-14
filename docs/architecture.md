@@ -200,6 +200,31 @@ Unpaid orders expire after an hour, but only once the partner confirms nothing w
 
 The **deposit watcher** reads USDC `Transfer` logs to users' wallets, in 200-block ranges from its cursor, and stores each transfer once. It skips refunds from the settlement contract. Locally, `SimulatedOnrampProvider` stands in for MoonPay: its checkout page mints mock USDC on anvil.
 
+## Tap to pay
+
+Tap to pay follows [ADR 0010](adr/0010-tap-to-pay.md).
+
+```mermaid
+sequenceDiagram
+  autonumber
+  participant R as Receiver's phone
+  participant S as Payer's phone (card emulation)
+  participant B as Backend
+  participant T as USDC
+  R->>B: POST /p2p/requests {amount}
+  B-->>R: request + one-time challenge
+  R->>S: NFC: SELECT GlobalPay AID, then the challenge
+  S-->>R: device ID + P-256 signature (Keystore key)
+  R->>B: POST /p2p/requests/:id/tap
+  B->>B: verify signature, set payer, use up challenge
+  B-->>S: push {requestId} (or the payer's screen polls)
+  S->>B: GET authorization (TransferWithAuthorization)
+  S->>S: fingerprint unlocks wallet key, sign
+  S->>B: POST /approve {signature}
+  B->>T: transferWithAuthorization (relayer pays gas)
+  B-->>R: COMPLETED (polling, and a push)
+```
+
 ## Signatures
 
 Two signatures authorise every payment.
@@ -295,6 +320,8 @@ The signature check is offline, which covers ordinary wallets (EOAs), including 
 | `OpsAction` | Operator actions: who, what, why |
 | `OnrampOrder` | Add-money order: amount, wallet, status, partner purchase, and the delivering transfer (unique per transaction and log) |
 | `Deposit` | USDC that arrived in a user's wallet from outside, once per transfer |
+| `Device` | A phone's hardware P-256 public key and push token, for tap to pay |
+| `PaymentRequest` | A person-to-person request: amount, the receiver's name snapshot, one-time challenge and EIP-3009 nonce, the identified payer, status, transfer hash |
 | `IndexerCursor` | Last processed block per contract and chain |
 
 All money is stored as integers in minor units: USDC base units (6 decimals) and THB satang (2 decimals). Exchange rates are fixed-point integers scaled by 1e8 (`rateE8`).
@@ -319,6 +346,8 @@ All money is stored as integers in minor units: USDC base units (6 decimals) and
 | POST, GET | `/onramp/orders`, `/onramp/orders/:id` | Add money: start an order (signed checkout URL), follow it | 8 ✅ |
 | GET | `/me/deposits` | Incoming USDC, linked to Add-money orders | 8 ✅ |
 | POST | `/webhooks/onramp/:partner` | MoonPay webhooks (not in the app's spec) | 8 ✅ |
+| PUT, POST, DELETE | `/me/profile`, `/devices`, `/devices/:id` | Your name; register or revoke a phone for tap to pay | 9 ✅ |
+| POST, GET | `/p2p/requests`, `/p2p/requests/:id/{tap,claim,authorization,approve,decline,cancel}`, `/p2p/incoming` | Tap to pay | 9 ✅ |
 
 Each route declares zod schemas. The same schemas validate requests, shape responses, and generate the OpenAPI spec. Every operation has an `operationId`, and the main schemas have names (`QuoteResponse`, `Payment`, …), so generated clients get readable methods and classes.
 

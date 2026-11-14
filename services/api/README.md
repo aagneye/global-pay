@@ -11,7 +11,7 @@ Stack: Fastify, zod (validation and OpenAPI), viem, Prisma 7 (Postgres), jose (J
 
 ## Status
 
-Iterations 3 (backend core), 4 (settlement loop), 6 (payout confirmation and operations) and 8 (Add money) are done. These work:
+Iterations 3 (backend core), 4 (settlement loop), 6 (payout confirmation and operations), 8 (Add money) and 9 (tap to pay) are done. These work:
 
 | Route | What it does |
 |---|---|
@@ -23,6 +23,8 @@ Iterations 3 (backend core), 4 (settlement loop), 6 (payout confirmation and ope
 | `GET /me/balance` | The wallet's USDC balance, read from the chain |
 | `POST /onramp/orders`, `GET /onramp/orders[/:id]` | Add money: a signed MoonPay checkout for the user's own wallet; COMPLETED only once the USDC is proved on-chain |
 | `GET /me/deposits` | USDC that arrived from outside, linked to the Add-money order it completed |
+| `PUT /me/profile`, `POST /devices` | The name people see when paying you; a phone's hardware key and push token for tap to pay |
+| `POST /p2p/requests`, `.../tap`, `.../claim`, `.../authorization`, `.../approve`, `GET /p2p/incoming` | Tap to pay: the receiver asks, a tap (P-256 signature over a one-time challenge) or QR identifies the payer, who approves a USDC transfer that the backend relays |
 | `GET /docs` | OpenAPI docs (spec at `/docs/json`) |
 | `POST /webhooks/payouts/:partner` | Partner status webhooks: token checked, then the payout is re-fetched before anything changes |
 | `POST /webhooks/onramp/:partner` | MoonPay webhooks: signature over the raw body and its age checked, then the order is re-fetched |
@@ -49,10 +51,12 @@ src/
   lib/promptpay/      EMVCo PromptPay parser and builder (shared vectors in packages/fixtures)
   lib/typed-data.ts   EIP-712 types shared with the contracts (Quote, ReceiveWithAuthorization)
   modules/<feature>/  routes.ts (HTTP schemas) and service.ts (use case):
-                      auth, kyc, quotes, payments, account, ops (operator console), onramp (Add money)
+                      auth, kyc, quotes, payments, account, ops (operator console), onramp (Add money),
+                      p2p (tap to pay)
   modules/payouts/    PayoutTracker (partner answers → payout status, shared by worker, webhook and ops)
   workers/            indexer (chain events), payout worker (pay out, then settle or refund),
-                      onramp worker (Add-money orders), deposit watcher (incoming USDC)
+                      onramp worker (Add-money orders), deposit watcher (incoming USDC),
+                      p2p worker (tap-to-pay expiry and receipts)
   shared/             errors, zod schemas, auth hook
   generated/prisma/   Prisma client (generated on npm install, gitignored)
 prisma/               schema and migrations
@@ -144,6 +148,17 @@ It also shows the relayer's gas and the payout float. Its actions (re-check, mar
   - **Webhooks:** register `<public URL>/webhooks/onramp/moonpay` in MoonPay's dashboard.
 
 An order is COMPLETED only once a confirmed transfer of the reported amount reaches the user's wallet, and each transfer completes one order ([ADR 0009](../../docs/adr/0009-add-money-proved-on-chain.md)).
+
+## Tap to pay
+
+`POST /p2p/requests` (the receiver) returns a one-time `challenge`.
+
+1. **Tap:** the receiver's phone sends the challenge to the payer's phone over NFC, and forwards the answer to `POST /p2p/requests/:id/tap`. The answer is the device ID and a P-256 signature over `"GLOBALPAY-TAP-1"` followed by the challenge.
+2. **Push:** the payer gets a push carrying only the request ID, or sees the request in `GET /p2p/incoming`.
+3. **Approve:** the payer signs the transfer from `.../authorization`, an EIP-712 `TransferWithAuthorization` built from the stored request, and sends it to `.../approve`.
+4. **Relay:** the backend checks the signature against the stored request and relays the transfer. The P2P worker records COMPLETED once it's mined.
+
+Push needs `FCM_SERVICE_ACCOUNT_FILE`; without it the apps poll. The rules are in [ADR 0010](../../docs/adr/0010-tap-to-pay.md).
 
 ## Conventions
 

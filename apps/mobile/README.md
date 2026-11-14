@@ -21,6 +21,12 @@ Iteration 5 is done. The whole flow works against the local backend:
 6. **Status:** polls until Paid, Refunded or Failed, with the transactions.
 7. **Receive** (address QR with an EIP-681 USDC link) and **History** (payments and deposits).
 8. **Add money** (iteration 8): pick a baht amount; the partner's checkout opens in a Custom Tab (never a WebView). The status screen re-checks when the app comes back, and shows "Added" only once the USDC is proved on-chain. Against the local backend, the checkout is the API's simulator page.
+9. **Tap to pay** (iteration 9, [ADR 0010](../../docs/adr/0010-tap-to-pay.md)):
+   - **Request** (receiver): enter a USDC amount, then hold the payer's phone to yours, or let them scan the QR.
+   - **Pay by tap** (payer): while this screen is open, the phone answers taps as a contactless card. Its signing key never leaves the Android Keystore.
+   - **Approve:** the payer sees who they're paying (with a "verified" badge only for verified names) and the amount, then approves with their fingerprint.
+   - **Fingerprint-locked wallet:** with strong biometrics enrolled, the wallet key is stored only encrypted by a Keystore key that needs the fingerprint for every signature.
+   - **Native code** is in `android/app/src/main/kotlin/.../TapCard.kt` and `KeyVault.kt`.
 
 The embedded wallet (Privy) replaces the dev wallet in iteration 7. See [docs/roadmap.md](../../docs/roadmap.md).
 
@@ -84,6 +90,7 @@ adb shell am start -n com.globalpay.globalpay/.MainActivity --ez enable-impeller
 | `CHAIN_ID` | `84532` | Base Sepolia; `31337` for anvil |
 | `EXPLORER_URL` | `https://sepolia.basescan.org` | Not used by the app yet; the backend sends transaction links |
 | `DEV_WALLET_PRIVATE_KEY` | none | Optional, local chains only: the dev wallet's key on first start. Never a real key: dart-defines end up in the app. |
+| `FIREBASE_API_KEY`, `FIREBASE_APP_ID`, `FIREBASE_SENDER_ID`, `FIREBASE_PROJECT_ID` | none | Push for tap to pay, from your Firebase project's Android app settings (no `google-services.json` needed). Without them push is off and the payer's screen polls. |
 
 ### Live backend test
 
