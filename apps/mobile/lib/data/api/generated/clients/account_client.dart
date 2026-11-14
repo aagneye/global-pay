@@ -8,6 +8,8 @@ import 'package:retrofit/retrofit.dart';
 import '../models/balance.dart';
 import '../models/deposit_list.dart';
 import '../models/payment_list.dart';
+import '../models/profile.dart';
+import '../models/profile_update.dart';
 
 part 'account_client.g.dart';
 
@@ -28,4 +30,10 @@ abstract class AccountClient {
   /// Found on-chain by the deposit watcher, a few blocks after they land. Refunds show on their payment instead.
   @GET('/me/deposits')
   Future<DepositList> listDeposits();
+
+  /// Set the name others see when paying you
+  @PUT('/me/profile')
+  Future<Profile> updateProfile({
+    @Body() required ProfileUpdate body,
+  });
 }

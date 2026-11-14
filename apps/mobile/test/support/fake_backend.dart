@@ -11,6 +11,7 @@ class FakeBackend implements HttpClientAdapter {
     this.finalStatus = 'SETTLED',
     this.payoutStatus = 'PENDING',
     this.onrampFinalStatus = 'COMPLETED',
+    this.p2pRole = 'receiver',
   });
 
   final String balanceUnits;
@@ -24,6 +25,13 @@ class FakeBackend implements HttpClientAdapter {
   final String onrampFinalStatus;
   int _onrampPolls = 0;
   bool _added = false;
+
+  /// Which side of a tap payment this phone is on.
+  final String p2pRole;
+  String p2pStatus = 'CREATED';
+  int _p2pPolls = 0;
+  static final p2pChallenge = '0x${'c4' * 32}';
+  static const receiverAddress = '0x70997970C51812dc3A010C7d01b50e0d17dc79C8';
   final requests = <({String method, String path, Object? body, String? auth})>[];
   String kycStatus = 'NOT_STARTED';
   int _statusPolls = 0;
@@ -108,9 +116,87 @@ class FakeBackend implements HttpClientAdapter {
         return (200, _onramp(status));
       }(),
       ('GET', '/me/deposits') => (200, {'deposits': _added ? [_deposit()] : []}),
+      ('POST', '/devices') => (201, {'id': 'device_1'}),
+      ('PUT', '/me/profile') => (200, {'displayName': (body as Map)['displayName'], 'nameVerified': false}),
+      ('POST', '/p2p/requests') => (201, _p2p()),
+      ('POST', '/p2p/requests/request_1/tap') => () {
+        p2pStatus = 'SENDER_IDENTIFIED';
+        return (200, _p2p());
+      }(),
+      ('POST', '/p2p/requests/request_1/claim') => () {
+        p2pStatus = 'SENDER_IDENTIFIED';
+        return (200, _p2p());
+      }(),
+      ('GET', '/p2p/incoming') => (200, {'requests': p2pStatus == 'SENDER_IDENTIFIED' ? [_p2p()] : []}),
+      ('GET', '/p2p/requests/request_1') => () {
+        // The other side acts between polls: the sender approves, then the transfer lands.
+        if (++_p2pPolls > 1) {
+          if (p2pRole == 'receiver' && p2pStatus == 'SENDER_IDENTIFIED') p2pStatus = 'COMPLETED';
+          if (p2pStatus == 'SUBMITTED') p2pStatus = 'COMPLETED';
+        }
+        return (200, _p2p());
+      }(),
+      ('GET', '/p2p/requests/request_1/authorization') => (200, _transfer()),
+      ('POST', '/p2p/requests/request_1/approve') => () {
+        p2pStatus = 'SUBMITTED';
+        return (200, _p2p());
+      }(),
+      ('POST', '/p2p/requests/request_1/decline') => () {
+        p2pStatus = 'DECLINED';
+        return (200, _p2p());
+      }(),
+      ('POST', '/p2p/requests/request_1/cancel') => () {
+        p2pStatus = 'CANCELLED';
+        return (200, _p2p());
+      }(),
       _ => (404, {'error': 'not_found', 'message': 'No route $method $path'}),
     };
   }
+
+  Map<String, Object> _p2p() {
+    final now = DateTime.now().toUtc();
+    return {
+      'id': 'request_1',
+      'role': p2pRole,
+      'status': p2pStatus,
+      'token': '0x5FbDB2315678afecb367f032d93F642f64180aa3',
+      'amount': '5000000',
+      'recipient': {'name': 'Somchai Coffee', 'verified': false, 'address': receiverAddress},
+      if (p2pStatus != 'CREATED') 'sender': {'address': '0x15d34AAf54267DB7D7c367839AAf71A00a2C6A65'},
+      if (p2pRole == 'receiver' && p2pStatus == 'CREATED') 'challenge': p2pChallenge,
+      if (p2pStatus == 'SUBMITTED' || p2pStatus == 'COMPLETED')
+        'transaction': {'hash': '0x${'66' * 32}', 'url': 'https://explorer.test/tx/0x${'66' * 32}'},
+      'expiresAt': now.add(const Duration(minutes: 2)).toIso8601String(),
+      'createdAt': now.toIso8601String(),
+      'updatedAt': now.toIso8601String(),
+    };
+  }
+
+  Map<String, Object> _transfer() => {
+    'domain': {'name': 'USDC', 'version': '2', 'chainId': 31337, 'verifyingContract': '0x5FbDB2315678afecb367f032d93F642f64180aa3'},
+    'types': {
+      'TransferWithAuthorization': [
+        for (final (name, type) in [
+          ('from', 'address'),
+          ('to', 'address'),
+          ('value', 'uint256'),
+          ('validAfter', 'uint256'),
+          ('validBefore', 'uint256'),
+          ('nonce', 'bytes32'),
+        ])
+          {'name': name, 'type': type},
+      ],
+    },
+    'primaryType': 'TransferWithAuthorization',
+    'message': {
+      'from': '0x15d34AAf54267DB7D7c367839AAf71A00a2C6A65',
+      'to': receiverAddress,
+      'value': '5000000',
+      'validAfter': '0',
+      'validBefore': '1900000000',
+      'nonce': '0x${'77' * 32}',
+    },
+  };
 
   Map<String, Object> _onramp(String status) {
     final now = DateTime.now().toUtc().toIso8601String();

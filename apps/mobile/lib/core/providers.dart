@@ -7,6 +7,9 @@ import 'package:globalpay/data/repositories/account_repository.dart';
 import 'package:globalpay/data/repositories/auth_repository.dart';
 import 'package:globalpay/data/repositories/kyc_repository.dart';
 import 'package:globalpay/data/repositories/onramp_repository.dart';
+import 'package:globalpay/data/repositories/p2p_repository.dart';
+import 'package:globalpay/services/push/push_service.dart';
+import 'package:globalpay/services/tap/tap_services.dart';
 import 'package:globalpay/data/repositories/payments_repository.dart';
 import 'package:globalpay/data/session_store.dart';
 import 'package:globalpay/features/auth/session_controller.dart';
@@ -26,8 +29,17 @@ final walletServiceProvider = Provider<WalletService>(
   (ref) => DevWalletService(
     store: ref.watch(secureStoreProvider),
     importKey: ref.watch(appConfigProvider).devWalletPrivateKey,
+    vault: ref.watch(keyVaultProvider),
   ),
 );
+
+/// The fingerprint-locked store for the wallet key (Android Keystore). Null disables it.
+final keyVaultProvider = Provider<KeyVault?>((ref) => const ChannelKeyVault());
+
+/// Tap to pay: this phone as a card (sender) and as a reader (receiver), and push.
+final tapCardProvider = Provider<TapCard>((ref) => const ChannelTapCard());
+final tapReaderProvider = Provider<TapReader>((ref) => NfcTapReader());
+final pushServiceProvider = Provider<PushService>((ref) => FirebasePushService(FirebaseConfig.fromEnvironment()));
 
 final apiClientProvider = Provider<ApiClient>((ref) {
   final sessions = ref.watch(sessionStoreProvider);
@@ -56,6 +68,8 @@ final paymentsRepositoryProvider = Provider<PaymentsRepository>(
 final accountRepositoryProvider = Provider<AccountRepository>(
   (ref) => AccountRepository(api: ref.watch(apiClientProvider)),
 );
+
+final p2pRepositoryProvider = Provider<P2pRepository>((ref) => P2pRepository(api: ref.watch(apiClientProvider)));
 
 final onrampRepositoryProvider = Provider<OnrampRepository>(
   (ref) => OnrampRepository(api: ref.watch(apiClientProvider), apiBaseUrl: ref.watch(appConfigProvider).apiBaseUrl),

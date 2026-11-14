@@ -1,14 +1,20 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:globalpay/app/router.dart';
+import 'package:globalpay/core/providers.dart';
+import 'package:globalpay/core/widgets/common.dart';
 import 'package:globalpay/domain/promptpay/promptpay_parser.dart';
+import 'package:globalpay/features/p2p/p2p_support.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 
 /// Whether to open the camera. Off in widget tests, which have no camera.
 final cameraScannerProvider = Provider<bool>((ref) => true);
 
-/// Scan a PromptPay QR with the camera, or paste its text (handy on emulators and the web).
+/// Scan a PromptPay QR (or a GlobalPay payment request) with the camera, or paste its text (handy on
+/// emulators and the web).
 /// The QR is checked here for instant feedback; the backend checks it again before quoting.
 class ScanScreen extends ConsumerStatefulWidget {
   const ScanScreen({super.key});
@@ -43,12 +49,33 @@ class _ScanScreenState extends ConsumerState<ScanScreen> {
 
   void _use(String payload) {
     if (_handled) return;
+    // A GlobalPay payment request (the QR instead of a tap): claim it, then approve it.
+    final request = parseRequestQr(payload);
+    if (request != null) {
+      _handled = true;
+      unawaited(_claim(request.id, request.challenge));
+      return;
+    }
     try {
       final qr = parsePromptPayQr(payload);
       _handled = true;
       context.pushReplacement(Routes.confirm, extra: qr);
     } on PromptPayParseException catch (e) {
       setState(() => _error = e.message);
+    }
+  }
+
+  Future<void> _claim(String id, String challenge) async {
+    try {
+      await ref.read(p2pRepositoryProvider).claim(id, challenge);
+      if (mounted) context.pushReplacement(Routes.approve(id));
+    } on Object catch (error) {
+      if (mounted) {
+        setState(() {
+          _handled = false;
+          _error = describeError(error);
+        });
+      }
     }
   }
 

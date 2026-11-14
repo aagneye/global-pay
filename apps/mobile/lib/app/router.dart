@@ -13,6 +13,9 @@ import 'package:globalpay/features/history/history_screen.dart';
 import 'package:globalpay/features/home/home_screen.dart';
 import 'package:globalpay/features/kyc/kyc_controller.dart';
 import 'package:globalpay/features/kyc/kyc_screen.dart';
+import 'package:globalpay/features/p2p/approve_screen.dart';
+import 'package:globalpay/features/p2p/pay_by_tap_screen.dart';
+import 'package:globalpay/features/p2p/request_screen.dart';
 import 'package:globalpay/features/pay/confirm_screen.dart';
 import 'package:globalpay/features/pay/payment_status_screen.dart';
 import 'package:globalpay/features/receive/receive_screen.dart';
@@ -28,9 +31,12 @@ abstract final class Routes {
   static const confirm = '/pay/confirm';
   static const history = '/history';
   static const addMoney = '/add-money';
+  static const request = '/request';
+  static const payByTap = '/pay-by-tap';
 
   static String status(String paymentId) => '/pay/status/$paymentId';
   static String addMoneyStatus(String orderId) => '/add-money/$orderId';
+  static String approve(String requestId) => '/approve/$requestId';
 }
 
 /// Where the app must go given the session and KYC state, or null to stay at [location].
@@ -80,6 +86,9 @@ final routerProvider = Provider<GoRouter>((ref) {
       ),
       GoRoute(path: Routes.history, builder: (context, state) => const HistoryScreen()),
       GoRoute(path: Routes.addMoney, builder: (context, state) => const AddMoneyScreen()),
+      GoRoute(path: Routes.request, builder: (context, state) => const RequestScreen()),
+      GoRoute(path: Routes.payByTap, builder: (context, state) => const PayByTapScreen()),
+      GoRoute(path: '/approve/:requestId', builder: (context, state) => ApproveScreen(requestId: state.pathParameters['requestId']!)),
       GoRoute(
         path: '/add-money/:orderId',
         builder: (context, state) => OnrampStatusScreen(

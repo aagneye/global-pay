@@ -2,10 +2,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:globalpay/app/router.dart';
+import 'package:globalpay/core/providers.dart';
 import 'package:globalpay/core/widgets/common.dart';
 import 'package:globalpay/features/auth/session_controller.dart';
 import 'package:globalpay/features/history/history_screen.dart';
 import 'package:globalpay/features/home/account_providers.dart';
+import 'package:globalpay/features/p2p/p2p_support.dart';
 
 class HomeScreen extends ConsumerWidget {
   const HomeScreen({super.key});
@@ -16,6 +18,8 @@ class HomeScreen extends ConsumerWidget {
     final address = ref.watch(sessionProvider).value?.walletAddress ?? '';
     final balance = ref.watch(balanceProvider);
     final history = ref.watch(historyProvider);
+    // Registers this phone for tap to pay (hardware key, push token) once signed in.
+    ref.watch(deviceRegistrationProvider);
 
     Future<void> refresh() async {
       ref.invalidate(balanceProvider);
@@ -34,8 +38,12 @@ class HomeScreen extends ConsumerWidget {
           PopupMenuButton<String>(
             onSelected: (value) {
               if (value == 'sign-out') ref.read(sessionProvider.notifier).signOut();
+              if (value == 'name') _editName(context, ref);
             },
-            itemBuilder: (context) => const [PopupMenuItem(value: 'sign-out', child: Text('Sign out'))],
+            itemBuilder: (context) => const [
+              PopupMenuItem(value: 'name', child: Text('Your name')),
+              PopupMenuItem(value: 'sign-out', child: Text('Sign out')),
+            ],
           ),
         ],
       ),
@@ -84,6 +92,26 @@ class HomeScreen extends ConsumerWidget {
               style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(56)),
             ),
             const SizedBox(height: 12),
+            Row(
+              children: [
+                Expanded(
+                  child: FilledButton.tonalIcon(
+                    onPressed: () => context.push(Routes.request),
+                    icon: const Icon(Icons.call_received),
+                    label: const Text('Request'),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: FilledButton.tonalIcon(
+                    onPressed: () => context.push(Routes.payByTap),
+                    icon: const Icon(Icons.contactless),
+                    label: const Text('Pay by tap'),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
             FilledButton.tonalIcon(
               onPressed: () => context.push(Routes.addMoney),
               icon: const Icon(Icons.add_card),
@@ -129,5 +157,34 @@ class HomeScreen extends ConsumerWidget {
         ),
       ),
     );
+  }
+}
+
+/// "Your name": what people see when they pay you. It's shown to them as not verified.
+Future<void> _editName(BuildContext context, WidgetRef ref) async {
+  final controller = TextEditingController();
+  final name = await showDialog<String>(
+    context: context,
+    builder: (context) => AlertDialog(
+      title: const Text('Your name'),
+      content: TextField(
+        key: const Key('name-field'),
+        controller: controller,
+        autofocus: true,
+        decoration: const InputDecoration(helperText: 'People see this when they pay you'),
+      ),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+        FilledButton(onPressed: () => Navigator.pop(context, controller.text), child: const Text('Save')),
+      ],
+    ),
+  );
+  controller.dispose();
+  if (name == null || !context.mounted) return;
+  try {
+    await ref.read(p2pRepositoryProvider).updateName(name);
+    if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Name saved')));
+  } on Object catch (error) {
+    if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(describeError(error))));
   }
 }

@@ -10,7 +10,10 @@ import 'package:globalpay/data/api/api_client.dart';
 import 'package:globalpay/features/scan/scan_screen.dart';
 import 'package:globalpay/services/wallet/dev_wallet_service.dart';
 
+import 'package:globalpay/services/push/push_service.dart';
+
 import 'support/fake_backend.dart';
+import 'support/fake_tap.dart';
 
 /// anvil account #4, a public test key.
 const testKey = '0x47e179ec197488593b187f80a00eb0da91f1b9d0b13f8733639f19c30a34926a';
@@ -22,8 +25,9 @@ const qr250 =
 
 const config = AppConfig(apiBaseUrl: 'http://backend.test', chainId: 31337);
 
-/// [launched] collects the checkout pages the app opens (no browser in tests).
-Widget app(FakeBackend backend, SecureStore store, {List<Uri>? launched}) {
+/// [launched] collects the checkout pages the app opens (no browser in tests). [card] and [reader]
+/// stand in for NFC; push is off, so the apps poll.
+Widget app(FakeBackend backend, SecureStore store, {List<Uri>? launched, FakeTapCard? card, FakeTapReader? reader}) {
   return ProviderScope(
     overrides: [
       appConfigProvider.overrideWithValue(config),
@@ -34,6 +38,9 @@ Widget app(FakeBackend backend, SecureStore store, {List<Uri>? launched}) {
         return ApiClient(config, token: () => sessions.current?.token, dio: Dio()..httpClientAdapter = backend);
       }),
       cameraScannerProvider.overrideWithValue(false),
+      tapCardProvider.overrideWithValue(card ?? FakeTapCard(supported: false)),
+      tapReaderProvider.overrideWithValue(reader ?? FakeTapReader()),
+      pushServiceProvider.overrideWithValue(const NoPushService()),
       checkoutLauncherProvider.overrideWithValue((url) async {
         launched?.add(url);
         return true;
@@ -200,6 +207,90 @@ void main() {
     await tap(tester, 'History');
     await pumpUntil(tester, find.text('Added money'));
     expect(find.text('+24.615384 USDC'), findsOneWidget);
+  });
+
+  group('tap to pay', () {
+    Future<void> signIn(WidgetTester tester, Widget widget) async {
+      tester.view.physicalSize = const Size(1080, 2400);
+      tester.view.devicePixelRatio = 2.5;
+      addTearDown(tester.view.reset);
+      await tester.pumpWidget(widget);
+      await pumpUntil(tester, find.text('Continue with dev wallet'));
+      await tap(tester, 'Continue with dev wallet');
+      await pumpUntil(tester, find.text('Pay by tap'));
+    }
+
+    testWidgets('receiver: reads the other phone, then sees the payment arrive', (tester) async {
+      final backend = FakeBackend()..kycStatus = 'APPROVED';
+      final reader = FakeTapReader();
+      await signIn(tester, app(backend, MemorySecureStore(), reader: reader));
+
+      await tap(tester, 'Request');
+      await pumpUntil(tester, find.byKey(const Key('request-amount')));
+      await tester.enterText(find.byKey(const Key('request-amount')), '5');
+      await tap(tester, 'Request');
+      await pumpUntil(tester, find.text('Hold their phone to the back of yours'));
+      expect(find.text('5.000000 USDC'), findsOneWidget);
+
+      // The fake phone answers: its device ID and signature go to the backend.
+      await pumpUntil(tester, find.text('Waiting for them to approve'), maxFrames: 40);
+      expect(reader.challenges, [FakeBackend.p2pChallenge]);
+      expect(
+        backend.requests.firstWhere((r) => r.path == '/p2p/requests/request_1/tap').body,
+        {'deviceId': 'device_9', 'signature': '0x3044abcd'},
+      );
+
+      await pumpUntil(tester, find.text('Received 5.000000 USDC'), maxFrames: 60);
+      await tap(tester, 'Done');
+      await pumpUntil(tester, find.text('Pay by tap'));
+      await tester.pump(const Duration(seconds: 1));
+    });
+
+    testWidgets('sender: answers taps, then approves with the wallet', (tester) async {
+      final backend = FakeBackend(p2pRole: 'sender')..kycStatus = 'APPROVED';
+      final card = FakeTapCard();
+      await signIn(tester, app(backend, MemorySecureStore(), card: card));
+      // Signed in: the phone registered its hardware key, and knows its device ID.
+      await tester.pump(const Duration(milliseconds: 300));
+      expect(card.deviceId, 'device_1');
+      expect((backend.requests.firstWhere((r) => r.path == '/devices').body as Map)['publicKey'], startsWith('MFkw'));
+
+      await tap(tester, 'Pay by tap');
+      await pumpUntil(tester, find.text('Hold your phone to theirs'));
+      await tester.pump(const Duration(milliseconds: 100));
+      expect(card.arms, [const Duration(seconds: 60)]);
+
+      // The receiver tapped: the backend now has a request waiting for this phone's owner.
+      backend.p2pStatus = 'SENDER_IDENTIFIED';
+      await pumpUntil(tester, find.text('Somchai Coffee'), maxFrames: 40);
+      await tester.pump(const Duration(seconds: 1)); // the tap screen closes after its transition
+      expect(card.disarms, greaterThan(0));
+      expect(find.text('Name not verified: check it with them'), findsOneWidget);
+      expect(find.text('5.000000 USDC'), findsOneWidget);
+
+      await tap(tester, 'Approve');
+      await pumpUntil(tester, find.text('Paid 5.000000 USDC'), maxFrames: 60);
+      final approve = backend.requests.firstWhere((r) => r.path == '/p2p/requests/request_1/approve');
+      expect((approve.body as Map)['signature'], matches(RegExp(r'^0x[0-9a-f]{130}$')));
+      await tap(tester, 'Done');
+      await tester.pump(const Duration(seconds: 1));
+    });
+
+    testWidgets("sender: scans the receiver's code instead of tapping", (tester) async {
+      final backend = FakeBackend(p2pRole: 'sender')..kycStatus = 'APPROVED';
+      await signIn(tester, app(backend, MemorySecureStore()));
+      await tap(tester, 'Pay by tap');
+      await pumpUntil(tester, find.text("This phone can't pay by tap"));
+      await tap(tester, 'Scan their code instead');
+      await pumpUntil(tester, find.byKey(const Key('qr-text')));
+      await tester.enterText(find.byKey(const Key('qr-text')), 'globalpay://pay?r=request_1&c=${FakeBackend.p2pChallenge}');
+      await tap(tester, 'Continue');
+      await pumpUntil(tester, find.text('Somchai Coffee'), maxFrames: 40);
+      expect(backend.requests.firstWhere((r) => r.path == '/p2p/requests/request_1/claim').body, {'challenge': FakeBackend.p2pChallenge});
+
+      await tap(tester, 'Decline');
+      await pumpUntil(tester, find.text('Declined. No money moved.'));
+    });
   });
 
   testWidgets('stays signed in across restarts', (tester) async {

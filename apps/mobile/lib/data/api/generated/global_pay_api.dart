@@ -11,6 +11,7 @@ import 'clients/quotes_client.dart';
 import 'clients/payments_client.dart';
 import 'clients/account_client.dart';
 import 'clients/onramp_client.dart';
+import 'clients/p2p_client.dart';
 
 /// GlobalPay API `v0.1.0`.
 ///
@@ -36,6 +37,7 @@ class GlobalPayApi {
   PaymentsClient? _payments;
   AccountClient? _account;
   OnrampClient? _onramp;
+  P2pClient? _p2p;
 
   SystemClient get system => _system ??= SystemClient(_dio, baseUrl: _baseUrl);
 
@@ -50,4 +52,6 @@ class GlobalPayApi {
   AccountClient get account => _account ??= AccountClient(_dio, baseUrl: _baseUrl);
 
   OnrampClient get onramp => _onramp ??= OnrampClient(_dio, baseUrl: _baseUrl);
+
+  P2pClient get p2p => _p2p ??= P2pClient(_dio, baseUrl: _baseUrl);
 }
