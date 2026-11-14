@@ -156,4 +156,51 @@ describe('production checks', () => {
     // Development keeps the easy defaults.
     expect(testEnv({}).MERCHANT_QR_ONLY).toBe(false);
   });
+
+  it('refuses NEAR testnet and the testnet faucet', () => {
+    const near = { SETTLEMENT_RAIL: 'near', ...NEAR_SETTINGS };
+    expect(refused(near)).toThrow(/NEAR_NETWORK=testnet is refused in production/);
+    expect(testEnv({ ...production, ...near, NEAR_NETWORK: 'mainnet', NEAR_RPC_URL: 'https://free.rpc.fastnear.com' }).NEAR_NETWORK).toBe('mainnet');
+    expect(refused({ NEAR_TESTNET_FAUCET: 'true' })).toThrow(/NEAR_TESTNET_FAUCET/);
+    // The EVM rail doesn't care about NEAR_NETWORK's default.
+    expect(testEnv(production).NEAR_NETWORK).toBe('testnet');
+  });
+});
+
+/** NEAR rail settings with well-formed placeholder values (not real accounts or keys). */
+const NEAR_SETTINGS = {
+  NEAR_SETTLEMENT_CONTRACT: 'gp-abc123-settle.testnet',
+  NEAR_USDC_CONTRACT: 'gp-abc123-usdc.testnet',
+  NEAR_RELAYER_ACCOUNT_ID: 'gp-abc123-relayer.testnet',
+  NEAR_RELAYER_PRIVATE_KEY: `ed25519:${'2'.repeat(88)}`,
+  NEAR_QUOTE_SIGNER_PRIVATE_KEY: `ed25519:${'3'.repeat(88)}`,
+};
+
+describe('NEAR rail settings', () => {
+  it('defaults to the EVM rail and NEAR testnet', () => {
+    const env = testEnv();
+    expect(env.SETTLEMENT_RAIL).toBe('evm');
+    expect(env.NEAR_NETWORK).toBe('testnet');
+    expect(env.NEAR_RPC_URL).toBe('https://test.rpc.fastnear.com');
+    expect(env.NEAR_EXPLORER_URL).toBe('https://testnet.nearblocks.io');
+    expect(env.NEAR_TESTNET_FAUCET).toBe(false);
+  });
+
+  it('needs the contracts, the relayer and the quote signer on the NEAR rail', () => {
+    const env = testEnv({ SETTLEMENT_RAIL: 'near', ...NEAR_SETTINGS, NEAR_TESTNET_FAUCET: 'true' });
+    expect(env.NEAR_USDC_CONTRACT).toBe('gp-abc123-usdc.testnet');
+    expect(env.NEAR_TESTNET_FAUCET).toBe(true);
+    for (const name of Object.keys(NEAR_SETTINGS)) {
+      expect(() => testEnv({ SETTLEMENT_RAIL: 'near', ...NEAR_SETTINGS, [name]: '' })).toThrow(/SETTLEMENT_RAIL=near needs/);
+    }
+    // The EVM rail ignores them.
+    expect(testEnv({ NEAR_USDC_CONTRACT: 'usdc.testnet' }).SETTLEMENT_RAIL).toBe('evm');
+  });
+
+  it('checks the formats', () => {
+    expect(() => testEnv({ NEAR_USDC_CONTRACT: 'Not An Account' })).toThrow(/NEAR_USDC_CONTRACT/);
+    expect(() => testEnv({ NEAR_RELAYER_PRIVATE_KEY: '0x1234' })).toThrow(/NEAR_RELAYER_PRIVATE_KEY/);
+    expect(() => testEnv({ SETTLEMENT_RAIL: 'solana' })).toThrow(/SETTLEMENT_RAIL/);
+    expect(() => testEnv({ NEAR_NETWORK: 'mainnet', NEAR_TESTNET_FAUCET: 'true' })).toThrow(/testnet only/);
+  });
 });

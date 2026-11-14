@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { FIAT_DECIMALS, RATE_DECIMALS, TOKEN_DECIMALS, parseDecimal } from '../domain/money.js';
-import { addressSchema, privateKeySchema } from '../shared/schemas.js';
+import { addressSchema, nearAccountIdSchema, nearPrivateKeySchema, privateKeySchema } from '../shared/schemas.js';
 import { ANVIL_CHAIN_ID, isPublicTestKey } from './public-test-keys.js';
 
 /** A THB amount like "5000" or "5000.00", as satang. */
@@ -87,6 +87,34 @@ export const envSchema = z.object({
 
   QUOTE_SIGNER_PRIVATE_KEY: privateKeySchema.optional(),
   RELAYER_PRIVATE_KEY: privateKeySchema.optional(),
+
+  /**
+   * Which chain settles payments, one per backend: `evm` (CHAIN_ID, USDC_ADDRESS, SETTLEMENT_ADDRESS and the
+   * keys above) or `near` (the NEAR_* settings). Tap to pay, Add money and deposits are EVM only.
+   */
+  SETTLEMENT_RAIL: z.enum(['evm', 'near']).default('evm'),
+
+  // NEAR rail (SETTLEMENT_RAIL=near)
+  NEAR_NETWORK: z.enum(['testnet', 'mainnet']).default('testnet'),
+  NEAR_RPC_URL: z.url().default('https://test.rpc.fastnear.com'),
+  /** The GlobalPay settlement contract's account. */
+  NEAR_SETTLEMENT_CONTRACT: nearAccountIdSchema.optional(),
+  /** The NEP-141 USDC contract's account. */
+  NEAR_USDC_CONTRACT: nearAccountIdSchema.optional(),
+  /** Pays the gas for users' meta transactions, and is the settlement contract's operator (settle, refund). */
+  NEAR_RELAYER_ACCOUNT_ID: nearAccountIdSchema.optional(),
+  /** "ed25519:..." full-access key of NEAR_RELAYER_ACCOUNT_ID. */
+  NEAR_RELAYER_PRIVATE_KEY: nearPrivateKeySchema.optional(),
+  /** "ed25519:..." key whose public key the settlement contract trusts to sign quotes. */
+  NEAR_QUOTE_SIGNER_PRIVATE_KEY: nearPrivateKeySchema.optional(),
+  /** Where settled USDC goes (set in the contract; shown by `npm run near:testnet -- status`). */
+  NEAR_TREASURY_ACCOUNT_ID: nearAccountIdSchema.optional(),
+  /**
+   * Testnet only: on a NEAR user's first sign-in, the relayer creates their account with 0.05 NEAR,
+   * registers it with the token and mints 1,000 test USDC (the relayer must own the test token).
+   */
+  NEAR_TESTNET_FAUCET: z.stringbool().default(false),
+  NEAR_EXPLORER_URL: z.url().default('https://testnet.nearblocks.io'),
 
   QUOTE_TTL_SECONDS: z.coerce.number().int().min(15).max(300).default(60),
   SPREAD_BPS: z.coerce.number().int().min(0).max(1_000).default(100),
@@ -239,6 +267,15 @@ export const envSchema = z.object({
 
 export type Env = z.infer<typeof envSchema>;
 
+/** What the NEAR rail can't run without. */
+const NEAR_RAIL_REQUIRED = [
+  'NEAR_SETTLEMENT_CONTRACT',
+  'NEAR_USDC_CONTRACT',
+  'NEAR_RELAYER_ACCOUNT_ID',
+  'NEAR_RELAYER_PRIVATE_KEY',
+  'NEAR_QUOTE_SIGNER_PRIVATE_KEY',
+] as const;
+
 /** Settings that only make sense together. */
 function checkCombinations(env: Env, ctx: z.RefinementCtx): void {
   if (env.PAYOUT_PROVIDER === 'xendit' && !env.XENDIT_SECRET_KEY) {
@@ -267,6 +304,16 @@ function checkCombinations(env: Env, ctx: z.RefinementCtx): void {
   if (env.ONRAMP_MIN_THB > env.ONRAMP_MAX_THB) {
     ctx.addIssue({ code: 'custom', path: ['ONRAMP_MIN_THB'], message: 'ONRAMP_MIN_THB is above ONRAMP_MAX_THB' });
   }
+  if (env.SETTLEMENT_RAIL === 'near') {
+    for (const name of NEAR_RAIL_REQUIRED) {
+      if (!env[name]) {
+        ctx.addIssue({ code: 'custom', path: [name], message: `SETTLEMENT_RAIL=near needs ${NEAR_RAIL_REQUIRED.join(', ')}` });
+      }
+    }
+  }
+  if (env.NEAR_TESTNET_FAUCET && env.NEAR_NETWORK !== 'testnet') {
+    ctx.addIssue({ code: 'custom', path: ['NEAR_TESTNET_FAUCET'], message: 'NEAR_TESTNET_FAUCET works on NEAR_NETWORK=testnet only' });
+  }
   if (env.NODE_ENV === 'production') checkProduction(env, ctx);
 }
 
@@ -287,6 +334,10 @@ function checkProduction(env: Env, ctx: z.RefinementCtx): void {
     const key = env[name];
     if (key && isPublicTestKey(key)) refuse(name, `${name} is one of anvil's public test keys and is refused in production`);
   }
+  if (env.SETTLEMENT_RAIL === 'near' && env.NEAR_NETWORK === 'testnet') {
+    refuse('NEAR_NETWORK', 'NEAR_NETWORK=testnet is refused in production');
+  }
+  if (env.NEAR_TESTNET_FAUCET) refuse('NEAR_TESTNET_FAUCET', 'NEAR_TESTNET_FAUCET gives away test tokens and is refused in production');
 
   const generate = `generate one with: node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"`;
   if (looksGuessable(env.JWT_SECRET)) refuse('JWT_SECRET', `JWT_SECRET looks guessable; ${generate}`);

@@ -53,6 +53,18 @@ export function parseWallet(rail: SettlementRail, value: string): Address {
 /** Standard base64, e.g. a borsh-encoded NEAR SignedDelegate or an ed25519 signature. */
 export const base64Schema = z.string().regex(BASE64, 'expected base64');
 
+/** A NEAR account ID, e.g. "gp-abc123-usdc.testnet" or an implicit account (NEAR's account ID rules). */
+export const nearAccountIdSchema = z
+  .string()
+  .min(2)
+  .max(64)
+  .regex(/^(([a-z\d]+[-_])*[a-z\d]+\.)*([a-z\d]+[-_])*[a-z\d]+$/, 'expected a NEAR account ID, e.g. alice.testnet');
+
+/** A NEAR secret key, "ed25519:" + base58 (as near-cli and near-api-js write it). */
+export const nearPrivateKeySchema = z
+  .string()
+  .regex(/^ed25519:[1-9A-HJ-NP-Za-km-z]{43,90}$/, 'expected "ed25519:" followed by a base58 secret key');
+
 /** A NEAR ed25519 public key, "ed25519:" + base58. */
 export const nearPublicKeySchema = z.string().regex(NEAR_PUBLIC_KEY, 'expected "ed25519:" followed by a base58 public key');
 
