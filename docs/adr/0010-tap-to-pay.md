@@ -83,3 +83,7 @@ All of these are settings (`P2P_*`).
 - **The app checks the transfer before signing** it: recipient, amount, token, chain and nonce must match the request on screen.
 - **The fingerprint step depends on the wallet.** With the dev wallet, every signature still needs a strong biometric. With Privy (iteration 11), the default wallet, it doesn't yet; see [ADR 0003](0003-embedded-non-custodial-wallet.md) for the open decision.
 - **Stuck transfers** (no receipt after `OPS_STUCK_TX_AFTER_MS`) appear on `/ops`.
+
+## Update: the fingerprint for Privy too (2026-11-14)
+
+Approving a tap payment needs the fingerprint again with either wallet. Before each Privy signature, the app opens a token sealed by the same Keystore key as the dev wallet's vault, so the hardware enforces the check. The rules, including the lock after a fingerprint change, are in [ADR 0003](0003-embedded-non-custodial-wallet.md#update-a-fingerprint-before-every-privy-signature-2026-11-14). The vault now replaces its key when fingerprints change, instead of failing to seal anything again.

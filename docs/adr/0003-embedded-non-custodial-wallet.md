@@ -31,6 +31,20 @@ The first users are freelancers, not crypto experts. Seed phrases cause drop-off
 - **Android needs API 28.** Privy's Android library is built for Android 9, so the app's `minSdk` went from 24 to 28. This is an owner decision: it drops Android 7 and 8 phones.
 
 Not settled yet:
-- **No fingerprint per Privy signature.** The dev wallet's key needed a strong biometric for every signature ([ADR 0010](0010-tap-to-pay.md)). Privy signs without one. The owner decides between gating Privy signatures behind a `BiometricPrompt` with a `CryptoObject` (e.g. opening a vault-sealed value before each signature) and Privy's own MFA for signing.
 - **Google sign-in** isn't wired up (it needs a redirect scheme and `PrivyRedirectActivity`).
 - **Not tried on a phone:** it needs a Privy app (an owner step). Unit and widget tests use a fake Privy client.
+
+## Update: a fingerprint before every Privy signature (2026-11-14)
+
+The owner chose to keep [ADR 0010](0010-tap-to-pay.md)'s promise of a fingerprint for every approval with Privy too.
+
+- **Every Privy signature needs the fingerprint first:** "Sign in to GlobalPay" for Sign-In with Ethereum, "Approve this payment" for each USDC authorisation. Nothing reaches Privy until the check passes, so a cancelled prompt signs nothing.
+- **The phone's hardware decides, not the app.** `FingerprintGate` (`lib/services/wallet/signature_gate.dart`) seals a random 32-byte token with the `KeyVault` AES key, which the Android Keystore releases only after a strong biometric through `BiometricPrompt` with a `CryptoObject`. Each check must decrypt that token, and the result must match the SHA-256 digest stored beside it. A bare `local_auth` prompt only reports "passed", which a tampered app can fake.
+- **One prompt per signature.** The first check seals the token, and sealing is itself the fingerprint prompt.
+- **Changed fingerprints lock it.** Adding or removing a fingerprint destroys the Keystore key. The gate then refuses every signature (`biometric_reset`) until the user signs in again with an email code, so someone who knows the phone's PIN can't add their own finger and pay. The fresh sign-in seals a new token (the vault replaces the destroyed key). A token that doesn't match its digest locks the gate the same way.
+- **No strong biometric, no signature in release builds** (`biometric_unavailable`, "Set up a fingerprint…"). Debug builds skip the check on such phones, so emulators without a fingerprint still work.
+
+Consequences:
+- **It protects against someone holding an unlocked phone, not against a rooted one.** Malware on a rooted phone could call Privy directly, because Privy's key isn't bound to the fingerprint. Privy's own MFA for signing (a passkey or an authenticator app, checked by Privy) would cover that; it's listed under "Before real money" in the roadmap.
+- **Phones with only weak biometrics can't pay.** Android counts most face unlock as weak, and `BIOMETRIC_STRONG` excludes it. Allowing the screen-lock PIN instead (Android 11 and later can bind a Keystore key to it) is an owner decision.
+- **Not tried on a phone yet.** Unit and widget tests cover the gate with a fake vault, and the Kotlin builds. A real fingerprint, a cancel and a fingerprint change need a phone and the owner's Privy app.
