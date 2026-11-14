@@ -52,6 +52,13 @@ TokenAmount usdc(String units) => TokenAmount(symbol: 'USDC', units: BigInt.pars
 
 FiatAmount thb(String minor) => FiatAmount(currency: FiatCurrency.thb, minor: BigInt.parse(minor));
 
+/// [minor] units of the currency with ISO code [code] (THB or INR).
+FiatAmount fiat(String code, String minor) =>
+    FiatAmount(currency: FiatCurrency.fromCode(code), minor: BigInt.parse(minor));
+
+/// What the history calls a merchant without a name: a UPI ID (card payments in India) or a PromptPay ID.
+String merchantFallbackName(String kind, String targetId) => kind == 'upi' ? targetId : 'PromptPay $targetId';
+
 Quote quoteFromDto(dto.QuoteResponse response) {
   final typed = response.authorizationToSign;
   final near = response.nearPayment;
@@ -113,9 +120,10 @@ Payment paymentFromDto(dto.Payment response) {
     id: response.id,
     quoteId: response.quoteId,
     status: PaymentStatus.fromApi(response.status.toJson()),
-    fiatAmount: thb(response.fiatAmount),
+    fiatAmount: fiat(response.fiatCurrency, response.fiatAmount),
     tokenAmount: usdc(response.tokenAmount),
-    merchantName: response.merchant.name ?? 'PromptPay ${response.merchant.targetId}',
+    merchantName: response.merchant.name ?? merchantFallbackName(response.merchant.kind, response.merchant.targetId),
+    merchantId: response.merchant.targetId,
     createdAt: response.createdAt,
     failureReason: response.failureReason,
     payTx: link(response.transactions.pay),

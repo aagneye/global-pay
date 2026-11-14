@@ -6,6 +6,7 @@ import 'package:go_router/go_router.dart';
 import 'package:globalpay/app/router.dart';
 import 'package:globalpay/core/providers.dart';
 import 'package:globalpay/core/widgets/common.dart';
+import 'package:globalpay/domain/models/money.dart';
 import 'package:globalpay/domain/models/payment.dart';
 import 'package:globalpay/features/home/account_providers.dart';
 
@@ -84,14 +85,18 @@ class _PaymentStatusScreenState extends ConsumerState<PaymentStatusScreen> {
                         DetailRow('Merchant', payment.merchantName),
                         DetailRow('Merchant gets', payment.fiatAmount.format()),
                         DetailRow('You paid', payment.tokenAmount.format()),
-                        if (payment.payout?.reference case final reference?) DetailRow('Bank reference', reference),
+                        if (payment.payout?.reference case final reference?)
+                          DetailRow(
+                            payment.fiatAmount.currency == FiatCurrency.inr ? 'UPI reference' : 'Bank reference',
+                            reference,
+                          ),
                         if (payment.failureReason != null) DetailRow('Reason', payment.failureReason!),
                       ],
                     ),
                   ),
                 ),
                 const SizedBox(height: 16),
-                _Steps(status: payment.status),
+                _Steps(status: payment.status, currency: payment.fiatAmount.currency),
                 const SizedBox(height: 16),
                 for (final (label, tx) in [
                   ('Payment', payment.payTx),
@@ -164,9 +169,12 @@ class _Headline extends StatelessWidget {
 
 /// The payment's progress: sent, received on-chain, merchant paid, then paid or refunded.
 class _Steps extends StatelessWidget {
-  const _Steps({required this.status});
+  const _Steps({required this.status, required this.currency});
 
   final PaymentStatus status;
+
+  /// What the merchant is paid in.
+  final FiatCurrency currency;
 
   @override
   Widget build(BuildContext context) {
@@ -176,7 +184,7 @@ class _Steps extends StatelessWidget {
     final steps = [
       'Payment sent',
       'USDC received on-chain',
-      'Paying the merchant in baht',
+      'Paying the merchant in ${currency.name}',
       status == PaymentStatus.refunded ? 'USDC refunded' : 'Merchant paid',
     ];
     if (status == PaymentStatus.failed) {

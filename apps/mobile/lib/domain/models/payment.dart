@@ -82,6 +82,7 @@ class Payment {
     required this.tokenAmount,
     required this.merchantName,
     required this.createdAt,
+    this.merchantId,
     this.failureReason,
     this.payTx,
     this.settleTx,
@@ -96,6 +97,9 @@ class Payment {
   final TokenAmount tokenAmount;
   final String merchantName;
   final DateTime createdAt;
+
+  /// The merchant's PromptPay ID, or UPI ID for a card payment in India.
+  final String? merchantId;
 
   /// Why it failed, or why the merchant payout failed and the USDC was refunded.
   final String? failureReason;
