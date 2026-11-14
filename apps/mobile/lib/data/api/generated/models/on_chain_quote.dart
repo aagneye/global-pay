@@ -34,9 +34,11 @@ class OnChainQuote {
 
   /// USDC base units (6 decimals), spread included
   final String tokenAmount;
+
+  /// THB for a PromptPay QR, INR for a UPI QR
   final OnChainQuoteFiatCurrency fiatCurrency;
 
-  /// THB satang the merchant receives
+  /// Minor units of fiatCurrency (satang, paise) the merchant receives
   final String fiatAmount;
   final String merchantRefHash;
 

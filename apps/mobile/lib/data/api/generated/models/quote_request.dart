@@ -19,10 +19,10 @@ class QuoteRequest {
   /// Wallet that will pay; must be the signed-in user's wallet (a NEAR implicit account on the NEAR rail)
   final String payer;
 
-  /// The scanned PromptPay QR text
+  /// The scanned QR text: a Thai PromptPay QR (THB) or an Indian UPI QR, upi://pay?... (INR)
   final String qrPayload;
 
-  /// THB satang. Required when the QR has no amount; must match it when it has one.
+  /// Minor units of the QR's currency (THB satang, INR paise). Required when the QR has no amount; must match it when it has one.
   final String? fiatAmountMinor;
 
   Map<String, Object?> toJson() => _$QuoteRequestToJson(this);

@@ -8,7 +8,7 @@ import 'payment_payout_status.dart';
 
 part 'payment_payout.g.dart';
 
-/// Paying the merchant in THB. Absent until the payment is paid on-chain.
+/// Paying the merchant in fiatCurrency (THB, INR). Absent until the payment is paid on-chain.
 @JsonSerializable()
 class PaymentPayout {
   const PaymentPayout({

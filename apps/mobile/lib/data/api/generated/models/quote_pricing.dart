@@ -18,7 +18,7 @@ class QuotePricing {
   
   factory QuotePricing.fromJson(Map<String, Object?> json) => _$QuotePricingFromJson(json);
   
-  /// Mid-market THB per USDC × 1e8
+  /// Mid-market fiatCurrency per USDC × 1e8
   final String rateE8;
   final String rateSource;
   final int spreadBps;

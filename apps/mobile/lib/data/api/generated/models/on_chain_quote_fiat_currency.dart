@@ -4,10 +4,13 @@
 
 import 'package:json_annotation/json_annotation.dart';
 
+/// THB for a PromptPay QR, INR for a UPI QR
 @JsonEnum()
 enum OnChainQuoteFiatCurrency {
   @JsonValue('THB')
   thb('THB'),
+  @JsonValue('INR')
+  inr('INR'),
   /// Default value for all unparsed values, allows backward compatibility when adding new values on the backend.
   $unknown(null);
 

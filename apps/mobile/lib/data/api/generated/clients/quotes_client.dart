@@ -14,9 +14,9 @@ part 'quotes_client.g.dart';
 abstract class QuotesClient {
   factory QuotesClient(Dio dio, {String? baseUrl}) = _QuotesClient;
 
-  /// Quote a PromptPay QR payment in USDC.
+  /// Quote a PromptPay or UPI QR payment in USDC.
   ///
-  /// Parses the QR, checks KYC limits, prices it at the live rate plus the spread, and signs it. The quote expires after QUOTE_TTL_SECONDS (60 s by default). EVM rail: sign `authorizationToSign` with the payer wallet. NEAR rail: sign `nearPayment` as a delegate action. Then submit it to POST /payments.
+  /// Parses the QR (PromptPay: THB, UPI: INR), checks KYC limits, prices it at the live rate plus the spread, and signs it. The quote expires after QUOTE_TTL_SECONDS (60 s by default). EVM rail: sign `authorizationToSign` with the payer wallet. NEAR rail: sign `nearPayment` as a delegate action. Then submit it to POST /payments.
   @POST('/quotes')
   Future<QuoteResponse> createQuote({
     @Body() required QuoteRequest body,

@@ -15,9 +15,9 @@ import 'clients/p2p_client.dart';
 
 /// GlobalPay API `v0.1.0`.
 ///
-/// Pay Thai PromptPay QRs with USDC on Base or NEAR (one settlement rail per server, SETTLEMENT_RAIL). Testnet demo: partners are simulated.
+/// Pay Thai PromptPay and Indian UPI QRs with USDC on Base or NEAR (one settlement rail per server, SETTLEMENT_RAIL). Testnet demo: partners are simulated.
 ///
-/// Money is sent as integer strings in minor units: THB satang ("10000" = 100.00 THB) and USDC base units ("1000000" = 1 USDC). Rates are THB per USDC × 1e8.
+/// Money is sent as integer strings in minor units of its currency: THB satang ("10000" = 100.00 THB), INR paise ("25000" = ₹250.00) and USDC base units ("1000000" = 1 USDC). Rates are fiat per USDC × 1e8.
 class GlobalPayApi {
   GlobalPayApi(
     Dio dio, {

@@ -39,7 +39,7 @@ class Payment {
   final PaymentStatus status;
   final String fiatCurrency;
 
-  /// THB satang the merchant receives
+  /// Minor units of fiatCurrency (satang, paise) the merchant receives
   final String fiatAmount;
 
   /// USDC: its 0x address (EVM rail) or contract account ID (NEAR rail)
