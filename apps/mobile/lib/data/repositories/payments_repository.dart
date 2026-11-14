@@ -50,6 +50,7 @@ Quote quoteFromDto(dto.QuoteResponse response) {
   return Quote(
     quoteId: response.quote.quoteId,
     payer: response.quote.payer,
+    token: response.quote.token,
     tokenAmount: usdc(response.quote.tokenAmount),
     feeAmount: usdc(response.pricing.feeTokenAmount),
     fiatAmount: thb(response.quote.fiatAmount),
@@ -72,7 +73,8 @@ Quote quoteFromDto(dto.QuoteResponse response) {
               for (final field in entry.value) {'name': field.name, 'type': field.type},
             ],
         },
-        'primaryType': typed.primaryType.toJson(),
+        // Null for a type this app doesn't know, which the signing check refuses.
+        'primaryType': typed.primaryType.json,
         'domain': typed.domain.toJson(),
         'message': typed.message.toJson(),
       },

@@ -5,6 +5,7 @@ class Quote {
   const Quote({
     required this.quoteId,
     required this.payer,
+    required this.token,
     required this.tokenAmount,
     required this.feeAmount,
     required this.fiatAmount,
@@ -18,6 +19,9 @@ class Quote {
   /// bytes32 hex. Also the nonce of the USDC authorisation the user signs.
   final String quoteId;
   final String payer;
+
+  /// The USDC contract the quote is priced in.
+  final String token;
 
   /// What the user pays, fee included.
   final TokenAmount tokenAmount;

@@ -14,6 +14,7 @@ import 'package:globalpay/services/push/push_service.dart';
 
 import 'support/fake_backend.dart';
 import 'support/fake_tap.dart';
+import 'support/spy_wallet.dart';
 
 /// anvil account #4, a public test key.
 const testKey = '0x47e179ec197488593b187f80a00eb0da91f1b9d0b13f8733639f19c30a34926a';
@@ -26,16 +27,24 @@ const qr250 =
 const config = AppConfig(apiBaseUrl: 'http://backend.test', chainId: 31337);
 
 /// [launched] collects the checkout pages the app opens (no browser in tests). [card] and [reader]
-/// stand in for NFC; push is off, so the apps poll.
-Widget app(FakeBackend backend, SecureStore store, {List<Uri>? launched, FakeTapCard? card, FakeTapReader? reader}) {
+/// stand in for NFC; push is off, so the apps poll. [wallet] replaces the dev wallet, e.g. with a [SpyWallet].
+Widget app(
+  FakeBackend backend,
+  SecureStore store, {
+  List<Uri>? launched,
+  FakeTapCard? card,
+  FakeTapReader? reader,
+  DevWalletService? wallet,
+  AppConfig appConfig = config,
+}) {
   return ProviderScope(
     overrides: [
-      appConfigProvider.overrideWithValue(config),
+      appConfigProvider.overrideWithValue(appConfig),
       secureStoreProvider.overrideWithValue(store),
-      walletServiceProvider.overrideWith((ref) => DevWalletService(store: store, importKey: testKey)),
+      walletServiceProvider.overrideWith((ref) => wallet ?? DevWalletService(store: store, importKey: testKey)),
       apiClientProvider.overrideWith((ref) {
         final sessions = ref.watch(sessionStoreProvider);
-        return ApiClient(config, token: () => sessions.current?.token, dio: Dio()..httpClientAdapter = backend);
+        return ApiClient(appConfig, token: () => sessions.current?.token, dio: Dio()..httpClientAdapter = backend);
       }),
       cameraScannerProvider.overrideWithValue(false),
       tapCardProvider.overrideWithValue(card ?? FakeTapCard(supported: false)),
@@ -173,6 +182,55 @@ void main() {
     expect(find.text('Done'), findsNothing);
   });
 
+  group('refuses to sign what a compromised backend sends', () {
+    Future<void> pay(WidgetTester tester, FakeBackend backend, SpyWallet wallet, {AppConfig appConfig = config}) async {
+      tester.view.physicalSize = const Size(1080, 2400);
+      tester.view.devicePixelRatio = 2.5;
+      addTearDown(tester.view.reset);
+      await tester.pumpWidget(app(backend, MemorySecureStore(), wallet: wallet, appConfig: appConfig));
+      await pumpUntil(tester, find.text('Continue with dev wallet'));
+      await tap(tester, 'Continue with dev wallet');
+      await pumpUntil(tester, find.text('Scan & pay'));
+      await tap(tester, 'Scan & pay');
+      await pumpUntil(tester, find.byKey(const Key('qr-text')));
+      await tester.enterText(find.byKey(const Key('qr-text')), qr250);
+      await tap(tester, 'Continue');
+      await pumpUntil(tester, find.text('Pay 7.477454 USDC'));
+      await tap(tester, 'Pay 7.477454 USDC');
+      await pumpUntil(tester, find.textContaining('Stopped before signing'));
+    }
+
+    testWidgets('a quote authorisation for more than the screen shows', (tester) async {
+      final backend = FakeBackend()
+        ..kycStatus = 'APPROVED'
+        ..tamper = (typed) => (typed['message']! as Map)['value'] = '7477454000';
+      final wallet = SpyWallet(store: MemorySecureStore(), importKey: testKey);
+      await pay(tester, backend, wallet);
+
+      expect(find.textContaining('(the amount)'), findsOneWidget);
+      expect(find.textContaining('Nothing was signed'), findsOneWidget);
+      expect(wallet.signedTypedData, isEmpty);
+      expect(backend.requests.where((r) => r.path == '/payments'), isEmpty);
+    });
+
+    testWidgets('a quote authorisation that pays someone other than the settlement contract', (tester) async {
+      final backend = FakeBackend()
+        ..kycStatus = 'APPROVED'
+        ..tamper = (typed) => (typed['message']! as Map)['to'] = '0x000000000000000000000000000000000000dEaD';
+      final wallet = SpyWallet(store: MemorySecureStore(), importKey: testKey);
+      const withSettlement = AppConfig(
+        apiBaseUrl: 'http://backend.test',
+        chainId: 31337,
+        settlementAddress: '0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512',
+      );
+      await pay(tester, backend, wallet, appConfig: withSettlement);
+
+      expect(find.textContaining('(the recipient)'), findsOneWidget);
+      expect(wallet.signedTypedData, isEmpty);
+      expect(backend.requests.where((r) => r.path == '/payments'), isEmpty);
+    });
+  });
+
   testWidgets('adds money: opens the checkout, then shows the USDC once it arrives', (tester) async {
     tester.view.physicalSize = const Size(1080, 2400);
     tester.view.devicePixelRatio = 2.5;
@@ -274,6 +332,27 @@ void main() {
       expect((approve.body as Map)['signature'], matches(RegExp(r'^0x[0-9a-f]{130}$')));
       await tap(tester, 'Done');
       await tester.pump(const Duration(seconds: 1));
+    });
+
+    testWidgets('sender: refuses to sign a transfer to someone the screen does not show', (tester) async {
+      // A compromised backend: the request shows Somchai Coffee, the transfer pays someone else.
+      final backend = FakeBackend(p2pRole: 'sender')
+        ..kycStatus = 'APPROVED'
+        ..p2pStatus = 'SENDER_IDENTIFIED'
+        ..tamper = (typed) => (typed['message']! as Map)['to'] = '0x000000000000000000000000000000000000dEaD';
+      final store = MemorySecureStore();
+      final wallet = SpyWallet(store: store, importKey: testKey);
+      await signIn(tester, app(backend, store, wallet: wallet));
+      await tap(tester, 'Pay by tap');
+      await pumpUntil(tester, find.text('Somchai Coffee'), maxFrames: 40);
+      await tester.pump(const Duration(seconds: 1));
+
+      await tap(tester, 'Approve');
+      await pumpUntil(tester, find.textContaining('Stopped before signing'));
+      expect(find.textContaining('(the recipient)'), findsOneWidget);
+      expect(wallet.signedTypedData, isEmpty);
+      expect(backend.requests.where((r) => r.path == '/p2p/requests/request_1/approve'), isEmpty);
+      expect(find.text('Approve'), findsOneWidget);
     });
 
     testWidgets("sender: scans the receiver's code instead of tapping", (tester) async {

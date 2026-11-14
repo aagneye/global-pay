@@ -71,6 +71,7 @@ void main() {
     Quote quote(String rateE8) => Quote(
       quoteId: '0x',
       payer: '0x',
+      token: '0x',
       tokenAmount: TokenAmount(symbol: 'USDC', units: BigInt.one, decimals: 6),
       feeAmount: TokenAmount(symbol: 'USDC', units: BigInt.zero, decimals: 6),
       fiatAmount: FiatAmount(currency: FiatCurrency.thb, minor: BigInt.one),

@@ -40,6 +40,10 @@ class FakeBackend implements HttpClientAdapter {
   static const quoteId = '0xabababababababababababababababababababababababababababababababab';
   static const paymentId = 'payment_1';
 
+  /// Changes the typed data the backend asks the wallet to sign (a quote's or a tap payment's), like a
+  /// compromised backend would.
+  void Function(Map<String, Object?> typedData)? tamper;
+
   @override
   Future<ResponseBody> fetch(
     RequestOptions options,
@@ -172,7 +176,7 @@ class FakeBackend implements HttpClientAdapter {
     };
   }
 
-  Map<String, Object> _transfer() => {
+  Map<String, Object?> _transfer() => _tampered({
     'domain': {'name': 'USDC', 'version': '2', 'chainId': 31337, 'verifyingContract': '0x5FbDB2315678afecb367f032d93F642f64180aa3'},
     'types': {
       'TransferWithAuthorization': [
@@ -193,10 +197,16 @@ class FakeBackend implements HttpClientAdapter {
       'to': receiverAddress,
       'value': '5000000',
       'validAfter': '0',
-      'validBefore': '1900000000',
+      // Like P2P_AUTHORIZATION_TTL_MS: 10 minutes.
+      'validBefore': '${DateTime.now().add(const Duration(minutes: 10)).millisecondsSinceEpoch ~/ 1000}',
       'nonce': '0x${'77' * 32}',
     },
-  };
+  });
+
+  Map<String, Object?> _tampered(Map<String, Object?> typedData) {
+    tamper?.call(typedData);
+    return typedData;
+  }
 
   Map<String, Object> _onramp(String status) {
     final now = DateTime.now().toUtc().toIso8601String();
@@ -265,7 +275,7 @@ class FakeBackend implements HttpClientAdapter {
         'merchantName': 'GLOBALPAY TEST CAFE',
         'merchantCity': 'BANGKOK',
       },
-      'authorizationToSign': {
+      'authorizationToSign': _tampered({
         'types': {
           'EIP712Domain': [
             {'name': 'name', 'type': 'string'},
@@ -297,7 +307,7 @@ class FakeBackend implements HttpClientAdapter {
           'validBefore': '$seconds',
           'nonce': quoteId,
         },
-      },
+      }),
     };
   }
 

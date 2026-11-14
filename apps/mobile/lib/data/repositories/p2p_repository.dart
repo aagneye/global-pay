@@ -54,7 +54,8 @@ class P2pRepository {
             for (final field in entry.value) {'name': field.name, 'type': field.type},
           ],
       },
-      'primaryType': typed.primaryType.toJson(),
+      // Null for a type this app doesn't know, which the signing check refuses.
+      'primaryType': typed.primaryType.json,
       'domain': typed.domain.toJson(),
       'message': typed.message.toJson(),
     };
@@ -74,6 +75,7 @@ P2pRequest p2pRequestFromDto(dto.P2pRequest response) => P2pRequest(
   id: response.id,
   isReceiver: response.role == dto.P2pRequestRole.receiver,
   status: P2pStatus.fromApi(response.status.toJson()),
+  token: response.token,
   amount: usdc(response.amount),
   recipientName: response.recipient.name,
   recipientVerified: response.recipient.verified,

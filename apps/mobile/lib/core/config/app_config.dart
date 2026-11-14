@@ -9,7 +9,7 @@ import 'package:flutter/foundation.dart';
 ///   cover Dart's own HTTP client (Dio), so this check is what keeps plain HTTP out of a release.
 /// - `DEV_WALLET_PRIVATE_KEY` is ignored, and not even compiled in, so a test key can't ship.
 class AppConfig {
-  const AppConfig({required this.apiBaseUrl, required this.chainId, this.devWalletPrivateKey});
+  const AppConfig({required this.apiBaseUrl, required this.chainId, this.devWalletPrivateKey, this.settlementAddress});
 
   /// This build's settings. [release] is [kReleaseMode]; tests set it to check the release rules.
   factory AppConfig.fromEnvironment({bool release = kReleaseMode}) => AppConfig.checked(
@@ -21,6 +21,8 @@ class AppConfig {
     // e.g. anvil account #4. Never a real key: dart-defines end up in the app binary.
     // kReleaseMode is a constant, so release builds drop this branch and the key with it.
     devWalletPrivateKey: kReleaseMode ? null : const String.fromEnvironment('DEV_WALLET_PRIVATE_KEY'),
+    // Optional: the GlobalPaySettlement contract. When set, the wallet won't sign a merchant payment to anything else.
+    settlementAddress: const String.fromEnvironment('SETTLEMENT_ADDRESS'),
     release: release,
   );
 
@@ -30,13 +32,19 @@ class AppConfig {
     required String apiBaseUrl,
     required int chainId,
     String? devWalletPrivateKey,
+    String? settlementAddress,
     required bool release,
   }) {
     if (release && !isHttps(apiBaseUrl)) {
       throw ArgumentError.value(apiBaseUrl, 'API_BASE_URL', 'release builds need an https:// URL');
     }
     final key = devWalletPrivateKey == null || devWalletPrivateKey.isEmpty ? null : devWalletPrivateKey;
-    return AppConfig(apiBaseUrl: apiBaseUrl, chainId: chainId, devWalletPrivateKey: release ? null : key);
+    return AppConfig(
+      apiBaseUrl: apiBaseUrl,
+      chainId: chainId,
+      devWalletPrivateKey: release ? null : key,
+      settlementAddress: settlementAddress == null || settlementAddress.isEmpty ? null : settlementAddress,
+    );
   }
 
   /// Whether [url] is an absolute https URL with a host.
@@ -48,4 +56,7 @@ class AppConfig {
   final String apiBaseUrl;
   final int chainId;
   final String? devWalletPrivateKey;
+
+  /// Where merchant payments go (SETTLEMENT_ADDRESS). Null or empty: not checked before signing.
+  final String? settlementAddress;
 }

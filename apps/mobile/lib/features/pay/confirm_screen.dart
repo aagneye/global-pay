@@ -8,6 +8,7 @@ import 'package:globalpay/core/providers.dart';
 import 'package:globalpay/core/widgets/common.dart';
 import 'package:globalpay/domain/models/promptpay_qr.dart';
 import 'package:globalpay/domain/models/quote.dart';
+import 'package:globalpay/domain/signing/authorization_check.dart';
 import 'package:globalpay/features/auth/session_controller.dart';
 
 final _amount = RegExp(r'^\d+(\.\d{1,2})?$');
@@ -83,6 +84,15 @@ class _ConfirmScreenState extends ConsumerState<ConfirmScreen> {
   });
 
   Future<void> _pay(Quote quote) => _guarded(() async {
+    // Never sign more, to anyone else or on another chain than this screen shows, whatever the backend sent.
+    final config = ref.read(appConfigProvider);
+    checkQuoteAuthorization(
+      quote,
+      wallet: ref.read(sessionProvider).value!.walletAddress,
+      chainId: config.chainId,
+      settlement: config.settlementAddress,
+      now: DateTime.now(),
+    );
     final signature = await ref.read(walletServiceProvider).signTypedData(quote.authorization.typedData);
     final payment = await ref.read(paymentsRepositoryProvider).submit(quote, signature);
     if (mounted) context.pushReplacement(Routes.status(payment.id));

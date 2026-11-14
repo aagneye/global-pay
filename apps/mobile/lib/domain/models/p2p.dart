@@ -31,6 +31,7 @@ class P2pRequest {
     required this.id,
     required this.isReceiver,
     required this.status,
+    required this.token,
     required this.amount,
     required this.recipientName,
     required this.recipientVerified,
@@ -47,6 +48,9 @@ class P2pRequest {
   /// True on the receiver's phone, false on the sender's.
   final bool isReceiver;
   final P2pStatus status;
+
+  /// The USDC contract the amount is in.
+  final String token;
   final TokenAmount amount;
 
   /// From the receiver's profile, copied by the backend: the sender can trust it came from there.

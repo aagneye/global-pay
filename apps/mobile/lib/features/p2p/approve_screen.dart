@@ -8,6 +8,8 @@ import 'package:globalpay/core/errors/app_exception.dart';
 import 'package:globalpay/core/providers.dart';
 import 'package:globalpay/core/widgets/common.dart';
 import 'package:globalpay/domain/models/p2p.dart';
+import 'package:globalpay/domain/signing/authorization_check.dart';
+import 'package:globalpay/features/auth/session_controller.dart';
 import 'package:globalpay/features/home/account_providers.dart';
 import 'package:globalpay/features/p2p/request_screen.dart' show requestPollInterval;
 
@@ -57,6 +59,8 @@ class _ApproveScreenState extends ConsumerState<ApproveScreen> {
   }
 
   Future<void> _approve() async {
+    // What the payer saw when they tapped Approve.
+    final shown = _request!;
     setState(() {
       _busy = true;
       _error = null;
@@ -64,6 +68,14 @@ class _ApproveScreenState extends ConsumerState<ApproveScreen> {
     try {
       final repository = ref.read(p2pRepositoryProvider);
       final typed = await repository.authorization(widget.requestId);
+      // Never sign a transfer to anyone else, or for more, than this screen shows, whatever the backend sent.
+      checkTapAuthorization(
+        typed,
+        shown,
+        wallet: ref.read(sessionProvider).value!.walletAddress,
+        chainId: ref.read(appConfigProvider).chainId,
+        now: DateTime.now(),
+      );
       final signature = await ref.read(walletServiceProvider).signTypedData(typed);
       final request = await repository.approve(widget.requestId, signature);
       if (!mounted) return;
