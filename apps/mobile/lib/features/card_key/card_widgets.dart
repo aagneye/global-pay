@@ -186,6 +186,9 @@ class _CardTapSheetState extends ConsumerState<_CardTapSheet> {
       if (mounted) Navigator.pop(context, card);
     } on AppException catch (error) {
       if (error.code != 'tap_cancelled' && mounted) setState(() => _error = error);
+    } catch (error) {
+      // A platform error (e.g. NFC switched off mid-session) must still show a message and "Try again".
+      if (mounted) setState(() => _error = error);
     }
   }
 

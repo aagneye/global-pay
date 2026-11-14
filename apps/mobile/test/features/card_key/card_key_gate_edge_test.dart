@@ -61,11 +61,6 @@ class _FlakyStore extends MemorySecureStore {
   }
 }
 
-const _platformErrorBug =
-    'BUG: _CardTapSheet._listen catches only AppException. A PlatformException from read() (NfcCardReader.read '
-    'lets startSession errors through, e.g. NFC switched off after isAvailable) escapes unhandled: the sheet shows '
-    'no error and no Try again, and just waits.';
-
 const _mainnet = AppConfig(apiBaseUrl: 'https://api.globalpay.example', chainId: 8453);
 
 /// Just the card tap sheet, opened by a button; what it returns goes to [results].
@@ -168,7 +163,7 @@ void main() {
         expect(find.text('Something went wrong. Please try again.'), findsOneWidget);
         expect(find.text('Try again'), findsOneWidget);
       });
-    }, skip: _platformErrorBug);
+    });
 
     testWidgets('Cancel while waiting for a tap stops the reader and returns nothing', (tester) async {
       final reader = _ScriptedReader();
