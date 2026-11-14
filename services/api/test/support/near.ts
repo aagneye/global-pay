@@ -1,26 +1,14 @@
-import { createHash, createPrivateKey, createPublicKey } from 'node:crypto';
+import { createHash } from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
-import {
-  KeyPair,
-  type KeyPairString,
-  KeyPairSigner,
-  PublicKey,
-  actions,
-  baseEncode,
-  buildDelegateAction,
-  encodeSignedDelegate,
-} from 'near-api-js';
+import { type KeyPair, KeyPairSigner, PublicKey, actions, buildDelegateAction, encodeSignedDelegate } from 'near-api-js';
+import { keyPairFromSeed } from '../../src/adapters/near/keys.js';
 
 /**
- * Deterministic ed25519 test keys, derived from a label (no funds anywhere, never use outside tests).
- * The seed is sha256("globalpay-near-test:" + label); the key string is near-api-js's "ed25519:" + base58(seed ‖ public key).
+ * Deterministic ed25519 test keys, derived from a label (no funds anywhere, never use outside tests):
+ * the seed is sha256("globalpay-near-test:" + label).
  */
 export function nearTestKey(label: string): KeyPair {
-  const seed = createHash('sha256').update(`globalpay-near-test:${label}`).digest();
-  const pkcs8 = Buffer.concat([Buffer.from('302e020100300506032b657004220420', 'hex'), seed]);
-  const spki = createPublicKey(createPrivateKey({ key: pkcs8, format: 'der', type: 'pkcs8' })).export({ format: 'der', type: 'spki' });
-  const publicKey = spki.subarray(spki.length - 32);
-  return KeyPair.fromString(`ed25519:${baseEncode(Buffer.concat([seed, publicKey]))}` as KeyPairString);
+  return keyPairFromSeed(createHash('sha256').update(`globalpay-near-test:${label}`).digest());
 }
 
 export function implicitAccount(key: KeyPair): string {

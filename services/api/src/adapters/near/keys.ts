@@ -1,4 +1,5 @@
-import { PublicKey, baseDecode, baseEncode } from 'near-api-js';
+import { createPrivateKey, createPublicKey } from 'node:crypto';
+import { KeyPair, type KeyPairString, PublicKey, baseDecode, baseEncode } from 'near-api-js';
 
 /**
  * NEAR key and account formats shared with the app and the contracts:
@@ -23,6 +24,15 @@ export function implicitAccountOf(publicKey: string): string | null {
 export function publicKeyOfImplicitAccount(accountId: string): string {
   if (!/^[0-9a-f]{64}$/.test(accountId)) throw new Error(`${accountId} is not a NEAR implicit account`);
   return `${ED25519_PREFIX}${baseEncode(Buffer.from(accountId, 'hex'))}`;
+}
+
+/** The ed25519 key pair of a 32-byte seed, as near-api-js writes it: "ed25519:" + base58(seed ‖ public key). */
+export function keyPairFromSeed(seed: Uint8Array): KeyPair {
+  if (seed.length !== 32) throw new Error('an ed25519 seed is 32 bytes');
+  const pkcs8 = Buffer.concat([Buffer.from('302e020100300506032b657004220420', 'hex'), seed]);
+  const spki = createPublicKey(createPrivateKey({ key: pkcs8, format: 'der', type: 'pkcs8' })).export({ format: 'der', type: 'spki' });
+  const publicKey = spki.subarray(spki.length - 32);
+  return KeyPair.fromString(`ed25519:${baseEncode(Buffer.concat([seed, publicKey]))}` as KeyPairString);
 }
 
 /** Verifies an ed25519 signature over `message`. False for a malformed key or signature. */

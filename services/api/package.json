@@ -23,6 +23,7 @@
     "qr:make": "tsx scripts/make-promptpay-qr.ts",
     "xendit:sandbox": "tsx scripts/xendit-sandbox.ts",
     "testnet": "tsx scripts/testnet.ts",
+    "near:vectors": "tsx scripts/near-vectors.ts",
     "openapi": "tsx scripts/export-openapi.ts"
   },
   "dependencies": {

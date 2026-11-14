@@ -36,3 +36,17 @@ Reference signatures made by viem (the backend's library) for the app wallet to 
 - `typedData`: a USDC `ReceiveWithAuthorization` in exactly the shape `POST /quotes` returns, signed with EIP-712 (`eth_signTypedData_v4`). Includes the digest.
 
 The key is anvil account #4, a public test key: never use it outside local chains and tests. Consumer: `apps/mobile/test/services/local_key_signer_test.dart`.
+
+## `near/vectors.json`
+
+NEAR rail reference bytes and signatures, made by near-api-js and the backend (`npm run near:vectors` in
+`services/api`), for the app's borsh writer and signer to match byte for byte:
+- `nep413`: a sign-in message as `POST /auth/nonce` writes it, its NEP-413 hash
+  (`sha256(borsh(u32 2^31+413) ‖ borsh({message, nonce[32], recipient, callback_url: None}))`) and signature.
+- `quote`: the quote JSON the settlement contract checks, the backend's ed25519 signature over its UTF-8
+  bytes, and the `ft_transfer_call` msg. The same quote as `contracts-near/settlement/tests/fixtures/quote.json`.
+- `delegate`: the NEP-366 DelegateAction for that payment (one `ft_transfer_call`, args JSON in the order
+  `receiver_id, amount, msg`), its borsh encoding with the `u32 2^30+366` prefix, hash, signature and the
+  base64 SignedDelegate that `POST /payments` takes as `signedDelegate`.
+
+The keys are the public RFC 8032 Ed25519 test vectors: test only. Consumer: `services/api/test/near-vectors.test.ts`.
