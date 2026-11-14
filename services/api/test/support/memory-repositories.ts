@@ -8,10 +8,13 @@ import {
   assertPayoutTransition,
   assertTransition,
 } from '../../src/domain/payment.js';
+import { type Deposit, type OnrampOrder, assertOnrampTransition } from '../../src/domain/onramp.js';
 import type { KycRecord, User } from '../../src/domain/user.js';
+import { alreadyCounted } from '../../src/adapters/db/prisma-onramp-repositories.js';
 import { buildPromptPayQr } from '../../src/lib/promptpay/build.js';
 import { parsePromptPayQr } from '../../src/lib/promptpay/parse.js';
 import type {
+  OnrampFields,
   OpsAction,
   PaymentFields,
   PaymentWithQuote,
@@ -31,6 +34,9 @@ export function createMemoryRepositories() {
   const cursors = new Map<string, bigint>();
   const payoutEvents: PayoutEvent[] = [];
   const opsActions: OpsAction[] = [];
+  const onrampOrders = new Map<string, OnrampOrder>();
+  const deposits: Deposit[] = [];
+  let nextOrderId = 1;
   let nextUserId = 1;
   let nextPaymentId = 1;
   let clock = 0;
@@ -57,6 +63,9 @@ export function createMemoryRepositories() {
       },
       async findById(id) {
         return users.get(id) ?? null;
+      },
+      async listWallets() {
+        return [...users.values()];
       },
     },
     nonces: {
@@ -235,6 +244,86 @@ export function createMemoryRepositories() {
           .slice(0, limit);
       },
     },
+    onrampOrders: {
+      async create(order) {
+        const at = now();
+        const created: OnrampOrder = {
+          ...order,
+          walletAddress: order.walletAddress.toLowerCase() as Address,
+          id: `order_${nextOrderId++}`,
+          status: 'CREATED',
+          createdAt: at,
+          updatedAt: at,
+        };
+        onrampOrders.set(created.id, created);
+        return { ...created };
+      },
+      async findById(id) {
+        const order = onrampOrders.get(id);
+        return order ? { ...order } : null;
+      },
+      async listByUser(userId, limit) {
+        return [...onrampOrders.values()]
+          .filter((o) => o.userId === userId)
+          .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
+          .slice(0, limit)
+          .map((o) => ({ ...o }));
+      },
+      async listByStatus(statuses, limit) {
+        return [...onrampOrders.values()]
+          .filter((o) => statuses.includes(o.status))
+          .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime())
+          .slice(0, limit)
+          .map((o) => ({ ...o }));
+      },
+      async countOpen(userId) {
+        return [...onrampOrders.values()].filter((o) => o.userId === userId && (o.status === 'CREATED' || o.status === 'PENDING')).length;
+      },
+      async update(id, fields) {
+        const order = onrampOrders.get(id);
+        if (!order) throw new Error(`no order ${id}`);
+        applyFields(order, lowerOnramp(fields));
+        order.updatedAt = now();
+        return { ...order };
+      },
+      async transition(id, from, to, fields = {}) {
+        assertOnrampTransition(from, to);
+        const order = onrampOrders.get(id);
+        if (!order || order.status !== from) return false;
+        const next = lowerOnramp(fields);
+        const txHash = next.txHash ?? order.txHash;
+        const logIndex = next.logIndex ?? order.logIndex;
+        if (txHash && logIndex !== undefined && logIndex !== null) {
+          const taken = [...onrampOrders.values()].some((o) => o.id !== id && o.txHash === txHash && o.logIndex === logIndex);
+          if (taken) throw alreadyCounted();
+        }
+        applyFields(order, next);
+        order.status = to;
+        order.updatedAt = now();
+        return true;
+      },
+    },
+    deposits: {
+      async record(deposit) {
+        const lowered = {
+          ...deposit,
+          token: deposit.token.toLowerCase() as Address,
+          txHash: deposit.txHash.toLowerCase() as Hex,
+          from: deposit.from.toLowerCase() as Address,
+        };
+        const exists = deposits.some((d) => d.chainId === lowered.chainId && d.txHash === lowered.txHash && d.logIndex === lowered.logIndex);
+        if (exists) return false;
+        deposits.push({ ...lowered, id: `deposit_${deposits.length + 1}`, createdAt: now() });
+        return true;
+      },
+      async listByUser(userId, limit) {
+        return deposits
+          .filter((d) => d.userId === userId)
+          .sort((a, b) => (a.blockNumber === b.blockNumber ? b.logIndex - a.logIndex : Number(b.blockNumber - a.blockNumber)))
+          .slice(0, limit)
+          .map((d) => ({ ...d }));
+      },
+    },
     cursors: {
       async get(id) {
         return cursors.get(id) ?? null;
@@ -248,17 +337,25 @@ export function createMemoryRepositories() {
   return {
     ...repositories,
     /** Test-only views of the stored data. */
-    state: { users, nonces, kyc, quotes, payments, payouts, cursors, payoutEvents, opsActions },
+    state: { users, nonces, kyc, quotes, payments, payouts, cursors, payoutEvents, opsActions, onrampOrders, deposits },
   };
 }
 
 /** Applies fields like the database would: `null` clears, `undefined` leaves alone. */
-function applyPayoutFields(payout: Payout, fields: PayoutFields): void {
+function applyFields(target: object, fields: object): void {
   for (const [key, value] of Object.entries(fields)) {
     if (value === undefined) continue;
-    if (value === null) delete (payout as unknown as Record<string, unknown>)[key];
-    else (payout as unknown as Record<string, unknown>)[key] = value;
+    if (value === null) delete (target as Record<string, unknown>)[key];
+    else (target as Record<string, unknown>)[key] = value;
   }
+}
+
+function applyPayoutFields(payout: Payout, fields: PayoutFields): void {
+  applyFields(payout, fields);
+}
+
+function lowerOnramp(fields: OnrampFields): OnrampFields {
+  return { ...fields, ...(fields.txHash ? { txHash: fields.txHash.toLowerCase() as Hex } : {}) };
 }
 
 function lowerFields(fields: PaymentFields): PaymentFields {

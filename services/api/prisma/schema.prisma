@@ -11,14 +11,16 @@ datasource db {
 }
 
 model User {
-  id            String     @id @default(cuid())
+  id            String        @id @default(cuid())
   /// Lowercase 0x wallet address
-  walletAddress String     @unique
-  createdAt     DateTime   @default(now())
-  updatedAt     DateTime   @updatedAt
+  walletAddress String        @unique
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
   kyc           KycRecord?
   quotes        Quote[]
   payments      Payment[]
+  onrampOrders  OnrampOrder[]
+  deposits      Deposit[]
 }
 
 enum KycStatus {
@@ -178,4 +180,65 @@ model IndexerCursor {
   id        String   @id
   lastBlock BigInt
   updatedAt DateTime @updatedAt
+}
+
+/// See src/domain/onramp.ts: COMPLETED only once the transfer is confirmed on-chain
+enum OnrampStatus {
+  CREATED
+  PENDING
+  COMPLETED
+  FAILED
+  EXPIRED
+}
+
+/// An "Add money" order with an onramp partner (MoonPay)
+model OnrampOrder {
+  id                  String       @id @default(cuid())
+  userId              String
+  user                User         @relation(fields: [userId], references: [id])
+  provider            String
+  /// Lowercase; copied from the user when the order is made
+  walletAddress       String
+  fiatCurrency        String
+  fiatAmount          BigInt
+  status              OnrampStatus @default(CREATED)
+  providerTxId        String?
+  providerStatus      String?
+  /// Token base units the partner reports sending
+  expectedTokenAmount BigInt?
+  /// The delivering transfer, once verified on-chain
+  txHash              String?
+  logIndex            Int?
+  receivedAmount      BigInt?
+  failureReason       String?
+  lastError           String?
+  lastCheckedAt       DateTime?
+  expiresAt           DateTime
+  createdAt           DateTime     @default(now())
+  updatedAt           DateTime     @updatedAt
+
+  /// Each on-chain transfer completes at most one order
+  @@unique([txHash, logIndex])
+  @@index([userId, createdAt])
+  @@index([status])
+}
+
+/// Token that arrived in a user's wallet from outside (found by the deposit watcher)
+model Deposit {
+  id          String   @id @default(cuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id])
+  chainId     Int
+  /// Lowercase token address
+  token       String
+  txHash      String
+  logIndex    Int
+  /// Lowercase sender address
+  fromAddress String
+  amount      BigInt
+  blockNumber BigInt
+  createdAt   DateTime @default(now())
+
+  @@unique([chainId, txHash, logIndex])
+  @@index([userId, createdAt])
 }

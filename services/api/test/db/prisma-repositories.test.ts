@@ -31,7 +31,7 @@ describe.skipIf(!url)('Prisma repositories (Postgres)', () => {
 
   beforeEach(async () => {
     await prisma.$executeRawUnsafe(
-      'TRUNCATE "OpsAction", "PayoutEvent", "Payout", "Payment", "Quote", "KycRecord", "SiweNonce", "User", "IndexerCursor" CASCADE',
+      'TRUNCATE "Deposit", "OnrampOrder", "OpsAction", "PayoutEvent", "Payout", "Payment", "Quote", "KycRecord", "SiweNonce", "User", "IndexerCursor" CASCADE',
     );
   });
 
@@ -291,6 +291,64 @@ describe.skipIf(!url)('Prisma repositories (Postgres)', () => {
     await expect(repos.opsActions.list(10, { type: 'payout', id: payment.id })).resolves.toMatchObject([
       { action: 'mark-paid', note: 'checked with the bank', details: { reference: 'BANKREF123' } },
     ]);
+  });
+
+  it('keeps onramp orders, completing each on-chain transfer at most once', async () => {
+    const user = await repos.users.upsertByWallet(PAYER);
+    expect((await repos.users.listWallets()).map((u) => u.id)).toEqual([user.id]);
+    const order = (n: number) =>
+      repos.onrampOrders.create({
+        userId: user.id,
+        provider: 'moonpay',
+        walletAddress: PAYER,
+        fiat: { currency: 'THB', minor: BigInt(n) * 100_00n },
+        expiresAt: new Date(Date.now() + 3_600_000),
+      });
+    const first = await order(8);
+    const second = await order(9);
+    expect(first).toMatchObject({ status: 'CREATED', walletAddress: PAYER.toLowerCase(), fiat: { currency: 'THB', minor: 800_00n } });
+    await expect(repos.onrampOrders.countOpen(user.id)).resolves.toBe(2);
+    expect((await repos.onrampOrders.listByUser(user.id, 10)).map((o) => o.id)).toEqual([second.id, first.id]);
+
+    const txHash = `0x${'AB'.repeat(32)}` as const;
+    await repos.onrampOrders.update(first.id, { providerTxId: 'mp-1', expectedTokenAmount: 24_000_000n });
+    await expect(repos.onrampOrders.transition(first.id, 'CREATED', 'PENDING', { providerStatus: 'pending' })).resolves.toBe(true);
+    await expect(repos.onrampOrders.transition(first.id, 'CREATED', 'PENDING')).resolves.toBe(false);
+    await repos.onrampOrders.transition(first.id, 'PENDING', 'COMPLETED', { txHash, logIndex: 3, receivedAmount: 24_000_000n, lastError: null });
+    expect(await repos.onrampOrders.findById(first.id)).toMatchObject({
+      status: 'COMPLETED',
+      txHash: txHash.toLowerCase(),
+      logIndex: 3,
+      expectedTokenAmount: 24_000_000n,
+      receivedAmount: 24_000_000n,
+    });
+
+    // The same transfer can't complete a second order.
+    await expect(
+      repos.onrampOrders.transition(second.id, 'CREATED', 'COMPLETED', { txHash, logIndex: 3 }),
+    ).rejects.toMatchObject({ code: 'transfer_already_counted' });
+    expect((await repos.onrampOrders.listByStatus(['CREATED'], 10)).map((o) => o.id)).toEqual([second.id]);
+    await expect(repos.onrampOrders.transition(second.id, 'COMPLETED', 'FAILED')).rejects.toThrow(/cannot move/);
+  });
+
+  it('stores each deposit once', async () => {
+    const user = await repos.users.upsertByWallet(PAYER);
+    const deposit = {
+      userId: user.id,
+      chainId: 84532,
+      token: ANVIL.usdc,
+      txHash: `0x${'cd'.repeat(32)}` as const,
+      logIndex: 1,
+      from: ANVIL.accounts.treasury.address,
+      amount: 5_000_000n,
+      blockNumber: 123n,
+    };
+    await expect(repos.deposits.record(deposit)).resolves.toBe(true);
+    await expect(repos.deposits.record(deposit)).resolves.toBe(false);
+    await expect(repos.deposits.record({ ...deposit, logIndex: 2 })).resolves.toBe(true);
+    const listed = await repos.deposits.listByUser(user.id, 10);
+    expect(listed).toHaveLength(2);
+    expect(listed[1]).toMatchObject({ token: ANVIL.usdc.toLowerCase(), from: ANVIL.accounts.treasury.address.toLowerCase(), amount: 5_000_000n, blockNumber: 123n });
   });
 
   it('saves the indexer cursor', async () => {

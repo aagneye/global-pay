@@ -1,5 +1,6 @@
 import type { Address, Hex } from 'viem';
 import type { FiatAmount } from '../domain/money.js';
+import type { Deposit, OnrampOrder, OnrampStatus } from '../domain/onramp.js';
 import type { Payment, PaymentStatus, Payout, PayoutEvent, PayoutStatus } from '../domain/payment.js';
 import type { Quote, SignedQuote } from '../domain/quote.js';
 import type { KycRecord, User } from '../domain/user.js';
@@ -9,6 +10,8 @@ export interface UserRepository {
   /** Returns the user for a wallet, creating them on first sign-in. */
   upsertByWallet(walletAddress: Address): Promise<User>;
   findById(id: string): Promise<User | null>;
+  /** Every user's wallet, for the deposit watcher. */
+  listWallets(): Promise<User[]>;
 }
 
 /** One-time nonces for Sign-In with Ethereum. */
@@ -143,4 +146,44 @@ export interface Repositories {
   payouts: PayoutRepository;
   cursors: CursorRepository;
   opsActions: OpsActionRepository;
+  onrampOrders: OnrampOrderRepository;
+  deposits: DepositRepository;
+}
+
+/** Order fields that change alongside, or without, a status change. `null` clears a field. */
+export type OnrampFields = {
+  [K in
+    | 'providerTxId'
+    | 'providerStatus'
+    | 'expectedTokenAmount'
+    | 'txHash'
+    | 'logIndex'
+    | 'receivedAmount'
+    | 'failureReason'
+    | 'lastError'
+    | 'lastCheckedAt']?: Exclude<OnrampOrder[K], undefined> | null;
+};
+
+export interface OnrampOrderRepository {
+  create(order: Pick<OnrampOrder, 'userId' | 'provider' | 'walletAddress' | 'fiat' | 'expiresAt'>): Promise<OnrampOrder>;
+  findById(id: string): Promise<OnrampOrder | null>;
+  /** Newest first. */
+  listByUser(userId: string, limit: number): Promise<OnrampOrder[]>;
+  /** Oldest first. */
+  listByStatus(statuses: readonly OnrampStatus[], limit: number): Promise<OnrampOrder[]>;
+  /** CREATED or PENDING orders of this user. */
+  countOpen(userId: string): Promise<number>;
+  update(id: string, fields: OnrampFields): Promise<OnrampOrder>;
+  /**
+   * Moves the order from `from` to `to` only if it's still in `from`; false if something else moved it.
+   * Throws `transfer_already_counted` (409) if another order already has this txHash and logIndex.
+   */
+  transition(id: string, from: OnrampStatus, to: OnrampStatus, fields?: OnrampFields): Promise<boolean>;
+}
+
+export interface DepositRepository {
+  /** Stores a deposit once per chain, transaction and log; false if it was already stored. */
+  record(deposit: Omit<Deposit, 'id' | 'createdAt'>): Promise<boolean>;
+  /** Newest first, in chain order (block, then log). */
+  listByUser(userId: string, limit: number): Promise<Deposit[]>;
 }

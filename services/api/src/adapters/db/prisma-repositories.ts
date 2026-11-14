@@ -21,6 +21,7 @@ import {
   type Quote as QuoteRow,
 } from '../../generated/prisma/client.js';
 import { parsePromptPayQr } from '../../lib/promptpay/parse.js';
+import { PrismaDepositRepository, PrismaOnrampOrderRepository } from './prisma-onramp-repositories.js';
 import type {
   CursorRepository,
   KycRepository,
@@ -57,6 +58,8 @@ export function createPrismaRepositories(prisma: PrismaClient): Repositories {
     payouts: new PrismaPayoutRepository(prisma),
     cursors: new PrismaCursorRepository(prisma),
     opsActions: new PrismaOpsActionRepository(prisma),
+    onrampOrders: new PrismaOnrampOrderRepository(prisma),
+    deposits: new PrismaDepositRepository(prisma),
   };
 }
 
@@ -82,6 +85,11 @@ export class PrismaUserRepository implements UserRepository {
   async findById(id: string): Promise<User | null> {
     const row = await this.prisma.user.findUnique({ where: { id } });
     return row && toUser(row);
+  }
+
+  async listWallets(): Promise<User[]> {
+    const rows = await this.prisma.user.findMany({ orderBy: { createdAt: 'asc' } });
+    return rows.map(toUser);
   }
 }
 
