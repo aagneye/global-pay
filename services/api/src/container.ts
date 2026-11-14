@@ -307,19 +307,21 @@ export function buildContainer(env: Env, overrides: Partial<Adapters> = {}): Con
         cursors: repositories.cursors,
         chainId: env.CHAIN_ID,
         pollMs: env.INDEXER_POLL_MS,
-        maxBlockRange: env.INDEXER_MAX_BLOCK_RANGE,
-        // NEAR: the contract's payment sequence stands in for blocks, read at final finality.
+        // NEAR: the contract's payment sequence stands in for blocks, read at final finality,
+        // 100 payments per view call at most.
         ...(near
           ? {
               settlementAddress: near.settlementContract as Address,
               cursorId: `settlement:near-${near.network}:${near.settlementContract}`,
               confirmations: 0,
               startBlock: 0n,
+              maxBlockRange: 100n,
             }
           : {
               settlementAddress: env.SETTLEMENT_ADDRESS,
               confirmations: env.INDEXER_CONFIRMATIONS,
               startBlock: env.INDEXER_START_BLOCK,
+              maxBlockRange: env.INDEXER_MAX_BLOCK_RANGE,
             }),
       }),
       payouts: new PayoutWorker({

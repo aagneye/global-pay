@@ -23,8 +23,10 @@ import { AppError } from '../../shared/errors.js';
 import { decodeBase64, encodeBase64 } from './keys.js';
 import { type FinalExecutionOutcome, NearRpc, NearRpcError, NearRpcUnavailableError } from './rpc.js';
 
-/** Gas for operator calls (settle, refund): each makes an ft_transfer with a callback. */
+/** Gas for operator calls (settle, refund): each makes an ft_transfer with a callback; the contract needs >= 40 TGas. */
 export const OPERATOR_CALL_GAS = 100_000_000_000_000n;
+/** `get_paid_events` doesn't cap its limit; more than about 100 runs out of view gas. */
+const PAID_EVENTS_PAGE = 100n;
 
 /**
  * A payment as the settlement contract's views return it (contracts-near `PaymentView`).
@@ -143,14 +145,17 @@ export class NearSettlementGateway implements NearGateway {
   }
 
   async getPaymentReceivedEvents(fromBlock: bigint, toBlock: bigint): Promise<PaymentReceivedEvent[]> {
-    const fromIndex = fromBlock > 0n ? fromBlock - 1n : 0n;
-    if (toBlock < 1n || toBlock - 1n < fromIndex) return [];
-    const limit = toBlock - fromIndex;
-    const views = await this.view<NearPaymentView[]>(this.settlementContract, 'get_paid_events', {
-      from_index: Number(fromIndex),
-      limit: Number(limit),
-    });
-    return views.map((view) => this.toEvent(view));
+    const events: PaymentReceivedEvent[] = [];
+    // Block n is index n - 1; read in pages the contract's view gas allows.
+    for (let index = fromBlock > 0n ? fromBlock - 1n : 0n; index < toBlock; index += PAID_EVENTS_PAGE) {
+      const limit = toBlock - index < PAID_EVENTS_PAGE ? toBlock - index : PAID_EVENTS_PAGE;
+      const views = await this.view<NearPaymentView[]>(this.settlementContract, 'get_paid_events', {
+        from_index: Number(index),
+        limit: Number(limit),
+      });
+      events.push(...views.map((view) => this.toEvent(view)));
+    }
+    return events;
   }
 
   async getPaymentStatus(quoteId: Hex): Promise<OnChainPaymentStatus> {
@@ -320,9 +325,18 @@ function unavailable(error: unknown): ChainUnavailableError {
   return new ChainUnavailableError(message);
 }
 
+/**
+ * A transaction counts as reverted if it or any of its receipts failed, or if it returned `false`:
+ * settle/refund return false when the USDC transfer failed and the contract rolled the payment back to
+ * Paid, without failing the transaction itself.
+ */
 function failed(outcome: FinalExecutionOutcome): boolean {
   const isFailure = (status: unknown) => typeof status === 'object' && status !== null && 'Failure' in status;
-  return isFailure(outcome.status) || (outcome.receipts_outcome ?? []).some((receipt) => isFailure(receipt.outcome.status));
+  if (isFailure(outcome.status) || (outcome.receipts_outcome ?? []).some((receipt) => isFailure(receipt.outcome.status))) {
+    return true;
+  }
+  const value = typeof outcome.status === 'object' ? outcome.status.SuccessValue : undefined;
+  return value !== undefined && Buffer.from(value, 'base64').toString('utf8') === 'false';
 }
 
 function sleep(ms: number): Promise<void> {
