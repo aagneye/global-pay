@@ -160,6 +160,18 @@ An order is COMPLETED only once a confirmed transfer of the reported amount reac
 
 Push needs `FCM_SERVICE_ACCOUNT_FILE`; without it the apps poll. The rules are in [ADR 0010](../../docs/adr/0010-tap-to-pay.md).
 
+## NEAR rail (testnet)
+
+`SETTLEMENT_RAIL=near` settles on NEAR instead of the EVM chain, through the contracts in `contracts-near/`. It's one rail per backend: the same API, database and state machines, with NEAR adapters (`src/adapters/near/`) behind the same ports.
+
+1. **Set up:** `npm run near:testnet -- init`, then `create` (four accounts from the testnet faucet) and `deploy` (both contracts, `new`, token registrations). `status` shows where you are; `mint <account> <USDC>` mints test USDC. Keys go only into `.env.near-testnet` (gitignored).
+2. **Run:** `npm run dev:near` serves the API on port 3001 with `.env.near-testnet`, next to the EVM API on 3000.
+3. **Sign in (NEP-413):** `POST /auth/nonce {address: <implicit account>}` returns a 32-byte nonce and a message; the app signs `{message, nonce, recipient: SIWE_DOMAIN}` and sends `POST /auth/verify {message, signature: base64, publicKey}`. With `NEAR_TESTNET_FAUCET=true`, a new account gets 0.05 NEAR, token registration and 1,000 test USDC before the token is returned.
+4. **Pay (NEP-366):** quotes carry `nearPayment`, an `ft_transfer_call` to the settlement contract whose msg holds the quote JSON and the backend's ed25519 signature. The app signs it as a delegate action and sends `POST /payments {quoteId, signedDelegate}`. The backend checks it against the stored quote and relays it, paying the gas.
+5. **Then as usual:** the indexer reads the contract's `paid_count`/`get_paid_events` (final finality), and the payout worker calls `settle` or `refund` as the operator. Links go to nearblocks.
+
+Tap to pay, Add money and the deposit watcher are EVM only and answer 503 `not_configured` on this rail. Reference bytes for the app: `packages/fixtures/near/vectors.json` (`npm run near:vectors`).
+
 ## Hardening
 
 **Rate limits** (`src/shared/rate-limits.ts`, `RATE_LIMIT_*` settings). Every route has a limit per window (`RATE_LIMIT_WINDOW_MS`, a minute by default):
