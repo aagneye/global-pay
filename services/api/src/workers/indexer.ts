@@ -35,7 +35,8 @@ export interface IndexerDeps {
  * doesn't is never paid out, and is shown to operators.
  *
  * It also reconciles SUBMITTED payments whose pay() never produced an event: a reverted
- * transaction, or one that didn't land before the quote expired, becomes FAILED.
+ * transaction, or one that didn't land before the quote expired, becomes FAILED, but only while the
+ * chain shows no payment for the quote. A FAILED payment whose quote is paid later becomes PAID.
  */
 export class IndexerWorker {
   private readonly deps: IndexerDeps;
@@ -124,8 +125,14 @@ export class IndexerWorker {
       });
       this.log.info({ paymentId: payment.id, txHash: event.txHash }, 'payment received on-chain');
     } else if (payment.status === 'FAILED') {
-      // Shouldn't happen: payments only fail when the chain shows no payment. Needs a person.
-      this.log.error({ paymentId: payment.id, txHash: event.txHash }, 'FAILED payment was paid on-chain');
+      // Failed while the chain showed no payment, but the quote was paid after all: pay() is permissionless,
+      // so the same authorisation can be relayed later. The chain decides; the payment is paid out as usual.
+      await payments.transition(payment.id, 'FAILED', 'PAID', {
+        payTxHash: event.txHash,
+        paidBlock: event.blockNumber,
+        failureReason: null,
+      });
+      this.log.warn({ paymentId: payment.id, txHash: event.txHash }, 'FAILED payment was paid on-chain; now PAID');
     }
     // Any other status: we've seen this event before.
   }
@@ -161,7 +168,17 @@ export class IndexerWorker {
     if (payment.payTxHash) {
       const receipt = await gateway.getReceipt(payment.payTxHash);
       if (receipt?.status === 'reverted') {
-        await payments.transition(payment.id, 'SUBMITTED', 'FAILED', { failureReason: 'The pay() transaction reverted' });
+        // Another pay() of the same quote may have landed first (a relayer re-sign, or a third party), and
+        // ours reverted with QuoteAlreadyUsed: then the USDC is in the contract. Fail only if it isn't.
+        const onChain = await gateway.getPaymentStatus(payment.quoteId);
+        if (onChain === 'None') {
+          await payments.transition(payment.id, 'SUBMITTED', 'FAILED', { failureReason: 'The pay() transaction reverted' });
+        } else {
+          this.log.warn(
+            { paymentId: payment.id, txHash: payment.payTxHash, onChain },
+            "pay() reverted, but the quote is paid on-chain; waiting for its PaymentReceived event",
+          );
+        }
         return;
       }
       if (receipt) return; // mined: its event arrives once confirmed

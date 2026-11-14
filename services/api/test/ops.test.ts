@@ -201,6 +201,22 @@ describe('operator console', () => {
     ]);
   });
 
+  it('lists a payment still SUBMITTED long after its quote, with what the chain says', async () => {
+    const { ops, app, session, chain, repos, container } = await setup({ INDEXER_CONFIRMATIONS: '5' });
+    // Our pay() reverted, but the chain shows the quote paid: the payment waits for that event.
+    chain.revertNextWrite = true;
+    const quote = await createQuote(app, session, qr);
+    const id = (await submitPayment(app, session, quote, await signAuthorization(PAYER_KEY, quote))).json().id;
+    await chain.submitPayment(repos.state.quotes.get(quote.quote.quoteId)!, { validAfter: 0n, validBefore: 0n, signature: '0x' });
+    await container.workers.indexer.tick();
+    expect((await ops('GET', '/exceptions')).json().items).toEqual([]);
+
+    repos.state.payments.get(id)!.createdAt = new Date(Date.now() - 11 * 60_000);
+    const items = (await ops('GET', '/exceptions')).json().items;
+    expect(items).toEqual([expect.objectContaining({ kind: 'payment_unconfirmed', escalated: true, paymentId: id, paymentStatus: 'SUBMITTED' })]);
+    expect(items[0].lastError).toMatch(/reverted.*shows the quote as Paid/);
+  });
+
   it('lists a payment stuck in PAID, and a settlement that keeps failing', async () => {
     const { paid, ops, chain, container, app, session, repos } = await setup();
     const settled = await paid(1); // payout sent; the next check finds it SUCCEEDED

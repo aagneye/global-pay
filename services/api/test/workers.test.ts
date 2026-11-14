@@ -219,6 +219,49 @@ describe('indexer', () => {
     expect(repos.state.payments.get(id)?.failureReason).toBe('The pay() transaction reverted');
   });
 
+  it('keeps a payment whose pay() reverted if another pay() of its quote landed, then marks it PAID', async () => {
+    const t = await setup({ INDEXER_CONFIRMATIONS: '3' });
+    // Our pay() reverts (QuoteAlreadyUsed): a second transaction for the same quote, from a relayer
+    // re-sign or a third party, got there first.
+    t.chain.revertNextWrite = true;
+    const { id, quoteId } = await t.pay();
+    await t.chain.submitPayment(t.repos.state.quotes.get(quoteId)!, { validAfter: 0n, validBefore: 0n, signature: '0x' });
+
+    await t.indexer.tick(); // the reverted receipt is there, the other payment's event isn't confirmed yet
+    expect(t.status(id)).toBe('SUBMITTED');
+
+    t.chain.advance(3n);
+    await t.indexer.tick();
+    expect(t.status(id)).toBe('PAID');
+    expect(t.repos.state.payments.get(id)?.payTxHash).toBe(t.chain.events[0]?.txHash);
+    for (let i = 0; i < 3; i++) await t.payouts.tick();
+    expect(t.status(id)).toBe('SETTLED');
+  });
+
+  it('moves a FAILED payment to PAID when its quote is paid on-chain after all', async () => {
+    const t = await setup();
+    // The contract would have rejected our pay(), so the payment FAILED...
+    t.chain.failNextWrite = new TransactionRejectedError('ERC20InsufficientBalance');
+    const quote = await createQuote(t.app, t.session, qr);
+    const response = await submitPayment(t.app, t.session, quote, await signAuthorization(PAYER_KEY, quote));
+    expect(response.statusCode).toBe(422);
+    const [failed] = [...t.repos.state.payments.values()];
+    expect(failed?.status).toBe('FAILED');
+
+    // ...but pay() is permissionless: the same signed authorisation was relayed later, and landed.
+    await t.chain.submitPayment(t.repos.state.quotes.get(quote.quote.quoteId)!, { validAfter: 0n, validBefore: 0n, signature: '0x' });
+    const { logger, lines } = recordingLogger();
+    t.indexer.start(logger);
+    await t.indexer.stop();
+    await t.indexer.tick();
+
+    expect(t.repos.state.payments.get(failed!.id)).toMatchObject({ status: 'PAID', payTxHash: t.chain.events[0]?.txHash });
+    expect(t.repos.state.payments.get(failed!.id)?.failureReason).toBeUndefined();
+    expect(lines).toContainEqual({ level: 'warn', message: 'FAILED payment was paid on-chain; now PAID' });
+    for (let i = 0; i < 3; i++) await t.payouts.tick();
+    expect(t.status(failed!.id)).toBe('SETTLED');
+  });
+
   it("fails a payment that didn't land before its quote expired, but not before", async () => {
     const { chain, indexer, repos, pay, status } = await setup();
     chain.autoMine = false;

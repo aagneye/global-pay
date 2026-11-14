@@ -60,8 +60,11 @@ export interface PageCursor {
 
 /** Fields that change without a status change, or alongside one. */
 export type PaymentFields = Partial<
-  Pick<Payment, 'payTxHash' | 'paidBlock' | 'settleTxHash' | 'refundTxHash' | 'failureReason' | 'eventMismatch'>
->;
+  Pick<Payment, 'payTxHash' | 'paidBlock' | 'settleTxHash' | 'refundTxHash' | 'eventMismatch'>
+> & {
+  /** `null` clears it: a FAILED payment the chain shows paid after all. */
+  failureReason?: string | null;
+};
 
 export interface PaymentRepository {
   /** Total fiat (minor units) of the user's payments created since `since`, excluding FAILED and REFUNDED. */

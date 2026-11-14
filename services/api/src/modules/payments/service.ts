@@ -65,12 +65,16 @@ export class PaymentService {
     const { payment, created } = await deps.payments.createForQuote(quoteId, userId);
     if (!created) return this.view(payment.id); // a concurrent submission got there first
 
+    let txHash: Hex;
     try {
-      const txHash = await deps.gateway.submitPayment(stored, authorization);
-      await deps.payments.update(payment.id, { payTxHash: txHash });
+      txHash = await deps.gateway.submitPayment(stored, authorization);
     } catch (error) {
       await this.handleSendError(payment.id, error);
+      return this.view(payment.id);
     }
+    // Sent. Whatever happens now, the payment stays SUBMITTED: if the hash can't be saved, the indexer
+    // still finds the payment by its event (or fails it once the quote expired and the chain shows none).
+    await deps.payments.update(payment.id, { payTxHash: txHash }).catch(() => undefined);
     return this.view(payment.id);
   }
 
@@ -119,18 +123,26 @@ export class PaymentService {
   }
 
   /**
-   * - The contract would revert: nothing was sent, so the payment FAILED.
-   * - The chain was unreachable and nothing was signed: FAILED too.
-   * - A transaction was signed but its fate is unknown: keep it SUBMITTED with its hash.
-   *   The indexer picks it up if it lands; the reconciler fails it if it doesn't before the quote expires.
+   * Fails the payment only when nothing can have been sent:
+   * - the contract would revert (the simulation said so);
+   * - the chain was unreachable before anything was signed, or there's no relayer key.
+   *
+   * Anything else may have come after a transaction was signed and sent, so the payment stays SUBMITTED
+   * (with its hash, if known). The indexer marks it PAID if it lands, or FAILED once the quote expired
+   * and the chain shows no payment.
    */
   private async handleSendError(paymentId: string, error: unknown): Promise<void> {
-    if (error instanceof ChainUnavailableError && error.txHash) {
-      await this.deps.payments.update(paymentId, { payTxHash: error.txHash });
+    const nothingSent =
+      error instanceof TransactionRejectedError ||
+      (error instanceof ChainUnavailableError && !error.txHash) ||
+      (error instanceof AppError && error.code === 'not_configured');
+    if (!nothingSent) {
+      if (error instanceof ChainUnavailableError && error.txHash) {
+        await this.deps.payments.update(paymentId, { payTxHash: error.txHash }).catch(() => undefined);
+      }
       return;
     }
-    const reason =
-      error instanceof TransactionRejectedError ? error.reason : error instanceof Error ? error.message : String(error);
+    const reason = error instanceof TransactionRejectedError ? error.reason : (error as AppError).message;
     await this.deps.payments.transition(paymentId, 'SUBMITTED', 'FAILED', { failureReason: reason });
     if (error instanceof TransactionRejectedError) {
       throw new AppError('payment_rejected', `The payment would fail on-chain: ${error.reason}`, 422);

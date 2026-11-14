@@ -6,14 +6,16 @@ import { AppError } from '../shared/errors.js';
  * Off-chain payment lifecycle (Prisma enum `PaymentStatus` uses the same names).
  *
  *   SUBMITTED ─▶ PAID ─▶ PAYOUT_PENDING ─▶ SETTLED
- *       │                      │
- *       └─▶ FAILED             └─▶ REFUNDED
+ *       │         ▲            │
+ *       └─▶ FAILED┘            └─▶ REFUNDED
  *
  * - SUBMITTED: pay() was sent (or its sending is being confirmed).
  * - PAID: the indexer saw PaymentReceived. The user's USDC is in the contract.
  * - PAYOUT_PENDING: the payout partner was asked to pay the merchant.
  * - SETTLED / REFUNDED: markSettled / refund confirmed on-chain.
- * - FAILED: pay() reverted, or never landed before the quote expired. No funds moved.
+ * - FAILED: pay() reverted, or never landed before the quote expired, and the chain showed no payment.
+ *   The chain still decides: if a PaymentReceived for the quote turns up later (pay() is permissionless,
+ *   so someone may relay the same authorisation), the payment becomes PAID and is paid out.
  */
 export const PAYMENT_STATUSES = [
   'SUBMITTED',
@@ -32,7 +34,7 @@ const TRANSITIONS: Record<PaymentStatus, readonly PaymentStatus[]> = {
   PAYOUT_PENDING: ['SETTLED', 'REFUNDED'],
   SETTLED: [],
   REFUNDED: [],
-  FAILED: [],
+  FAILED: ['PAID'],
 };
 
 export class InvalidTransitionError extends AppError {
@@ -50,8 +52,9 @@ export function assertTransition(from: PaymentStatus, to: PaymentStatus): void {
   if (!canTransition(from, to)) throw new InvalidTransitionError(from, to);
 }
 
+/** A final status for the app: it stops polling. FAILED counts, though the chain can still correct it to PAID. */
 export function isTerminal(status: PaymentStatus): boolean {
-  return TRANSITIONS[status].length === 0;
+  return status === 'FAILED' || TRANSITIONS[status].length === 0;
 }
 
 export interface Payment {

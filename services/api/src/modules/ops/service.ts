@@ -19,7 +19,7 @@ export interface OpsServiceDeps {
   actions: OpsActionRepository;
   tracker: PayoutTracker;
   payoutRail: Pick<PayoutProvider, 'name' | 'getBalance'>;
-  gateway: Pick<SettlementGateway, 'getRelayerBalance'>;
+  gateway: Pick<SettlementGateway, 'getRelayerBalance' | 'getReceipt' | 'getPaymentStatus'>;
   /** An UNKNOWN payout older than this is flagged as needing an operator. */
   escalateAfterMs: number;
   /** An operator may approve a refund only once the payout has been UNKNOWN this long. */
@@ -28,6 +28,8 @@ export interface OpsServiceDeps {
   minFloatMinor: bigint;
   /** A payment PAID for longer than this without a payout is flagged. */
   stuckPaidMs?: number;
+  /** A transaction (or a payment still SUBMITTED) older than this without a result is flagged. */
+  stuckTxMs?: number;
   now?: () => Date;
 }
 
@@ -39,7 +41,9 @@ export type ExceptionKind =
   | 'resolution_stuck'
   | 'payout_conflict'
   /** The on-chain payment differs from its quote (amount, payer, token or merchant): never paid out. */
-  | 'event_mismatch';
+  | 'event_mismatch'
+  /** Still SUBMITTED long after its quote expired: no receipt, or paid on-chain without its event seen. */
+  | 'payment_unconfirmed';
 
 export interface OpsException {
   kind: ExceptionKind;
@@ -90,7 +94,20 @@ export class OpsService {
     const { payments, payouts, escalateAfterMs } = this.deps;
     const now = this.now().getTime();
     const stuckPaidMs = this.deps.stuckPaidMs ?? 5 * 60_000;
+    const stuckTxMs = this.deps.stuckTxMs ?? 10 * 60_000;
     const items: OpsException[] = [];
+
+    // A payment resolves within the quote's lifetime plus a minute, unless the chain and our records disagree.
+    for (const item of await payments.listByStatus(['SUBMITTED'], LIMIT)) {
+      if (now - item.payment.createdAt.getTime() < stuckTxMs) continue;
+      items.push({
+        ...describe(item),
+        kind: 'payment_unconfirmed',
+        escalated: true,
+        since: item.payment.createdAt,
+        lastError: await this.whyUnconfirmed(item.payment),
+      });
+    }
 
     for (const item of await payments.listByStatus(['PAID'], LIMIT)) {
       if (now - item.payment.updatedAt.getTime() < stuckPaidMs) continue;
@@ -254,6 +271,24 @@ export class OpsService {
     if (answer) payout = await this.deps.tracker.apply(payout, answer, 'ops');
     if (payout.status !== 'UNKNOWN') throw changed(`the partner now reports it as ${payout.status}; nothing else was changed`);
     return payout;
+  }
+
+  /** What the chain says about a payment that is still SUBMITTED. */
+  private async whyUnconfirmed(payment: Payment): Promise<string> {
+    const { gateway } = this.deps;
+    try {
+      const onChain = await gateway.getPaymentStatus(payment.quoteId);
+      const hash = payment.payTxHash;
+      if (!hash) return `No pay() transaction recorded; the chain shows the quote as ${onChain}`;
+      const receipt = await gateway.getReceipt(hash);
+      if (!receipt) return `pay() transaction ${hash} has no receipt; the chain shows the quote as ${onChain}`;
+      if (receipt.status === 'reverted') {
+        return `pay() transaction ${hash} reverted, but the chain shows the quote as ${onChain}; its PaymentReceived event hasn't been processed`;
+      }
+      return `pay() transaction ${hash} was mined in block ${receipt.blockNumber}, but its PaymentReceived event hasn't been processed`;
+    } catch (error) {
+      return `Couldn't check the chain: ${(error as Error).message}`;
+    }
   }
 
   private async requireItem(paymentId: string): Promise<PaymentWithQuote> {

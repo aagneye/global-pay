@@ -219,6 +219,12 @@ describe.skipIf(!url)('Prisma repositories (Postgres)', () => {
     expect((await repos.payments.listByUser(user.id, 2)).map((p) => p.payment.id)).toEqual([ids[2], ids[1]]);
     expect((await repos.payments.listByStatus(['SUBMITTED'], 10)).map((p) => p.payment.id)).toEqual([ids[0], ids[2]]);
     expect((await repos.payments.listByStatus(['FAILED'], 10))[0]?.payment.failureReason).toBe('test');
+
+    // The chain shows the failed payment paid after all: it becomes PAID, and the failure reason goes.
+    await expect(repos.payments.transition(ids[1]!, 'FAILED', 'PAID', { paidBlock: 7n, failureReason: null })).resolves.toBe(true);
+    const corrected = (await repos.payments.findById(ids[1]!))?.payment;
+    expect(corrected).toMatchObject({ status: 'PAID', paidBlock: 7n });
+    expect(corrected?.failureReason).toBeUndefined();
   });
 
   it('keeps and lists payments whose on-chain event did not match their quote', async () => {

@@ -18,6 +18,12 @@ describe('payment state machine', () => {
     expect(canTransition('SUBMITTED', 'FAILED')).toBe(true);
   });
 
+  it('lets the chain correct a FAILED payment to PAID, and nothing else', () => {
+    expect(canTransition('FAILED', 'PAID')).toBe(true);
+    expect(canTransition('FAILED', 'SETTLED')).toBe(false);
+    expect(canTransition('FAILED', 'SUBMITTED')).toBe(false);
+  });
+
   it('rejects skipped or reversed steps', () => {
     expect(canTransition('SUBMITTED', 'SETTLED')).toBe(false);
     expect(canTransition('PAID', 'REFUNDED')).toBe(false);

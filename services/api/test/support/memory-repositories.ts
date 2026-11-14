@@ -181,13 +181,15 @@ export function createMemoryRepositories() {
       async update(id, fields) {
         const payment = payments.get(id);
         if (!payment) throw new Error(`no payment ${id}`);
-        Object.assign(payment, lowerFields(fields), { updatedAt: now() });
+        applyFields(payment, lowerFields(fields));
+        payment.updatedAt = now();
       },
       async transition(id, from, to, fields = {}) {
         assertTransition(from, to);
         const payment = payments.get(id);
         if (!payment || payment.status !== from) return false;
-        Object.assign(payment, lowerFields(fields), { status: to, updatedAt: now() });
+        applyFields(payment, lowerFields(fields));
+        Object.assign(payment, { status: to, updatedAt: now() });
         return true;
       },
     },

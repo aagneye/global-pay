@@ -172,6 +172,35 @@ describe('POST /payments', () => {
     expect(response.json()).toMatchObject({ status: 'SUBMITTED', transactions: { pay: { hash } } });
   });
 
+  it('keeps the payment SUBMITTED when saving the hash fails after pay() was sent', async () => {
+    const { app, chain, session, quote, repos, container } = await setup();
+    const update = repos.payments.update;
+    repos.payments.update = async () => {
+      repos.payments.update = update;
+      throw new Error('database connection lost');
+    };
+
+    const response = await submitPayment(app, session, quote, await signAuthorization(PAYER_KEY, quote));
+    expect(response.statusCode).toBe(202);
+    expect(response.json().status).toBe('SUBMITTED');
+    expect(chain.sent).toHaveLength(1);
+
+    // The indexer finds the payment from the chain.
+    chain.advance(2n);
+    await container.workers.indexer.tick();
+    expect([...repos.state.payments.values()][0]?.status).toBe('PAID');
+  });
+
+  it('keeps the payment SUBMITTED on an unexpected error while sending', async () => {
+    const { app, chain, session, quote, repos } = await setup();
+    chain.failNextWrite = new Error('socket hang up');
+
+    const response = await submitPayment(app, session, quote, await signAuthorization(PAYER_KEY, quote));
+    expect(response.statusCode).toBe(202);
+    expect(response.json().status).toBe('SUBMITTED');
+    expect([...repos.state.payments.values()][0]?.status).toBe('SUBMITTED');
+  });
+
   it('fails the payment when the chain is unreachable before anything is signed', async () => {
     const { app, chain, session, quote } = await setup();
     chain.failNextWrite = new ChainUnavailableError('connection refused');
