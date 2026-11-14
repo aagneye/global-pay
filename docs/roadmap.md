@@ -194,6 +194,7 @@ The rules are in [ADR 0009](adr/0009-add-money-proved-on-chain.md).
 - **A MoonPay sandbox purchase:** it needs the owner's MoonPay sandbox keys.
 - **A deposit on Base Sepolia:** this waits on iteration 7's funding.
 - **The Custom Tab on a device:** it's tested in widget tests only, not yet on an emulator or phone.
+- **Stuck orders on `/ops`:** they don't show there yet. (Since iteration 10 the worker re-checks expired orders for 24 hours, so a late payment completes without a webhook.)
 
 ## Iteration 9: Tap to pay ✅ (two-phone test pending)
 
@@ -217,7 +218,7 @@ The rules are in [ADR 0010](adr/0010-tap-to-pay.md).
   - `KeyVault`: an AES-GCM key that needs a strong biometric for every use, through `BiometricPrompt` and `CryptoObject`. The dev wallet's key moves into it.
   - minSdk raised from 23 to 24 (Android 7), because firebase_messaging needs it.
 
-**Result:** 290 backend tests pass, against Postgres, anvil and the fork. They cover:
+**Result:** 291 backend tests pass, against Postgres, anvil and the fork. They cover:
 - tap signatures: wrong key, reused challenge, revoked phone;
 - another user trying to approve;
 - a changed amount or recipient;
@@ -229,27 +230,146 @@ The anvil test runs request → tap → approve → relay, checks both balances,
 - **On hardware:** the tap between two physical Android phones and push with the app closed need two NFC phones and a Firebase project. The native code compiles, but has only been exercised through fakes.
 - **Verified names:** mock KYC doesn't verify names, so all names show as "not verified".
 
-## Iteration 10: Production hardening
+**Fixed in iteration 10** (found in review):
+- a cancel or expiry while an approval was being relayed could hide a transfer that happened (now the APPROVING status);
+- there was no daily limit per sender;
+- sent tap payments were missing from History;
+- a phone couldn't turn tap to pay off.
 
-1. App: release builds without the dev wallet, test keys or plain HTTP; release signing; code shrinking.
-2. Backend: rate limits, log redaction, webhook checks, key rotation, crash reporting without personal data.
-3. A threat model, a key-rotation runbook and a launch checklist.
+## Iteration 10: Production hardening ✅ (release key pending)
 
-**Done when:** a signed release build passes the checklist's automated checks.
+What "release-ready" means is written down in the [threat model](security.md), the [key rotation runbook](runbooks/key-rotation.md) and the [launch checklist](launch-checklist.md). Its automated checks A1–A11 are this iteration's bar.
 
-## Iteration 11: Embedded wallet
+**App** (`apps/mobile`):
+- [x] **Release builds refuse test settings.** A non-https `API_BASE_URL` stops the app at startup. `DEV_WALLET_PRIVATE_KEY` is dropped at compile time, and the dev wallet isn't offered.
+- [x] **Android settings:**
+  - plain HTTP is refused outside the debug build type (network security config);
+  - app data stays out of backups (`allowBackup`, data extraction rules).
+- [x] **Signing and shrinking:**
+  - release signing from the gitignored `android/key.properties`, falling back to the debug key with a warning;
+  - R8 shrinking, with keep rules for our Kotlin and for Privy, and logcat `v`/`d`/`i` calls removed;
+  - a test keeps logging out of the Dart code.
+- [x] **The app checks what it signs.** Before every signature, the typed data must match the payment on screen and the app's settings: chain, USDC, recipient, amount, nonce and lifetime, plus the settlement contract when `SETTLEMENT_ADDRESS` is set.
+- [x] **`tool/check_release.sh`** checks a built APK: A8 signing, A9 manifest and network security config, A10 test keys.
+- [x] **Tap to pay:**
+  - payments show in History;
+  - a "This phone" switch revokes the phone's registration;
+  - APPROVING requests show as sending.
 
-1. Create a Privy app (you do this), then implement `PrivyWalletService` with email/Google login and typed-data signing. Use Web3Auth if Privy doesn't fit.
-2. Make it the default `WalletService`, and keep `DevWalletService` for tests.
+**Backend** (`services/api`):
+- [x] **Request limits:**
+  - rate limits per route, by IP or by user (`RATE_LIMIT_*`), with `TRUST_PROXY` for a load balancer;
+  - a body limit (`BODY_LIMIT_BYTES`) and security headers;
+  - `{"error":"not_found"}` for unknown routes.
+- [x] **Logs:** secrets and personal fields are redacted, and every logged error is scrubbed (keys, signatures, JWTs, QR payloads, RPC keys in URLs). Process handlers log crashes the same way.
+- [x] **Production refuses test settings** (`NODE_ENV=production`):
+  - the anvil chain and keys;
+  - guessable secrets;
+  - fixed rates, or rate limits turned off;
+  - simulated partners and test destinations;
+  - Xendit and MoonPay test keys, and MoonPay's sandbox widget;
+  - a real partner without its webhook secret;
+  - `MERCHANT_QR_ONLY=false`, or a `.local` `SIWE_DOMAIN`.
+- [x] **Correctness fixes from the review:**
+  - a `PaymentReceived` event must match its quote; otherwise it's never paid out and shows on `/ops` (`event_mismatch`);
+  - a payment the chain shows paid is never FAILED, and a FAILED payment that turns out paid becomes PAID ([ADR 0007](adr/0007-chain-is-the-source-of-truth.md));
+  - the payout and onramp workers page through work that's due, so old UNKNOWN payouts no longer block new ones;
+  - expired onramp orders are re-checked for 24 hours;
+  - approving a tap-to-pay request locks it (APPROVING) before relaying, so a cancel or expiry can't hide a transfer that happened ([ADR 0010](adr/0010-tap-to-pay.md));
+  - a sender can send at most `P2P_DAILY_LIMIT_USDC` (2,000 USDC) by tap in 24 hours;
+  - stuck transactions and long-SUBMITTED payments show on `/ops` ([ADR 0008](adr/0008-payout-outcomes-and-reconciliation.md)).
+- [x] **Migrations:** `20261116000000_payment_event_mismatch` and `20261116100000_p2p_approving`.
 
-**Done when:** a new user can sign up with email and complete a payment.
+**Docs:** the threat model, the key rotation runbook and the launch checklist. ADRs 0003 and 0007–0010 are updated.
+
+**Result:**
+- **Backend:** 352 tests pass, against Postgres, anvil and the Base Sepolia fork.
+- **Contracts:** 47 tests pass; `forge fmt --check` and `forge lint` are clean again.
+- **App:** 159 tests pass.
+- **Release build:** it builds with R8. `tool/check_release.sh` passes A9 and A10. A8 also passes with a throwaway release key; with the debug-key fallback it fails, as it should.
+
+**Not done yet:**
+- **The owner's release key.** A8 passes only once `android/key.properties` names the real upload key.
+- **Privy in a shrunk build on a phone.** R8 keeps Privy's classes, but nobody has signed in with a release build on a device yet.
+- **Refusing mock KYC in production.** That waits for a real KYC adapter ("Before real money").
+- **Per-person operator accounts.** [ADR 0008](adr/0008-payout-outcomes-and-reconciliation.md) planned them for this iteration; they move to "Before real money".
+- **Crash reporting.** Logged errors are scrubbed, but choosing a tracker and shipping error-level logs to it is an ops step.
+- **Smaller gaps**, listed under "Next":
+  - rate-limit counters are kept per process;
+  - concurrent payments can pass the 24-hour THB limit;
+  - stuck transactions are shown, not replaced;
+  - the JWT secret has no key ID or grace period.
+
+## Iteration 11: Embedded wallet ✅ (needs a Privy app to try on a phone)
+
+The rules are in [ADR 0003](adr/0003-embedded-non-custodial-wallet.md).
+
+- [x] **`PrivyWalletService`** (`privy_flutter` 0.11.0, behind a `PrivyClient` interface):
+  - sign-in with an email and a one-time code;
+  - Privy creates the embedded wallet on first sign-in and restores the session on later launches;
+  - signing out also logs out of Privy.
+- [x] **Signing:** `personal_sign` for Sign-In with Ethereum, and `eth_signTypedData_v4` for both USDC authorisations. Only 65-byte signatures are accepted.
+- [x] **`WalletSwitch` is the app's `WalletService`:**
+  - Privy by default;
+  - the dev wallet in debug builds only;
+  - "Sign-in isn't set up" in a release build without the Privy IDs.
+- [x] **Settings:** `PRIVY_APP_ID` and `PRIVY_CLIENT_ID` are dart-defines, never committed.
+- [x] **Android:** `minSdk` 24 → 28 (Privy's Android library), plus a packaging exclude for a duplicated `META-INF` file.
+
+**Result:** the sign-in screen, the wallet, the switch and session restore are tested against a fake Privy client. The "done when" (a new user signs up with email and completes a payment) needs a real Privy app, so it hasn't been checked on a device yet.
+
+**Not done yet:**
+- **A real sign-up and payment** on an emulator or phone, with the owner's Privy app and a funded wallet (the simulated onramp on anvil, or a faucet on Base Sepolia).
+- **Google sign-in.** It needs an app URL scheme and Privy's `PrivyRedirectActivity`.
+- **No fingerprint before a Privy signature.** This is an owner decision (below). Until then, the approve screen's fingerprint applies only to the dev wallet.
+
+## Decisions for the owner
+
+1. **minSdk 28 (Android 9 and later)** for Privy. It drops Android 7 and 8 phones. Accept it, or choose a wallet SDK that supports API 24.
+2. **A biometric step before Privy signatures.** ADR 0010 promised a fingerprint for every approval, and with Privy it isn't asked.
+   - **Recommended:** keep it. Gate each Privy signature behind `BiometricPrompt` with a `CryptoObject`, for example by opening a value sealed in the existing `KeyVault`, so the check can't be skipped the way a bare `local_auth` prompt can.
+   - **Alternatives:** use Privy's MFA for signing, or drop the promise and update ADR 0010.
+3. **Configure Privy for embedded EOA wallets**, not smart wallets. The backend checks sign-in offline and the contract uses USDC's `v, r, s` EIP-3009, so smart-wallet signatures would fail.
+4. **Limits:**
+   - `P2P_DAILY_LIMIT_USDC` (2,000 USDC) and the KYC tier limits are demo values;
+   - `MERCHANT_QR_ONLY` is now forced on in production, while Xendit's rail pays only personal (tag 29) QRs, so production needs a partner that pays merchant QRs (Krungsri or a licensed partner).
+
+## Next (engineering, not blocked on the owner)
+
+- **CI** running checks A1–A6, A13 and A14 on every push. There's no CI today.
+- **The Privy biometric gate**, if decision 2 says so.
+- **An atomic 24-hour THB limit:** one transaction for the check and the insert, or a reservation at quote time (threat model WRK-15).
+- **Stuck transactions:** replace-by-fee, and recovery from a gap in the relayer's nonces (WRK-6).
+- **Stuck onramp orders on `/ops`** (WRK-10).
+- **Sessions:** JWT key IDs with a grace period, shorter tokens with refresh, and server-side logout (API-1).
+- **Phones:**
+  - a device list in the app, to revoke a lost phone;
+  - device key attestation (NFC-2) and Play Integrity (APP-2).
+- **A payouts-only stop switch** (WRK-12).
+- **Several instances:** a shared rate-limit store, and a setting to turn the workers off on extra API instances.
+- **A salted merchant hash** (SC-9).
+- **Google sign-in** with Privy.
+- **A script that checks the mainnet deployment** (launch checklist A12).
 
 ## Before real money
 
 - Thai legal opinion: the SEC's crypto-payment ban, the Payment Systems Act, and Decree No. 2 on offshore digital-asset services.
 - A licensed partner: Krungsri corporate API (pays PromptPay IDs and bill-payment QRs) or a TouristDigiPay exchange and e-money operator.
-- Contract audit, production key management (KMS, multisig admin), monitoring.
+- **A real KYC provider** (Sumsub or Onfido, passport and visa), with production refusing the mock, and verified names for tap to pay.
+- **AML:** sanctions and on-chain screening, transaction monitoring, and a review of tap to pay (USDC between users).
+- **Keys:**
+  - the contract admin on a multisig, and the pauser on a separate key;
+  - the quote signer and relayer in a KMS;
+  - relaying split from settling and refunding;
+  - partner keys in a secret manager.
+- **Operators:** per-person accounts (SSO with MFA), four-eyes for mark-paid and approve-refund, and `/ops` behind a VPN or allowlist.
+- **Monitoring that pages someone:** `/ops/api/health`, contract role and treasury events, and error-level logs shipped to a tracker.
+- **Hosting:** TLS, backups, and launch checklist A12–A16.
+- A decision on refunds to USDC-blacklisted payers ([ADR 0006](adr/0006-immutable-settlement-contract.md)).
+- A contract audit.
 - A controlled 1-baht live payment to an allowlisted merchant.
+
+The [launch checklist](launch-checklist.md) breaks these down into checks and sign-offs.
 
 ## After the demo (product)
 
@@ -263,11 +383,16 @@ The anvil test runs request → tap → approve → relay, checks both balances,
 ## Steps that need the project owner
 
 - **Android:** install cmdline-tools in Android Studio's SDK Manager and accept the SDK licences (`flutter doctor --android-licenses`).
-- **Xendit:** a test account and its secret key and callback token (iteration 6).
-- **Faucets:** Base Sepolia ETH and Circle test USDC (iteration 7).
-- **MoonPay:** a sandbox account (iteration 8).
+- **Release key:** create the upload key outside the repo, keep it and its passwords in the team vault, and write `apps/mobile/android/key.properties` ([apps/mobile/README.md](../apps/mobile/README.md#signing)). For the store: a Play Console account with MFA and Play App Signing.
+- **Privy** (iteration 11):
+  - a dashboard app with email login and embedded EOA wallets;
+  - an app client that allows `com.globalpay.globalpay`;
+  - its App ID and Client ID, passed at build time as `PRIVY_APP_ID` and `PRIVY_CLIENT_ID`.
+- **Xendit:** a test account, its secret key and callback token (iteration 6, run in iteration 7).
+- **Faucets:** Base Sepolia ETH (about 0.01 for the deployer and 0.02 for the relayer) and 10+ Circle test USDC for the test payer (iteration 7).
+- **MoonPay:** a sandbox account with its publishable, secret and webhook keys, and the Sepolia token it delivers (iteration 8).
 - **Firebase:** a project with an Android app (for the `FIREBASE_*` dart-defines) and a service-account key for the backend (iteration 9).
-- **Two NFC Android phones** for the tap test (iteration 9).
-- **Privy:** a dashboard account and app ID (iteration 11).
-- **Optional:** an Etherscan API key for contract verification.
-- **Business and legal:** the items under "Before real money".
+- **Two NFC Android phones** with strong biometrics, for the tap test (iteration 9).
+- **A public host** for the backend with TLS, so Xendit and MoonPay can reach the webhooks (a tunnel works for testing).
+- **Optional:** an Etherscan API key for contract verification; an error tracker account for the backend's logs.
+- **Business and legal:** the items under "Before real money", and the decisions above.

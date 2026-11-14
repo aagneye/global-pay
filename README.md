@@ -4,15 +4,17 @@
 
 The first target is foreign remote workers in Thailand who are paid in USDC. They pay any PromptPay QR from the GlobalPay app, and the merchant receives baht. It runs on **Base**, an Ethereum Layer 2 that uses the EVM.
 
-> **Status: iterations 1–6, 8 and 9 of 11 done.** Iteration 7 (Base Sepolia) is ready and waits on testnet funding. Iterations 6–11 turn the demo into a product (see the roadmap).
+> **Status: iterations 1–6 and 8–11 of 11 done.** Iteration 7 (Base Sepolia) is ready and waits on testnet funding. A signed release needs the owner's upload key, and email sign-in needs the owner's Privy app (see the roadmap).
 > - The architecture skeleton and docs are in place.
 > - The settlement contract is implemented and fully tested.
 > - The backend signs users in, runs mock KYC, and returns signed quotes for PromptPay QRs.
 > - The full payment loop works on a local chain: pay, simulated baht payout, then settle or refund.
 > - The Flutter app runs the whole flow on the Android emulator: sign in, KYC, scan, confirm, pay, and follow the payment until it settles.
-> - Tap to pay: hold phones together (or scan a QR) to identify the payer, who approves a gasless USDC transfer with their fingerprint.
+> - Tap to pay: hold phones together (or scan a QR) to identify the payer, who approves a gasless USDC transfer.
 > - Add money: buy USDC through MoonPay (or a local simulator), shown as added only once the USDC is proved on-chain; incoming deposits show in history.
 > - Payouts are confirmed, not trusted: idempotent retries, an UNKNOWN outcome that's never settled or refunded automatically, partner webhooks, and an operator console. A Xendit sandbox adapter is in place but not yet run against Xendit.
+> - Production hardening: rate limits, log redaction, production refusing test settings, release builds with HTTPS only, no test keys, R8 and a release key, and an app that checks what its wallet signs.
+> - Sign-in with an email code through Privy's embedded wallet; the dev wallet remains for debug builds and tests.
 >
 > Nothing moves real money. Partners (exchange, e-money operator, PromptPay payout, KYC) are simulated, and everything runs on testnet or a local chain.
 
