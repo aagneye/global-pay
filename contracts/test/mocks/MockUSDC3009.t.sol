@@ -131,4 +131,66 @@ contract MockUSDC3009Test is Test {
         );
         _receive(payer, 0, START + 60, v, r, s);
     }
+
+    /// @dev Signs a TransferWithAuthorization from `payer` to `payee`.
+    function _signTransfer(uint256 pk, uint256 validBefore, bytes32 nonce)
+        internal
+        view
+        returns (uint8 v, bytes32 r, bytes32 s)
+    {
+        bytes32 structHash = keccak256(
+            abi.encode(
+                token.TRANSFER_WITH_AUTHORIZATION_TYPEHASH(),
+                payer,
+                payee,
+                VALUE,
+                0,
+                validBefore,
+                nonce
+            )
+        );
+        bytes32 digest = keccak256(abi.encodePacked("\x19\x01", token.DOMAIN_SEPARATOR(), structHash));
+        (v, r, s) = vm.sign(pk, digest);
+    }
+
+    function test_transferWithAuthorization_anyoneCanSubmit() public {
+        (uint8 v, bytes32 r, bytes32 s) = _signTransfer(PAYER_PK, START + 60, NONCE);
+        vm.expectEmit(address(token));
+        emit MockUSDC3009.AuthorizationUsed(payer, NONCE);
+        vm.prank(makeAddr("relayer"));
+        token.transferWithAuthorization(payer, payee, VALUE, 0, START + 60, NONCE, v, r, s);
+        assertEq(token.balanceOf(payee), VALUE);
+        assertTrue(token.authorizationState(payer, NONCE));
+    }
+
+    function test_transferWithAuthorization_sharesNoncesWithReceive() public {
+        (uint8 v, bytes32 r, bytes32 s) = _signTransfer(PAYER_PK, START + 60, NONCE);
+        token.transferWithAuthorization(payer, payee, VALUE, 0, START + 60, NONCE, v, r, s);
+
+        (v, r, s) = _sign(PAYER_PK, payee, 0, START + 60, NONCE);
+        vm.prank(payee);
+        vm.expectRevert(
+            abi.encodeWithSelector(MockUSDC3009.AuthorizationAlreadyUsed.selector, payer, NONCE)
+        );
+        _receive(payer, 0, START + 60, v, r, s);
+    }
+
+    function test_revert_transfer_expired() public {
+        (uint8 v, bytes32 r, bytes32 s) = _signTransfer(PAYER_PK, START, NONCE);
+        vm.expectRevert(abi.encodeWithSelector(MockUSDC3009.AuthorizationExpired.selector, START));
+        token.transferWithAuthorization(payer, payee, VALUE, 0, START, NONCE, v, r, s);
+    }
+
+    function test_revert_receiveSignatureCannotTransfer() public {
+        // Signed as ReceiveWithAuthorization: the typehash differs, so it recovers someone else.
+        (uint8 v, bytes32 r, bytes32 s) = _sign(PAYER_PK, payee, 0, START + 60, NONCE);
+        vm.expectPartialRevert(MockUSDC3009.InvalidAuthorizationSignature.selector);
+        token.transferWithAuthorization(payer, payee, VALUE, 0, START + 60, NONCE, v, r, s);
+    }
+
+    function test_revert_transfer_changedAmount() public {
+        (uint8 v, bytes32 r, bytes32 s) = _signTransfer(PAYER_PK, START + 60, NONCE);
+        vm.expectPartialRevert(MockUSDC3009.InvalidAuthorizationSignature.selector);
+        token.transferWithAuthorization(payer, payee, VALUE + 1, 0, START + 60, NONCE, v, r, s);
+    }
 }
