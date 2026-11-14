@@ -2,6 +2,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:globalpay/data/repositories/payments_repository.dart' show thb, usdc;
 import 'package:globalpay/domain/models/money.dart';
 import 'package:globalpay/domain/models/onramp.dart';
+import 'package:globalpay/domain/models/p2p.dart';
 import 'package:globalpay/domain/models/payment.dart';
 
 void main() {
@@ -70,6 +71,17 @@ void main() {
       expect(OnrampStatus.fromApi('SOMETHING_NEW'), OnrampStatus.pending);
       expect(OnrampStatus.expired.isTerminal, isTrue);
       expect(OnrampStatus.pending.isTerminal, isFalse);
+    });
+  });
+
+  group('P2pStatus', () {
+    test('reads APPROVING as sending: not final, and it can no longer be cancelled', () {
+      expect(P2pStatus.fromApi('APPROVING'), P2pStatus.approving);
+      expect(P2pStatus.approving.isFinal, isFalse);
+      expect(P2pStatus.approving.isSending, isTrue);
+      expect(P2pStatus.submitted.isSending, isTrue);
+      expect(P2pStatus.senderIdentified.isSending, isFalse);
+      expect(P2pStatus.fromApi('SOMETHING_NEW'), P2pStatus.submitted);
     });
   });
 }

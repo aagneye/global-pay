@@ -5,6 +5,7 @@ import 'package:globalpay/domain/models/payment.dart';
 enum P2pStatus {
   created('CREATED'),
   senderIdentified('SENDER_IDENTIFIED'),
+  approving('APPROVING'),
   submitted('SUBMITTED'),
   completed('COMPLETED'),
   failed('FAILED'),
@@ -17,9 +18,12 @@ enum P2pStatus {
   final String apiValue;
 
   bool get isFinal => switch (this) {
-    created || senderIdentified || submitted => false,
+    created || senderIdentified || approving || submitted => false,
     _ => true,
   };
+
+  /// The sender approved and the transfer is on its way (being relayed, or sent and not yet mined).
+  bool get isSending => this == approving || this == submitted;
 
   /// A status from a newer backend reads as still in progress: never "paid".
   static P2pStatus fromApi(String? value) =>

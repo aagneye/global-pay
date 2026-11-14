@@ -58,7 +58,7 @@ void main() {
         tap('request_$i', i, status, transaction: status.isFinal ? tx('6$i') : null),
     ];
     final shown = historyItems(payments: [], deposits: [], taps: taps).cast<P2pRequest>().map((r) => r.status);
-    expect(shown, unorderedEquals([P2pStatus.submitted, P2pStatus.completed]));
+    expect(shown, unorderedEquals([P2pStatus.approving, P2pStatus.submitted, P2pStatus.completed]));
   });
 
   test("shows a received tap payment once, not again as the deposit of its transfer", () {

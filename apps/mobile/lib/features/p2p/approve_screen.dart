@@ -52,7 +52,7 @@ class _ApproveScreenState extends ConsumerState<ApproveScreen> {
         _error = null;
       });
       if (request.status == P2pStatus.completed) ref.invalidate(balanceProvider);
-      if (request.status == P2pStatus.submitted) _timer = Timer(requestPollInterval, _load);
+      if (request.status.isSending) _timer = Timer(requestPollInterval, _load);
     } on Object catch (error) {
       if (mounted) setState(() => _error = error);
     }
@@ -167,7 +167,7 @@ class _ApproveScreenState extends ConsumerState<ApproveScreen> {
         const SizedBox(height: 8),
         TextButton(onPressed: _busy ? null : _decline, child: const Text('Decline')),
       ],
-      P2pStatus.submitted => [headline('Sending…'), const Padding(padding: EdgeInsets.all(16), child: Center(child: CircularProgressIndicator()))],
+      P2pStatus.approving || P2pStatus.submitted => [headline('Sending…'), const Padding(padding: EdgeInsets.all(16), child: Center(child: CircularProgressIndicator()))],
       P2pStatus.completed => [
         headline('Paid ${request.amount.format()}'),
         const SizedBox(height: 16),

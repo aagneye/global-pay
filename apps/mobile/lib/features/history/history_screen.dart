@@ -70,7 +70,7 @@ List<Object> historyItems({
 }) {
   final moved = [
     for (final request in taps)
-      if (request.status == P2pStatus.submitted || request.status == P2pStatus.completed) request,
+      if (request.status.isSending || request.status == P2pStatus.completed) request,
   ];
   final tapTransfers = {
     for (final request in moved)
@@ -160,7 +160,7 @@ class TapPaymentTile extends StatelessWidget {
       onTap: link == null ? null : () => copyToClipboard(context, link, label: 'Link copied'),
       leading: const CircleAvatar(child: Icon(Icons.contactless)),
       title: Text(title, maxLines: 1, overflow: TextOverflow.ellipsis),
-      subtitle: Text(request.status == P2pStatus.submitted ? '$date · Sending' : date),
+      subtitle: Text(request.status.isSending ? '$date · Sending' : date),
       trailing: Text(
         received ? '+${request.amount.format()}' : request.amount.format(),
         style: theme.textTheme.titleSmall?.copyWith(color: received ? theme.colorScheme.primary : null),

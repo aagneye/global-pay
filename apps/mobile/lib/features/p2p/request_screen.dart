@@ -153,7 +153,7 @@ class _RequestScreenState extends ConsumerState<RequestScreen> {
     final (title, detail) = switch (request.status) {
       P2pStatus.created => ('Hold their phone to the back of yours', _reading ? 'Or let them scan this code.' : 'Let them scan this code.'),
       P2pStatus.senderIdentified => ('Waiting for them to approve', 'They see your name and the amount on their phone.'),
-      P2pStatus.submitted => ('Payment on its way', 'This takes a few seconds.'),
+      P2pStatus.approving || P2pStatus.submitted => ('Payment on its way', 'This takes a few seconds.'),
       P2pStatus.completed => ('Received ${request.amount.format()}', 'The USDC is in your wallet.'),
       P2pStatus.declined => ('They declined', 'No money moved.'),
       P2pStatus.expired => ('Request expired', 'No money moved. Start a new request.'),
@@ -185,7 +185,7 @@ class _RequestScreenState extends ConsumerState<RequestScreen> {
         Padding(padding: const EdgeInsets.only(top: 12), child: DetailRow('From', shortAddress(request.senderAddress!))),
       if (_error != null) Text(_error!, style: TextStyle(color: theme.colorScheme.error)),
       const SizedBox(height: 24),
-      if (!request.status.isFinal && request.status != P2pStatus.submitted)
+      if (!request.status.isFinal && !request.status.isSending)
         OutlinedButton(onPressed: _cancel, child: const Text('Cancel request')),
       if (request.status.isFinal) FilledButton(onPressed: () => context.go(Routes.home), child: const Text('Done')),
     ];
