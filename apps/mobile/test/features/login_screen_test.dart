@@ -96,7 +96,8 @@ void main() {
     await tap(tester, 'Email me a code');
     await pumpUntil(tester, find.byKey(const Key('email-code')));
     expect(privy.codesSentTo, [email]);
-    expect(find.text('Enter the code we sent to $email'), findsOneWidget);
+    expect(find.text('Enter the code we sent to'), findsOneWidget);
+    expect(find.text(email), findsOneWidget);
 
     await tester.enterText(find.byKey(const Key('email-code')), '000000');
     await tap(tester, 'Sign in');

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:globalpay/app/theme.dart';
 import 'package:globalpay/core/errors/app_exception.dart';
 import 'package:globalpay/core/providers.dart';
 import 'package:globalpay/core/widgets/common.dart';
@@ -97,23 +98,25 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
         child: LayoutBuilder(
           // Scrolls when the keyboard is up; otherwise fills the screen like a plain column.
           builder: (context, constraints) => SingleChildScrollView(
-            padding: const EdgeInsets.all(24),
+            padding: const EdgeInsets.fromLTRB(24, 20, 24, 24),
             child: ConstrainedBox(
-              constraints: BoxConstraints(minHeight: (constraints.maxHeight - 48).clamp(0, double.infinity)),
+              constraints: BoxConstraints(minHeight: (constraints.maxHeight - 44).clamp(0, double.infinity)),
               child: IntrinsicHeight(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    const Spacer(),
-                    Text('GlobalPay', style: theme.textTheme.displaySmall?.copyWith(color: theme.colorScheme.primary)),
-                    const SizedBox(height: 8),
-                    Text('Sign in', style: theme.textTheme.headlineSmall),
-                    const SizedBox(height: 8),
+                    const Align(alignment: Alignment.centerLeft, child: Wordmark()),
+                    const Spacer(flex: 3),
                     Text(
-                      'Pay any Thai PromptPay QR with USDC. The merchant gets baht.',
-                      style: theme.textTheme.bodyLarge,
+                      'Pay any\nThai QR\nwith USDC.',
+                      style: theme.textTheme.displayMedium?.copyWith(height: 1.02, letterSpacing: -2),
                     ),
-                    const Spacer(),
+                    const SizedBox(height: 20),
+                    Text(
+                      'Scan a PromptPay code and pay in USDC. The merchant gets baht.',
+                      style: theme.textTheme.bodyLarge?.copyWith(color: Brand.muted),
+                    ),
+                    const Spacer(flex: 2),
                     if (privy != null) ..._emailSignIn(theme, privy),
                     if (privy == null && !devWallet) _notConfigured(theme),
                     if (_error != null) ErrorView(error: _error!),
@@ -141,22 +144,24 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
           autocorrect: false,
           textInputAction: TextInputAction.send,
           onSubmitted: busy ? null : (_) => _sendCode(privy),
-          decoration: const InputDecoration(labelText: 'Email', border: OutlineInputBorder()),
+          decoration: const InputDecoration(labelText: 'Email'),
         ),
         const SizedBox(height: 12),
         FilledButton(
           onPressed: busy ? null : () => _sendCode(privy),
           child: _label('Email me a code', _Action.sendCode),
         ),
-        const SizedBox(height: 8),
+        const SizedBox(height: 12),
         Text(
           'Your wallet is created for you and secured by Privy. GlobalPay never holds your funds.',
           style: theme.textTheme.bodySmall,
+          textAlign: TextAlign.center,
         ),
       ],
       _Step.code => [
-        Text('Enter the code we sent to $_email', style: theme.textTheme.bodyLarge),
-        const SizedBox(height: 12),
+        Text('Enter the code we sent to', style: theme.textTheme.bodyMedium?.copyWith(color: Brand.muted)),
+        Text(_email, style: theme.textTheme.titleMedium),
+        const SizedBox(height: 16),
         TextField(
           key: const Key('email-code'),
           controller: _codeController,
@@ -165,7 +170,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
           autofillHints: const [AutofillHints.oneTimeCode],
           textInputAction: TextInputAction.done,
           onSubmitted: busy ? null : (_) => _verify(privy),
-          decoration: const InputDecoration(labelText: 'Code', border: OutlineInputBorder()),
+          decoration: const InputDecoration(labelText: 'Code'),
         ),
         const SizedBox(height: 12),
         FilledButton(onPressed: busy ? null : () => _verify(privy), child: _label('Sign in', _Action.verify)),
@@ -183,7 +188,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   /// A release build without Privy IDs: there's no wallet to sign in with.
   Widget _notConfigured(ThemeData theme) => Card(
     child: Padding(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(20),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -203,18 +208,22 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     final onPressed = _busy != null ? null : _signInWithDevWallet;
     final label = _label('Continue with dev wallet', _Action.dev);
     return [
-      const SizedBox(height: 16),
-      Card(
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Text(
-            'Testnet demo: the dev wallet is a development key stored on this device. '
-            'Signing in signs a message with it; no funds move.',
-            style: theme.textTheme.bodySmall,
+      const SizedBox(height: 20),
+      Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Padding(padding: EdgeInsets.only(top: 1), child: AccentTag('TESTNET')),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              'The dev wallet is a development key stored on this device. '
+              'Signing in signs a message with it; no funds move.',
+              style: theme.textTheme.bodySmall,
+            ),
           ),
-        ),
+        ],
       ),
-      const SizedBox(height: 16),
+      const SizedBox(height: 20),
       primary ? FilledButton(onPressed: onPressed, child: label) : OutlinedButton(onPressed: onPressed, child: label),
     ];
   }
