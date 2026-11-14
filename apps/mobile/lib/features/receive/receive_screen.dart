@@ -26,10 +26,13 @@ class ReceiveScreen extends ConsumerWidget {
       body: ListView(
         padding: const EdgeInsets.all(24),
         children: [
-          Text(
-            'Send USDC on chain ${config.chainId} to this address. Other tokens or networks will be lost.',
-            style: theme.textTheme.bodyMedium,
-          ),
+          Text(switch ((config.isNear, balance)) {
+            (true, AsyncData(:final value)) =>
+              'Send test USDC (${value.token}) on NEAR testnet to this account. '
+                  'Other tokens or networks will be lost.',
+            (true, _) => 'Send test USDC on NEAR testnet to this account. Other tokens or networks will be lost.',
+            _ => 'Send USDC on chain ${config.chainId} to this address. Other tokens or networks will be lost.',
+          }, style: theme.textTheme.bodyMedium),
           const SizedBox(height: 24),
           Center(
             child: switch (balance) {
@@ -37,7 +40,10 @@ class ReceiveScreen extends ConsumerWidget {
                 color: Colors.white,
                 padding: const EdgeInsets.all(12),
                 child: QrImageView(
-                  data: eip681TransferLink(token: value.token, chainId: config.chainId, recipient: address),
+                  // NEAR has no payment-link standard like EIP-681: the QR is the account id.
+                  data: config.isNear
+                      ? address
+                      : eip681TransferLink(token: value.token, chainId: config.chainId, recipient: address),
                   size: 220,
                 ),
               ),

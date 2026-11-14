@@ -19,6 +19,8 @@ class HomeScreen extends ConsumerWidget {
     final theme = Theme.of(context);
     final address = ref.watch(sessionProvider).value?.walletAddress ?? '';
     final balance = ref.watch(balanceProvider);
+    // Tap to pay (Request, Pay by tap) and Add money are EVM-only.
+    final near = ref.watch(appConfigProvider).isNear;
     final history = ref.watch(historyProvider);
     // Registers this phone for tap to pay (hardware key, push token) once signed in.
     ref.watch(deviceRegistrationProvider);
@@ -46,10 +48,10 @@ class HomeScreen extends ConsumerWidget {
               if (value == 'name') _editName(context, ref);
               if (value == 'phone') _thisPhone(context, ref);
             },
-            itemBuilder: (context) => const [
-              PopupMenuItem(value: 'name', child: Text('Your name')),
-              PopupMenuItem(value: 'phone', child: Text('This phone')),
-              PopupMenuItem(value: 'sign-out', child: Text('Sign out')),
+            itemBuilder: (context) => [
+              const PopupMenuItem(value: 'name', child: Text('Your name')),
+              if (!near) const PopupMenuItem(value: 'phone', child: Text('This phone')),
+              const PopupMenuItem(value: 'sign-out', child: Text('Sign out')),
             ],
           ),
           const SizedBox(width: 8),
@@ -60,18 +62,22 @@ class HomeScreen extends ConsumerWidget {
         child: ListView(
           padding: const EdgeInsets.fromLTRB(20, 8, 20, 32),
           children: [
-            _BalanceCard(balance: balance, address: address),
+            _BalanceCard(balance: balance, address: address, tag: near ? 'USDC · NEAR' : 'USDC'),
             const SizedBox(height: 28),
             Row(
               children: [
-                _QuickAction(icon: Icons.south_west, label: 'Request', onTap: () => context.push(Routes.request)),
-                _QuickAction(
-                  icon: Icons.contactless_outlined,
-                  label: 'Pay by tap',
-                  onTap: () => context.push(Routes.payByTap),
-                ),
-                _QuickAction(icon: Icons.add, label: 'Add money', onTap: () => context.push(Routes.addMoney)),
+                if (!near) ...[
+                  _QuickAction(icon: Icons.south_west, label: 'Request', onTap: () => context.push(Routes.request)),
+                  _QuickAction(
+                    icon: Icons.contactless_outlined,
+                    label: 'Pay by tap',
+                    onTap: () => context.push(Routes.payByTap),
+                  ),
+                  _QuickAction(icon: Icons.add, label: 'Add money', onTap: () => context.push(Routes.addMoney)),
+                ],
                 _QuickAction(icon: Icons.qr_code_2, label: 'Receive', onTap: () => context.push(Routes.receive)),
+                // Keeps Receive the size of one of four actions.
+                if (near) const Spacer(flex: 3),
               ],
             ),
             const SizedBox(height: 36),
@@ -106,10 +112,13 @@ class HomeScreen extends ConsumerWidget {
 
 /// The black card: balance, address, and the main action.
 class _BalanceCard extends StatelessWidget {
-  const _BalanceCard({required this.balance, required this.address});
+  const _BalanceCard({required this.balance, required this.address, required this.tag});
 
   final AsyncValue<({TokenAmount amount, String token})> balance;
   final String address;
+
+  /// The token (and network) the balance is in, e.g. "USDC".
+  final String tag;
 
   @override
   Widget build(BuildContext context) {
@@ -125,7 +134,7 @@ class _BalanceCard extends StatelessWidget {
             children: [
               Text('Balance', style: theme.textTheme.labelLarge?.copyWith(color: soft)),
               const Spacer(),
-              const AccentTag('USDC'),
+              AccentTag(tag),
             ],
           ),
           const SizedBox(height: 16),

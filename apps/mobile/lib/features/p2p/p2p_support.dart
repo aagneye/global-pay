@@ -34,11 +34,12 @@ const tapToPayOffKey = 'tap_to_pay_off';
 const tapDeviceIdKey = 'tap_device_id';
 
 /// Registers this phone for tap to pay, once per run after sign-in: its hardware key, and its push
-/// token if push is set up. Null when the phone can't act as a card (then only the QR works), or when
-/// tap to pay is turned off for it. Failures are swallowed: tap to pay is optional, and the next run tries again.
+/// token if push is set up. Null when the phone can't act as a card (then only the QR works), when
+/// tap to pay is turned off for it, or on the NEAR rail (no tap to pay). Failures are swallowed: tap to pay is
+/// optional, and the next run tries again.
 final deviceRegistrationProvider = FutureProvider<String?>((ref) async {
   final session = await ref.watch(sessionProvider.future);
-  if (session == null) return null;
+  if (session == null || ref.read(appConfigProvider).isNear) return null;
   try {
     final card = ref.read(tapCardProvider);
     final store = ref.read(secureStoreProvider);

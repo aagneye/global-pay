@@ -12,9 +12,10 @@ final balanceProvider = FutureProvider.autoDispose<({TokenAmount amount, String 
   return ref.read(accountRepositoryProvider).balance();
 });
 
-/// Deposits, newest first.
+/// Deposits, newest first. None on the NEAR rail, which doesn't watch deposits.
 final depositsProvider = FutureProvider.autoDispose<List<Deposit>>((ref) async {
   await ref.watch(sessionProvider.future);
+  if (ref.read(appConfigProvider).isNear) return const [];
   return ref.read(accountRepositoryProvider).deposits();
 });
 
@@ -24,8 +25,9 @@ final historyProvider = FutureProvider.autoDispose<List<Payment>>((ref) async {
   return ref.read(accountRepositoryProvider).history();
 });
 
-/// Tap-to-pay requests I paid or received, newest first, whatever their status.
+/// Tap-to-pay requests I paid or received, newest first, whatever their status. None on the NEAR rail.
 final tapHistoryProvider = FutureProvider.autoDispose<List<P2pRequest>>((ref) async {
   await ref.watch(sessionProvider.future);
+  if (ref.read(appConfigProvider).isNear) return const [];
   return ref.read(p2pRepositoryProvider).list();
 });
