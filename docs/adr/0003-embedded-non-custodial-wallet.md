@@ -46,5 +46,20 @@ The owner chose to keep [ADR 0010](0010-tap-to-pay.md)'s promise of a fingerprin
 
 Consequences:
 - **It protects against someone holding an unlocked phone, not against a rooted one.** Malware on a rooted phone could call Privy directly, because Privy's key isn't bound to the fingerprint. Privy's own MFA for signing (a passkey or an authenticator app, checked by Privy) would cover that; it's listed under "Before real money" in the roadmap.
-- **Phones with only weak biometrics can't pay.** Android counts most face unlock as weak, and `BIOMETRIC_STRONG` excludes it. Allowing the screen-lock PIN instead (Android 11 and later can bind a Keystore key to it) is an owner decision.
+- **Phones with only weak biometrics couldn't pay.** Android counts most face unlock as weak, and `BIOMETRIC_STRONG` excludes it. The owner chose to let the screen lock stand in on those phones (next update).
 - **Not tried on a phone yet.** Unit and widget tests cover the gate with a fake vault, and the Kotlin builds. A real fingerprint, a cancel and a fingerprint change need a phone and the owner's Privy app.
+
+## Update: the screen lock on phones without a strong fingerprint (2026-11-14)
+
+The owner chose to let phones with only face unlock, or no biometric at all, approve with their screen lock.
+
+- **Only on phones without a strong biometric, on Android 11 and later.** When the vault's key is made, a phone with a strong biometric gets a fingerprint-only key, as before. A phone without one (none enrolled, or no sensor; a sensor that's busy or in an unknown state doesn't count) but with a screen lock (PIN, pattern or password) gets a key that the screen lock or a strong biometric unlocks (`setUserAuthenticationParameters(0, AUTH_BIOMETRIC_STRONG | AUTH_DEVICE_CREDENTIAL)`). It's still a `CryptoObject` check, so the hardware still decides. Android 9 and 10 can't unlock a Keystore key with the screen lock for a single use, so they still need a fingerprint.
+- **The prompt matches the key.** `KeyVault.kt` reads back from the Keystore (`KeyInfo`) which kind the key is, and the prompt accepts the same. With the screen lock allowed, the system's own PIN screen replaces the Cancel button.
+- **Which kind is fixed when the key is made.** A phone that adds a fingerprint later keeps its screen-lock key, and the fingerprint works too. A phone that removes its last fingerprint has its key destroyed: the gate locks until the email sign-in, and the new key accepts the screen lock.
+- **A screen-lock key isn't tied to today's fingerprints** (`setInvalidatedByBiometricEnrollment(false)`). It would gain nothing, and a fingerprint added later would pass the prompt and then be refused by the key. Removing the screen lock destroys either kind of key, which locks the gate as before.
+- **Messages:** "Set up a screen lock in your phone's settings to approve payments. On Android 10 or older, also add a fingerprint." and "Your phone's fingerprints or screen lock changed…".
+
+Consequences:
+- **On these phones, anyone who knows the PIN can approve a payment.** The lock after a fingerprint change doesn't help there, because the PIN itself unlocks the key. Phones with a fingerprint keep the stricter rule. Privy's MFA for signing (roadmap, "Before real money") would add a second check.
+- **Debug builds on an emulator with a screen lock now ask for it** (the dev wallet too), instead of skipping the check.
+- **Not tried on a phone yet:** a phone with only face unlock paying with its PIN, and removing the last fingerprint.
