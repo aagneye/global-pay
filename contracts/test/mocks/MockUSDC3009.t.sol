@@ -149,7 +149,8 @@ contract MockUSDC3009Test is Test {
                 nonce
             )
         );
-        bytes32 digest = keccak256(abi.encodePacked("\x19\x01", token.DOMAIN_SEPARATOR(), structHash));
+        bytes32 digest =
+            keccak256(abi.encodePacked("\x19\x01", token.DOMAIN_SEPARATOR(), structHash));
         (v, r, s) = vm.sign(pk, digest);
     }
 
