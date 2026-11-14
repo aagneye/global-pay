@@ -1,6 +1,6 @@
 # Architecture
 
-This document describes the architecture of the GlobalPay **testnet demo**. A user scans a Thai PromptPay QR in the Flutter app, pays with USDC on Base Sepolia, and sees a simulated baht payout settle or refund.
+This document describes the architecture of GlobalPay on testnet. A user scans a Thai PromptPay QR in the Flutter app, pays with USDC on Base Sepolia, and sees the baht payout (simulated, or Xendit's sandbox) settle or refund. Users can also add money (MoonPay's sandbox or a local simulator) and pay each other by tapping phones.
 
 ## Goals and non-goals
 
@@ -10,7 +10,7 @@ This document describes the architecture of the GlobalPay **testnet demo**. A us
 - Every external partner sits behind an interface, so real partners can replace the simulated ones without touching core logic.
 
 **Non-goals for the demo**
-- Real money, mainnet, or real partner integrations (exchange, e-money, PromptPay payout, KYC).
+- Real money, mainnet, or live partner accounts (exchange, e-money, PromptPay payout, KYC). Payout and onramp partners run in their sandboxes; KYC is a mock.
 - Card issuing, USDT support, or countries other than Thailand.
 
 ## System overview
@@ -36,7 +36,7 @@ flowchart LR
     U["USDC"]
   end
 
-  X["Payout partner (simulated)"]
+  X["Payout partner (simulated or Xendit sandbox)"]
   M["PromptPay merchant"]
 
   UI --> API
@@ -62,10 +62,10 @@ flowchart LR
 |---|---|---|
 | App shell | `lib/app/` | `MaterialApp.router`, routes (`go_router`), theme |
 | Core | `lib/core/` | Config from `--dart-define`, Riverpod providers, shared widgets, errors |
-| Domain | `lib/domain/` | Pure Dart models (money, quote, payment, PromptPay QR) and the PromptPay parser |
+| Domain | `lib/domain/` | Pure Dart models (money, quote, payment, onramp, tap-to-pay request, PromptPay QR), the PromptPay parser, and the check of what a wallet is asked to sign (`lib/domain/signing/`) |
 | Data | `lib/data/` | Repositories over the API client generated from the OpenAPI spec (`lib/data/api/generated/`), plus the saved session |
-| Services | `lib/services/wallet/` | `WalletService` interface; `DevWalletService` (local key, development only) and `PrivyWalletService` (embedded wallet) |
-| Features | `lib/features/` | One folder per screen group: auth, kyc, home, receive, scan, pay, history |
+| Services | `lib/services/` | `wallet/`: `WalletService`, `PrivyWalletService` (the embedded wallet, the default), `DevWalletService` (local key, debug builds and tests only) and `WalletSwitch`, which remembers which one the user signed in with. `tap/`: NFC card emulation, the NFC reader and the fingerprint vault. `push/`: Firebase Cloud Messaging |
+| Features | `lib/features/` | One folder per screen group: auth, kyc, home, receive, scan, pay, history, add_money, p2p |
 
 ### Backend: `services/api` (TypeScript, Node 22)
 
@@ -74,14 +74,14 @@ This is a ports-and-adapters design. Core logic depends only on `domain/` and `p
 | Folder | Responsibility |
 |---|---|
 | `src/domain/` | Types and rules with no I/O: money in integer minor units, pricing, quotes, the payment state machine, users and KYC limits |
-| `src/ports/` | Interfaces to the outside world: repositories, `KycProvider`, `RateProvider`, `PayoutProvider`, `SettlementGateway`, `QuoteSigner` |
-| `src/adapters/` | Implementations of the ports: Prisma repositories, mock KYC, Coinbase public rate feed (or a fixed rate), simulated PromptPay payout, viem chain gateway and quote signer |
+| `src/ports/` | Interfaces to the outside world: repositories, `KycProvider`, `RateProvider`, `PayoutProvider`, `OnrampProvider`, `SettlementGateway`, `TokenReader`, `QuoteSigner`, `PushSender` |
+| `src/adapters/` | Implementations of the ports: Prisma repositories, mock KYC, Coinbase public rate feed (or a fixed rate), simulated PromptPay payout and Xendit payouts, simulated onramp and MoonPay, viem chain gateway, relayer, token reader and quote signer, FCM push |
 | `src/lib/promptpay/` | EMVCo PromptPay parser and builder (pure functions, tested against `packages/fixtures`) |
-| `src/lib/typed-data.ts` | EIP-712 types shared with the contracts: `Quote` and USDC `ReceiveWithAuthorization` |
-| `src/modules/` | HTTP features. Each has `routes.ts` (validation + HTTP) and `service.ts` (use case). Modules: `auth`, `kyc`, `quotes`, `payments`, `account` |
-| `src/shared/` | Errors, zod schemas, request-user helper |
+| `src/lib/typed-data.ts` | EIP-712 types shared with the contracts: `Quote`, and USDC's `ReceiveWithAuthorization` and `TransferWithAuthorization` |
+| `src/modules/` | HTTP features. Each has `routes.ts` (validation + HTTP) and `service.ts` (use case). Modules: `auth`, `kyc`, `quotes`, `payments`, `account`, `ops` (operator console), `onramp` (Add money), `p2p` (tap to pay), and `payouts` (`PayoutTracker` and the partner webhook) |
+| `src/shared/` | Errors, zod schemas, request-user helper, rate limits, log redaction and error scrubbing, security headers |
 | `src/config/` | Validated environment configuration |
-| `src/workers/` | Background loops: `indexer` (reads chain events) and `payout-worker` (pays out, then settles or refunds) |
+| `src/workers/` | Background loops: `indexer` (reads chain events), `payout-worker` (pays out, then settles or refunds), `onramp-worker` (Add-money orders), `deposit-worker` (incoming USDC) and `p2p-worker` (tap-to-pay expiry and receipts) |
 | `src/container.ts` | Composition root: builds adapters from config and wires them into services and workers |
 | `src/app.ts`, `src/main.ts` | Fastify app factory and process entry point |
 | `prisma/` | Database schema (Postgres) |
@@ -106,7 +106,7 @@ sequenceDiagram
   participant B as Backend
   participant C as GlobalPaySettlement
   participant T as USDC
-  participant X as Payout partner (simulated)
+  participant X as Payout partner
 
   U->>A: Scan PromptPay QR, enter THB amount
   A->>B: POST /quotes {qrPayload, fiatAmountMinor}
@@ -168,7 +168,7 @@ Three parts of the backend move a payment along. Each pass is safe to repeat aft
 | Part | Where | What it does |
 |---|---|---|
 | **Relayer** | `src/adapters/chain/relayer.ts` | Sends `pay`, `markSettled` and `refund` from the operator key. It simulates each call first: a revert becomes `TransactionRejectedError`, decoded to the contract's error name (e.g. `ERC20InsufficientBalance`), and nothing is sent. Calls are queued with a tracked nonce, re-read from the node when wrong. It signs locally, so after a timeout it can resend the same bytes safely. |
-| **Indexer** | `src/workers/indexer.ts` | Every `INDEXER_POLL_MS`, reads `PaymentReceived` from its saved block cursor (`INDEXER_START_BLOCK` the first time) up to `INDEXER_CONFIRMATIONS` behind the head, in chunks of 2,000 blocks, and moves payments SUBMITTED → PAID. It also tracks a payment someone else relayed, since `pay()` is permissionless. It then reconciles SUBMITTED payments: a reverted `pay()` becomes FAILED, and so does one that didn't land within a minute after its quote expired (checked against `paymentOf`). |
+| **Indexer** | `src/workers/indexer.ts` | Every `INDEXER_POLL_MS`, reads `PaymentReceived` from its saved block cursor (`INDEXER_START_BLOCK` the first time) up to `INDEXER_CONFIRMATIONS` behind the head, in chunks of `INDEXER_MAX_BLOCK_RANGE` blocks (200 by default, the limit of Base's public RPC), and moves payments SUBMITTED → PAID once the event matches the stored quote (a mismatch is never paid out and goes to `/ops`). It also tracks a payment someone else relayed, since `pay()` is permissionless. It then reconciles SUBMITTED payments: a reverted `pay()` becomes FAILED, and so does one that didn't land within a minute after its quote expired, but only while `paymentOf` shows no payment. A FAILED payment whose quote turns out paid becomes PAID. |
 | **Payout worker** | `src/workers/payout-worker.ts` | Every `PAYOUT_POLL_MS`: PAID → stores the payout and its idempotency key → PAYOUT_PENDING → asks the partner through `PayoutTracker` (looking the payout up before any re-create). Only a SUCCEEDED payout with a reference leads to `markSettled`, and only a definite FAILED to `refund`. UNKNOWN waits for the partner or an operator ([ADR 0008](adr/0008-payout-outcomes-and-reconciliation.md)). Before sending, it reads `paymentOf` and records a result that's already on-chain instead of sending again. |
 
 `POST /payments` returns `202` with status SUBMITTED right after sending. The app polls `GET /payments/:id` until SETTLED, REFUNDED or FAILED. Each response links the transactions on `EXPLORER_URL`.
@@ -371,11 +371,13 @@ The full [threat model](security.md) lists each threat with its control or remai
 - **Payout safety:** an idempotency key stored before calling the partner, lookup before any retry, settle only with a reference, refund only on a definite failure, webhooks re-fetched before use ([ADR 0008](adr/0008-payout-outcomes-and-reconciliation.md)).
 - **Operator actions are constrained and audited:** a separate token, allowed only from UNKNOWN, partner re-checked first, a cooling-off period before refunds, every action logged.
 - **Testnet keys only:** keys live in a gitignored `.env` and are never committed. The Xendit sandbox script refuses live keys, and `PAYOUT_TEST_DESTINATIONS` is refused in production.
+- **Hardened API:** per-route rate limits, a body size limit, security headers, secrets redacted from logs, errors scrubbed of personal data, and production refusing local, test and sandbox settings ([services/api/README.md](../services/api/README.md#hardening)).
+- **The app checks what it signs:** before any signature, the typed data must match the payment on screen and the app's own settings (chain, USDC, recipient, amount, nonce), so a compromised backend can't get a different transfer signed.
 
 ## Configuration
 
 - Backend: `services/api/.env.example`.
 - Contracts: `contracts/.env.example`.
-- Mobile app: `--dart-define` values (`API_BASE_URL`, `CHAIN_ID`, `EXPLORER_URL`), so the app ships no secrets.
+- Mobile app: `--dart-define` values (`API_BASE_URL`, `CHAIN_ID`, `SETTLEMENT_ADDRESS`, `PRIVY_APP_ID`, `PRIVY_CLIENT_ID`, `FIREBASE_*`, and `DEV_WALLET_PRIVATE_KEY` for local chains in debug builds), so the app ships no secrets. Release builds need an https `API_BASE_URL` ([apps/mobile/README.md](../apps/mobile/README.md)).
 
 Design decisions are recorded in [`docs/adr/`](adr/).
