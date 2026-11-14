@@ -13,7 +13,8 @@ export interface PaymentReceivedEvent {
   fiatCurrency: string;
   fiatAmount: bigint;
   merchantRefHash: Hex;
-  txHash: Hex;
+  /** Always set on the EVM rail. NEAR rail: known only for payments this process relayed. */
+  txHash?: Hex;
   blockNumber: bigint;
   logIndex: number;
 }

@@ -14,7 +14,13 @@ export interface IndexerDeps {
   quotes: QuoteRepository;
   cursors: CursorRepository;
   chainId: number;
+  /** The settlement contract (on the NEAR rail, its account ID). Without it the indexer doesn't start. */
   settlementAddress?: Address;
+  /**
+   * Overrides the cursor's key. Set on the NEAR rail, where the gateway's "blocks" are the contract's
+   * payment sequence numbers, so starting from 0 is normal.
+   */
+  cursorId?: string;
   pollMs: number;
   /** Blocks to wait before treating an event as final. */
   confirmations: number;
@@ -60,7 +66,7 @@ export class IndexerWorker {
       log.warn({ worker: 'indexer' }, 'SETTLEMENT_ADDRESS is not set; indexer not started');
       return;
     }
-    if (this.deps.startBlock === 0n && this.deps.chainId !== LOCAL_CHAIN_ID) {
+    if (this.deps.startBlock === 0n && this.deps.chainId !== LOCAL_CHAIN_ID && !this.deps.cursorId) {
       log.warn(
         { worker: 'indexer', chainId: this.deps.chainId },
         'INDEXER_START_BLOCK is 0: the first run scans the whole chain. Set it to the deployment block.',
@@ -80,7 +86,7 @@ export class IndexerWorker {
   }
 
   private get cursorId(): string {
-    return `settlement:${this.deps.chainId}:${this.deps.settlementAddress?.toLowerCase()}`;
+    return this.deps.cursorId ?? `settlement:${this.deps.chainId}:${this.deps.settlementAddress?.toLowerCase()}`;
   }
 
   private async indexEvents(): Promise<void> {
@@ -118,21 +124,17 @@ export class IndexerWorker {
       return;
     }
 
+    // NEAR rail: the event may not know the transaction; then the hash stored at submit stays.
+    const txHash = event.txHash ?? payment.payTxHash;
+    const paid = { ...(event.txHash ? { payTxHash: event.txHash } : {}), paidBlock: event.blockNumber };
     if (payment.status === 'SUBMITTED') {
-      await payments.transition(payment.id, 'SUBMITTED', 'PAID', {
-        payTxHash: event.txHash,
-        paidBlock: event.blockNumber,
-      });
-      this.log.info({ paymentId: payment.id, txHash: event.txHash }, 'payment received on-chain');
+      await payments.transition(payment.id, 'SUBMITTED', 'PAID', paid);
+      this.log.info({ paymentId: payment.id, txHash }, 'payment received on-chain');
     } else if (payment.status === 'FAILED') {
       // Failed while the chain showed no payment, but the quote was paid after all: pay() is permissionless,
       // so the same authorisation can be relayed later. The chain decides; the payment is paid out as usual.
-      await payments.transition(payment.id, 'FAILED', 'PAID', {
-        payTxHash: event.txHash,
-        paidBlock: event.blockNumber,
-        failureReason: null,
-      });
-      this.log.warn({ paymentId: payment.id, txHash: event.txHash }, 'FAILED payment was paid on-chain; now PAID');
+      await payments.transition(payment.id, 'FAILED', 'PAID', { ...paid, failureReason: null });
+      this.log.warn({ paymentId: payment.id, txHash }, 'FAILED payment was paid on-chain; now PAID');
     }
     // Any other status: we've seen this event before.
   }
@@ -141,7 +143,7 @@ export class IndexerWorker {
   private async onMismatch(payment: Payment, event: PaymentReceivedEvent, mismatch: string): Promise<void> {
     const { payments } = this.deps;
     this.log.error({ paymentId: payment.id, txHash: event.txHash, mismatch }, 'PaymentReceived does not match its quote; not paying out');
-    const eventMismatch = `Transaction ${event.txHash}: ${mismatch}`;
+    const eventMismatch = `Transaction ${event.txHash ?? payment.payTxHash ?? 'unknown'}: ${mismatch}`;
     if (payment.status === 'SUBMITTED') {
       const failed = await payments.transition(payment.id, 'SUBMITTED', 'FAILED', {
         failureReason: "The on-chain payment doesn't match the quote",
@@ -214,7 +216,9 @@ export function describeMismatch(event: PaymentReceivedEvent, quote: Quote): str
   return differences.length ? differences.join(', ') : null;
 }
 
+/** EVM addresses compare case-insensitively; NEAR account IDs (no 0x) exactly. */
 function sameAddress(a: string, b: string): boolean {
+  if (!a.startsWith('0x') || !b.startsWith('0x')) return a === b;
   try {
     return isAddressEqual(a as Address, b as Address);
   } catch {
