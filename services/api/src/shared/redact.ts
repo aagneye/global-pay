@@ -90,7 +90,10 @@ export interface ScrubbedError {
 /** Anything thrown, as a scrubbed plain object: the logger's `err` serializer. */
 export function scrubError(error: unknown): ScrubbedError {
   const value = scrub(error);
-  if (error instanceof Error) return { stack: '', ...(value as { type: string; message: string }) };
+  if (error instanceof Error) {
+    const scrubbed = value as { type: string; message: string; stack?: string };
+    return { ...scrubbed, stack: scrubbed.stack ?? '' };
+  }
   if (typeof value === 'object' && value !== null && !Array.isArray(value)) return { type: 'Object', message: '', stack: '', ...value };
   return { type: typeof error, message: String(value), stack: '' };
 }
