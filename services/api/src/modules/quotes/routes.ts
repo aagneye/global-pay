@@ -59,7 +59,7 @@ const NearPayment = z
     signerId: z.string().meta({ description: "The payer's implicit account (the delegate action's sender_id)" }),
     publicKey: z.string().meta({ description: 'The payer\'s key, "ed25519:" + base58' }),
     receiverId: z.string().meta({ description: 'The USDC contract' }),
-    methodName: z.literal('ft_transfer_call'),
+    methodName: z.string().meta({ description: 'Always "ft_transfer_call"' }),
     args: NearTransferCallArgs,
     gas: out.uint.meta({ description: 'Gas for the function call' }),
     deposit: out.uint.meta({ description: 'yoctoNEAR attached: always 1' }),

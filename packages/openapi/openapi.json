@@ -351,9 +351,7 @@
           },
           "methodName": {
             "type": "string",
-            "enum": [
-              "ft_transfer_call"
-            ]
+            "description": "Always \"ft_transfer_call\""
           },
           "args": {
             "$ref": "#/components/schemas/NearTransferCallArgs"
