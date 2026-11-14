@@ -206,6 +206,41 @@ describe.skipIf(!url)('Prisma repositories (Postgres)', () => {
     await expect(repos.payments.findByQuoteId(quoteId)).resolves.toMatchObject({ id: first.payment.id });
   });
 
+  it('keeps NEAR values as they are: account IDs, base64 signatures and base58 hashes', async () => {
+    const payer = 'ab'.repeat(32) as typeof PAYER;
+    const token = 'gp-abc123-usdc.testnet' as typeof PAYER;
+    const user = await repos.users.upsertByWallet(payer);
+    const quoteId = `0x${'cd'.repeat(32)}` as const;
+    const qr = parsePromptPayQr(
+      buildPromptPayQr({ kind: 'merchant', targetType: 'biller', targetId: '099999999999901', amount: { currency: 'THB', minor: 100_00n } }),
+    );
+    const ref = merchantRef(qr);
+    const signature = 'y5d7XAmigk1YwvgmGP2QPHlcRQe6O41wO5LmfRhZIIMhJ97ZAwDm4PPCdzEIKI3WB7EtNCtPouOVmLw4sDPkAQ==' as `0x${string}`;
+    await repos.quotes.create(user.id, {
+      quote: {
+        quoteId,
+        payer,
+        token,
+        tokenAmount: 2_850_000n,
+        fiat: { currency: 'THB', minor: 100_00n },
+        rateE8: 35_00000000n,
+        spreadBps: 100,
+        merchantRef: ref,
+        merchantRefHash: merchantRefHash(ref),
+        merchant: qr,
+        expiresAt: new Date('2026-11-12T00:01:00Z'),
+      },
+      signature,
+    });
+    const stored = await repos.quotes.findById(quoteId);
+    expect(stored).toMatchObject({ signature, quote: { payer, token } });
+
+    const { payment } = await repos.payments.createForQuote(quoteId, user.id);
+    const payTxHash = 'FiiMZwAXq7Cw3Wv7mR5cbtvbL2h8p9sQkE4nX1yJd6Tz' as `0x${string}`;
+    await repos.payments.update(payment.id, { payTxHash, settleTxHash: `0x${'EF'.repeat(32)}` });
+    expect((await repos.payments.findById(payment.id))?.payment).toMatchObject({ payTxHash, settleTxHash: `0x${'ef'.repeat(32)}` });
+  });
+
   it('lists payments by user (newest first) and by status (oldest first)', async () => {
     const user = await repos.users.upsertByWallet(PAYER);
     const ids: string[] = [];
