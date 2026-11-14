@@ -113,6 +113,19 @@ describe('NEAR payments: quote and delegate edge cases', () => {
     expect(near.sent.filter((s) => s.kind === 'delegate')).toHaveLength(1);
   });
 
+  it('relays once when the same quote is submitted twice at the same time', async () => {
+    const { near, repos, quote, submit } = await setup();
+    const q = await quote();
+    const signedDelegate = await signNearPayment(NEAR.payerKey, q.nearPayment);
+
+    const [a, b] = await Promise.all([submit(q.quote.quoteId, signedDelegate), submit(q.quote.quoteId, signedDelegate)]);
+    expect(a.statusCode).toBe(202);
+    expect(b.statusCode).toBe(202);
+    expect(b.json().id).toBe(a.json().id);
+    expect(near.sent.filter((s) => s.kind === 'delegate')).toHaveLength(1);
+    expect(repos.state.payments.size).toBe(1);
+  });
+
   it("refuses a delegate signed for one quote when it is sent for another (the msg is the first quote's)", async () => {
     const { near, repos, quote, submit } = await setup();
     const first = await quote();
