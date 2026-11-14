@@ -315,20 +315,19 @@ The rules are in [ADR 0003](adr/0003-embedded-non-custodial-wallet.md).
   - "Sign-in isn't set up" in a release build without the Privy IDs.
 - [x] **Settings:** `PRIVY_APP_ID` and `PRIVY_CLIENT_ID` are dart-defines, never committed.
 - [x] **Android:** `minSdk` 24 → 28 (Privy's Android library), plus a packaging exclude for a duplicated `META-INF` file.
+- [x] **A fingerprint before every Privy signature** (owner decision, 2026-11-14): `FingerprintGate` opens a token sealed by the Keystore's fingerprint-locked key; changed fingerprints lock it until the next email sign-in. Release builds refuse to sign without a strong biometric.
 
 **Result:** the sign-in screen, the wallet, the switch and session restore are tested against a fake Privy client. The "done when" (a new user signs up with email and completes a payment) needs a real Privy app, so it hasn't been checked on a device yet.
 
 **Not done yet:**
 - **A real sign-up and payment** on an emulator or phone, with the owner's Privy app and a funded wallet (the simulated onramp on anvil, or a faucet on Base Sepolia).
 - **Google sign-in.** It needs an app URL scheme and Privy's `PrivyRedirectActivity`.
-- **No fingerprint before a Privy signature.** This is an owner decision (below). Until then, the approve screen's fingerprint applies only to the dev wallet.
+- **The fingerprint gate on a phone:** a real fingerprint, a cancelled prompt, and the lock after changing fingerprints.
 
 ## Decisions for the owner
 
 1. **minSdk 28 (Android 9 and later)** for Privy. It drops Android 7 and 8 phones. Accept it, or choose a wallet SDK that supports API 24.
-2. **A biometric step before Privy signatures.** ADR 0010 promised a fingerprint for every approval, and with Privy it isn't asked.
-   - **Recommended:** keep it. Gate each Privy signature behind `BiometricPrompt` with a `CryptoObject`, for example by opening a value sealed in the existing `KeyVault`, so the check can't be skipped the way a bare `local_auth` prompt can.
-   - **Alternatives:** use Privy's MFA for signing, or drop the promise and update ADR 0010.
+2. **Phones without a strong fingerprint.** Every Privy signature now needs the fingerprint (decided 2026-11-14), and release builds refuse to sign on a phone with only weak biometrics (most face unlock) or none. Accept that, or also allow the screen-lock PIN on Android 11 and later.
 3. **Configure Privy for embedded EOA wallets**, not smart wallets. The backend checks sign-in offline and the contract uses USDC's `v, r, s` EIP-3009, so smart-wallet signatures would fail.
 4. **Limits:**
    - `P2P_DAILY_LIMIT_USDC` (2,000 USDC) and the KYC tier limits are demo values;
@@ -337,7 +336,6 @@ The rules are in [ADR 0003](adr/0003-embedded-non-custodial-wallet.md).
 ## Next (engineering, not blocked on the owner)
 
 - **CI** running checks A1–A6, A13 and A14 on every push. There's no CI today.
-- **The Privy biometric gate**, if decision 2 says so.
 - **An atomic 24-hour THB limit:** one transaction for the check and the insert, or a reservation at quote time (threat model WRK-15).
 - **Stuck transactions:** replace-by-fee, and recovery from a gap in the relayer's nonces (WRK-6).
 - **Stuck onramp orders on `/ops`** (WRK-10).
@@ -363,6 +361,7 @@ The rules are in [ADR 0003](adr/0003-embedded-non-custodial-wallet.md).
   - relaying split from settling and refunding;
   - partner keys in a secret manager.
 - **Operators:** per-person accounts (SSO with MFA), four-eyes for mark-paid and approve-refund, and `/ops` behind a VPN or allowlist.
+- **Privy's MFA for signing** (a passkey or an authenticator app, checked by Privy), on top of the phone's fingerprint check, so a rooted phone can't sign without it.
 - **Monitoring that pages someone:** `/ops/api/health`, contract role and treasury events, and error-level logs shipped to a tracker.
 - **Hosting:** TLS, backups, and launch checklist A12–A16.
 - A decision on refunds to USDC-blacklisted payers ([ADR 0006](adr/0006-immutable-settlement-contract.md)).

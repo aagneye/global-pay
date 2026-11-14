@@ -64,7 +64,7 @@ flowchart LR
 | Core | `lib/core/` | Config from `--dart-define`, Riverpod providers, shared widgets, errors |
 | Domain | `lib/domain/` | Pure Dart models (money, quote, payment, onramp, tap-to-pay request, PromptPay QR), the PromptPay parser, and the check of what a wallet is asked to sign (`lib/domain/signing/`) |
 | Data | `lib/data/` | Repositories over the API client generated from the OpenAPI spec (`lib/data/api/generated/`), plus the saved session |
-| Services | `lib/services/` | `wallet/`: `WalletService`, `PrivyWalletService` (the embedded wallet, the default), `DevWalletService` (local key, debug builds and tests only) and `WalletSwitch`, which remembers which one the user signed in with. `tap/`: NFC card emulation, the NFC reader and the fingerprint vault. `push/`: Firebase Cloud Messaging |
+| Services | `lib/services/` | `wallet/`: `WalletService`, `PrivyWalletService` (the embedded wallet, the default), `DevWalletService` (local key, debug builds and tests only), `WalletSwitch`, which remembers which one the user signed in with, and `FingerprintGate`, the hardware-checked fingerprint before every Privy signature. `tap/`: NFC card emulation, the NFC reader and the fingerprint vault. `push/`: Firebase Cloud Messaging |
 | Features | `lib/features/` | One folder per screen group: auth, kyc, home, receive, scan, pay, history, add_money, p2p |
 
 ### Backend: `services/api` (TypeScript, Node 22)

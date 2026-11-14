@@ -24,12 +24,13 @@ Iterations 5 (the app), 8 (Add money), 9 (tap to pay), 10 (release hardening) an
 9. **Tap to pay** (iteration 9, [ADR 0010](../../docs/adr/0010-tap-to-pay.md)):
    - **Request** (receiver): enter a USDC amount, then hold the payer's phone to yours, or let them scan the QR.
    - **Pay by tap** (payer): while this screen is open, the phone answers taps as a contactless card. Its signing key never leaves the Android Keystore.
-   - **Approve:** the payer sees who they're paying (with a "verified" badge only for verified names) and the amount, then approves. With the dev wallet, approving needs their fingerprint; with Privy it doesn't yet (an open decision, [ADR 0003](../../docs/adr/0003-embedded-non-custodial-wallet.md)).
+   - **Approve:** the payer sees who they're paying (with a "verified" badge only for verified names) and the amount, then approves with their fingerprint.
    - **"This phone":** the home screen's menu turns tap to pay off for this phone (its registration is revoked) and back on.
    - **Fingerprint-locked dev wallet:** with strong biometrics enrolled, the dev wallet's key is stored only encrypted by a Keystore key that needs the fingerprint for every signature.
    - **Native code** is in `android/app/src/main/kotlin/.../TapCard.kt` and `KeyVault.kt`.
 10. **Release builds** (iteration 10): HTTPS only, no test keys, no logging, no backups, signed with your own key and shrunk by R8. See [Release build](#release-build).
-11. **Checked signatures:** before any wallet signs, the app compares the typed data with the payment on screen and its own settings (`lib/domain/signing/authorization_check.dart`), so a compromised backend can't get a different transfer signed.
+11. **A fingerprint for every signature:** with Privy, each sign-in and payment first opens a token sealed by a Keystore key that needs the fingerprint (`lib/services/wallet/signature_gate.dart`, [ADR 0003](../../docs/adr/0003-embedded-non-custodial-wallet.md)). If the phone's fingerprints change, the app asks the user to sign in again with their email. Release builds refuse to sign on a phone without a strong fingerprint. Debug builds skip the check there, so an emulator works without one; to try it, enrol one in the emulator's settings and touch it from *Extended controls → Fingerprint*.
+12. **Checked signatures:** before any wallet signs, the app compares the typed data with the payment on screen and its own settings (`lib/domain/signing/authorization_check.dart`), so a compromised backend can't get a different transfer signed.
 
 The embedded wallet (Privy) is the default wallet when its IDs are set; see "Sign in with email (Privy)" below and [docs/roadmap.md](../../docs/roadmap.md).
 
