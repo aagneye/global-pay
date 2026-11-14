@@ -2,8 +2,8 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 
-/// Release builds must not allow plain HTTP; only the debug source set may. These read the Android
-/// sources (from apps/mobile, where `flutter test` runs).
+/// Release builds must not allow plain HTTP (only the debug source set may) or put app data in backups.
+/// These read the Android sources (from apps/mobile, where `flutter test` runs).
 void main() {
   const src = 'android/app/src';
 
@@ -37,6 +37,24 @@ void main() {
       }
     }
     expect(offenders, isEmpty);
+  });
+
+  test('the main manifest keeps app data out of backups and device transfers', () {
+    final manifest = _read('$src/main/AndroidManifest.xml');
+    expect(manifest, matches(RegExp(r'allowBackup\s*=\s*"false"')));
+    expect(manifest, matches(RegExp(r'fullBackupContent\s*=\s*"false"')));
+    final name = RegExp(r'dataExtractionRules\s*=\s*"@xml/([\w.]+)"').firstMatch(manifest)?[1];
+    expect(name, isNotNull, reason: 'main/AndroidManifest.xml should set android:dataExtractionRules');
+
+    final rules = _read('$src/main/res/xml/$name.xml');
+    expect(rules, isNot(contains('<include')));
+    for (final section in ['cloud-backup', 'device-transfer']) {
+      final body = RegExp('<$section>(.*?)</$section>', dotAll: true).firstMatch(rules)?[1];
+      expect(body, isNotNull, reason: '$name.xml should have <$section>');
+      for (final domain in ['root', 'device_root', 'external']) {
+        expect(body, matches(RegExp('<exclude\\s+domain="$domain"\\s+path="\\."')), reason: '$section, $domain');
+      }
+    }
   });
 }
 
