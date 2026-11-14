@@ -301,7 +301,7 @@ class _NoPayments extends StatelessWidget {
           Text('No payments yet.', style: theme.textTheme.titleSmall),
           const SizedBox(height: 4),
           Text(
-            'Scan a PromptPay code to make your first one.',
+            'Scan a UPI or PromptPay QR to make your first one.',
             style: theme.textTheme.bodySmall,
             textAlign: TextAlign.center,
           ),

@@ -114,12 +114,12 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                     const Align(alignment: Alignment.centerLeft, child: Wordmark()),
                     const Spacer(flex: 3),
                     Text(
-                      'Pay any\nThai QR\nwith USDC.',
+                      'Pay any\nshop QR\nwith USDC.',
                       style: theme.textTheme.displayMedium?.copyWith(height: 1.02, letterSpacing: -2),
                     ),
                     const SizedBox(height: 20),
                     Text(
-                      'Scan a PromptPay code and pay in USDC. The merchant gets baht.',
+                      'Scan a UPI or PromptPay QR and approve with your own bank card. The shop gets rupees or baht.',
                       style: theme.textTheme.bodyLarge?.copyWith(color: Brand.muted),
                     ),
                     const Spacer(flex: 2),
