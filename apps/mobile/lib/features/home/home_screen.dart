@@ -279,30 +279,49 @@ class _NoPayments extends StatelessWidget {
 
 /// "Your name": what people see when they pay you. It's shown to them as not verified.
 Future<void> _editName(BuildContext context, WidgetRef ref) async {
-  final controller = TextEditingController();
-  final name = await showDialog<String>(
-    context: context,
-    builder: (context) => AlertDialog(
-      title: const Text('Your name'),
-      content: TextField(
-        key: const Key('name-field'),
-        controller: controller,
-        autofocus: true,
-        decoration: const InputDecoration(helperText: 'People see this when they pay you'),
-      ),
-      actions: [
-        TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
-        FilledButton(onPressed: () => Navigator.pop(context, controller.text), child: const Text('Save')),
-      ],
-    ),
-  );
-  controller.dispose();
+  final name = await showDialog<String>(context: context, builder: (context) => const _NameDialog());
   if (name == null || !context.mounted) return;
   try {
     await ref.read(p2pRepositoryProvider).updateName(name);
     if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Name saved')));
   } on Object catch (error) {
     if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(describeError(error))));
+  }
+}
+
+/// The "Your name" dialog. It owns its text controller, so the controller lives until the dialog has
+/// finished closing: disposing it as soon as `showDialog` returns broke the closing animation.
+class _NameDialog extends StatefulWidget {
+  const _NameDialog();
+
+  @override
+  State<_NameDialog> createState() => _NameDialogState();
+}
+
+class _NameDialogState extends State<_NameDialog> {
+  final _controller = TextEditingController();
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Your name'),
+      content: TextField(
+        key: const Key('name-field'),
+        controller: _controller,
+        autofocus: true,
+        decoration: const InputDecoration(helperText: 'People see this when they pay you'),
+      ),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+        FilledButton(onPressed: () => Navigator.pop(context, _controller.text), child: const Text('Save')),
+      ],
+    );
   }
 }
 

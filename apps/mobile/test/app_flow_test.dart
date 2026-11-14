@@ -410,6 +410,24 @@ void main() {
       await pumpUntil(tester, find.text('Declined. No money moved.'));
     });
 
+    testWidgets('saving your name closes the dialog cleanly', (tester) async {
+      final backend = FakeBackend(p2pRole: 'sender')..kycStatus = 'APPROVED';
+      await signIn(tester, app(backend, MemorySecureStore(), card: FakeTapCard()));
+      await tester.tap(find.byType(PopupMenuButton<String>));
+      await pumpUntil(tester, find.text('Your name'));
+      await tester.pump(const Duration(milliseconds: 500)); // the menu opening
+      await tap(tester, 'Your name');
+      await pumpUntil(tester, find.byKey(const Key('name-field')));
+      await tester.enterText(find.byKey(const Key('name-field')), 'Somchai');
+      await tap(tester, 'Save');
+      await pumpUntil(tester, find.text('Name saved'));
+      // The dialog's closing animation must not touch a disposed text controller.
+      await tester.pump(const Duration(seconds: 1));
+      expect(tester.takeException(), isNull);
+      expect(find.byKey(const Key('name-field')), findsNothing);
+      expect(backend.requests.firstWhere((r) => r.path == '/me/profile').body, {'displayName': 'Somchai'});
+    });
+
     Future<void> openThisPhone(WidgetTester tester) async {
       await tester.tap(find.byType(PopupMenuButton<String>));
       await pumpUntil(tester, find.text('This phone'));
