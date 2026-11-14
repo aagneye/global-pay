@@ -20,6 +20,7 @@ dependencies:
   mobile_scanner: ^7.5.0
   nfc_manager: ^4.0.2
   on_chain: ^8.1.0
+  privy_flutter: 0.11.0
   qr_flutter: ^4.1.0
   # Pinned with retrofit_generator: newer pairs need Dart 3.9+.
   retrofit: 4.9.1

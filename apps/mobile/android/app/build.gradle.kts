@@ -40,13 +40,20 @@ android {
         jvmTarget = JavaVersion.VERSION_11.toString()
     }
 
+    // privy_flutter (embedded wallet): bcprov and jspecify both ship this unused file.
+    packaging {
+        resources {
+            excludes += "META-INF/versions/9/OSGI-INF/MANIFEST.MF"
+        }
+    }
+
     defaultConfig {
         // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
         applicationId = "com.globalpay.globalpay"
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
-        // firebase_messaging (push for tap to pay) needs Android 7 (API 24).
-        minSdk = 24
+        // privy_flutter 0.11 (the embedded wallet) is built for Android 9 (API 28).
+        minSdk = 28
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
