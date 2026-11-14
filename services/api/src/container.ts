@@ -1,8 +1,11 @@
 import { parseEther } from 'viem';
 import { ViemQuoteSigner } from './adapters/chain/viem-quote-signer.js';
 import { ViemSettlementGateway } from './adapters/chain/viem-settlement-gateway.js';
+import { ViemTokenReader } from './adapters/chain/viem-token-reader.js';
 import { createPrismaClient, createPrismaRepositories } from './adapters/db/prisma-repositories.js';
 import { MockKycProvider } from './adapters/kyc/mock-kyc-provider.js';
+import { MoonPayOnrampProvider } from './adapters/onramp/moonpay-provider.js';
+import { SimulatedOnrampProvider, mintOnLocalChain } from './adapters/onramp/simulated-onramp-provider.js';
 import { SimulatedPromptPayProvider } from './adapters/payouts/simulated-promptpay-provider.js';
 import { XenditPayoutProvider } from './adapters/payouts/xendit-provider.js';
 import { FixedRateProvider } from './adapters/rates/fixed-rate-provider.js';
@@ -13,17 +16,23 @@ import { AccountService } from './modules/account/service.js';
 import { AuthService } from './modules/auth/service.js';
 import { AccessTokens } from './modules/auth/tokens.js';
 import { KycService } from './modules/kyc/service.js';
+import { OnrampTracker } from './modules/onramp/onramp-tracker.js';
+import { OnrampService } from './modules/onramp/service.js';
 import { OpsService } from './modules/ops/service.js';
 import { PayoutTracker } from './modules/payouts/payout-tracker.js';
 import { PaymentService } from './modules/payments/service.js';
 import { QuoteService } from './modules/quotes/service.js';
 import type { KycProvider } from './ports/kyc-provider.js';
+import type { OnrampProvider } from './ports/onramp-provider.js';
 import type { PayoutProvider } from './ports/payout-provider.js';
 import type { QuoteSigner } from './ports/quote-signer.js';
 import type { RateProvider } from './ports/rate-provider.js';
 import type { Repositories } from './ports/repositories.js';
 import type { SettlementGateway } from './ports/settlement-gateway.js';
+import type { TokenReader } from './ports/token-reader.js';
+import { DepositWorker } from './workers/deposit-worker.js';
 import { IndexerWorker } from './workers/indexer.js';
+import { OnrampWorker } from './workers/onramp-worker.js';
 import { PayoutWorker } from './workers/payout-worker.js';
 
 /** Everything that talks to the outside world. Tests replace any of these. */
@@ -34,6 +43,11 @@ export interface Adapters {
   gateway: SettlementGateway;
   kyc: KycProvider;
   payouts: PayoutProvider;
+  onramp: OnrampProvider;
+  /** Token transfers on the payment chain (deposits). */
+  tokens: TokenReader;
+  /** Token transfers where the onramp delivers: the payment chain unless ONRAMP_RPC_URL/ONRAMP_CHAIN_ID say otherwise. */
+  onrampTokens: TokenReader;
 }
 
 export interface Container {
@@ -48,10 +62,13 @@ export interface Container {
     account: AccountService;
     payouts: PayoutTracker;
     ops: OpsService;
+    onramp: OnrampService;
   };
   workers: {
     indexer: IndexerWorker;
     payouts: PayoutWorker;
+    onramp: OnrampWorker;
+    deposits: DepositWorker;
   };
   /** Releases connections (database). */
   close(): Promise<void>;
@@ -97,6 +114,23 @@ export function buildContainer(env: Env, overrides: Partial<Adapters> = {}): Con
     pendingDeadlineMs: env.PAYOUT_PENDING_DEADLINE_MS,
   });
 
+  const tokenReader = overrides.tokens ?? new ViemTokenReader({ rpcUrl: env.RPC_URL, chainId: env.CHAIN_ID });
+  const onrampChain = { rpcUrl: env.ONRAMP_RPC_URL ?? env.RPC_URL, chainId: env.ONRAMP_CHAIN_ID ?? env.CHAIN_ID };
+  const onrampTokens =
+    overrides.onrampTokens ?? (env.ONRAMP_RPC_URL || env.ONRAMP_CHAIN_ID ? new ViemTokenReader(onrampChain) : tokenReader);
+  const onrampToken = env.ONRAMP_TOKEN_ADDRESS ?? env.USDC_ADDRESS;
+  const onrampProvider =
+    overrides.onramp ??
+    buildOnrampProvider(env, () => new SimulatedOnrampProvider({ rates, deliver: mintOnLocalChain({ ...onrampChain, token: onrampToken }) }));
+  const onrampTracker = new OnrampTracker({
+    orders: repositories.onrampOrders,
+    provider: onrampProvider,
+    reader: onrampTokens,
+    token: onrampToken,
+    confirmations: env.ONRAMP_CONFIRMATIONS ?? env.INDEXER_CONFIRMATIONS,
+    recheckMs: env.ONRAMP_RECHECK_MS,
+  });
+
   const tokens = new AccessTokens({ secret: env.JWT_SECRET, ttlSeconds: env.JWT_TTL_SECONDS });
   const payments = new PaymentService({
     quotes: repositories.quotes,
@@ -139,6 +173,17 @@ export function buildContainer(env: Env, overrides: Partial<Adapters> = {}): Con
       }),
       payments,
       payouts: payoutTracker,
+      onramp: new OnrampService({
+        users: repositories.users,
+        orders: repositories.onrampOrders,
+        provider: onrampProvider,
+        tracker: onrampTracker,
+        minFiatMinor: env.ONRAMP_MIN_THB,
+        maxFiatMinor: env.ONRAMP_MAX_THB,
+        ttlMs: env.ONRAMP_ORDER_TTL_MS,
+        maxOpenOrders: env.ONRAMP_MAX_OPEN_ORDERS,
+        explorerUrl: env.ONRAMP_EXPLORER_URL ?? env.EXPLORER_URL,
+      }),
       ops: new OpsService({
         payments: repositories.payments,
         payouts: repositories.payouts,
@@ -156,6 +201,9 @@ export function buildContainer(env: Env, overrides: Partial<Adapters> = {}): Con
         gateway,
         payments,
         usdcAddress: env.USDC_ADDRESS,
+        deposits: repositories.deposits,
+        onrampOrders: repositories.onrampOrders,
+        explorerUrl: env.EXPLORER_URL,
       }),
     },
     workers: {
@@ -178,6 +226,19 @@ export function buildContainer(env: Env, overrides: Partial<Adapters> = {}): Con
         gateway,
         pollMs: env.PAYOUT_POLL_MS,
         enabled: Boolean(env.SETTLEMENT_ADDRESS && env.RELAYER_PRIVATE_KEY),
+      }),
+      onramp: new OnrampWorker({ orders: repositories.onrampOrders, tracker: onrampTracker, pollMs: env.ONRAMP_POLL_MS }),
+      deposits: new DepositWorker({
+        users: repositories.users,
+        deposits: repositories.deposits,
+        cursors: repositories.cursors,
+        reader: tokenReader,
+        token: env.USDC_ADDRESS,
+        ignoreFrom: env.SETTLEMENT_ADDRESS ? [env.SETTLEMENT_ADDRESS] : [],
+        startBlock: env.INDEXER_START_BLOCK,
+        confirmations: env.INDEXER_CONFIRMATIONS,
+        maxBlockRange: env.INDEXER_MAX_BLOCK_RANGE,
+        pollMs: env.DEPOSITS_POLL_MS,
       }),
     },
     async close() {
@@ -202,4 +263,20 @@ function buildPayoutProvider(env: Env): PayoutProvider {
     failureRate: env.PAYOUT_FAILURE_RATE,
     unknownRate: env.PAYOUT_UNKNOWN_RATE,
   });
+}
+
+/** The onramp partner chosen by ONRAMP_PROVIDER. */
+function buildOnrampProvider(env: Env, simulated: () => OnrampProvider): OnrampProvider {
+  if (env.ONRAMP_PROVIDER === 'moonpay') {
+    return new MoonPayOnrampProvider({
+      publishableKey: env.MOONPAY_PUBLISHABLE_KEY ?? '',
+      secretKey: env.MOONPAY_SECRET_KEY ?? '',
+      widgetUrl: env.MOONPAY_WIDGET_URL,
+      apiUrl: env.MOONPAY_API_URL,
+      currencyCode: env.MOONPAY_CURRENCY_CODE,
+      ...(env.MOONPAY_WEBHOOK_KEY ? { webhookKey: env.MOONPAY_WEBHOOK_KEY } : {}),
+      ...(env.ONRAMP_REDIRECT_URL ? { redirectUrl: env.ONRAMP_REDIRECT_URL } : {}),
+    });
+  }
+  return simulated();
 }

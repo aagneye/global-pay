@@ -7,6 +7,9 @@ import { type Adapters, type Container, buildContainer } from '../../src/contain
 import { testEnv } from '../helpers.js';
 import { ANVIL } from './anvil.js';
 import { FakeChain } from './fake-chain.js';
+import { FakeTokenChain } from './fake-token-chain.js';
+import { SimulatedOnrampProvider } from '../../src/adapters/onramp/simulated-onramp-provider.js';
+import { FixedRateProvider } from '../../src/adapters/rates/fixed-rate-provider.js';
 import { type MemoryRepositories, createMemoryRepositories } from './memory-repositories.js';
 
 export interface TestApp {
@@ -15,11 +18,14 @@ export interface TestApp {
   env: Env;
   container: Container;
   chain: FakeChain;
+  /** Token transfers (deposits, onramp deliveries). */
+  tokens: FakeTokenChain;
 }
 
 /**
  * The real app, wired like production except for the outside world: in-memory storage,
- * a fake chain (FakeChain), a fixed 32.50 THB/USDC rate, and anvil's quote-signer key and addresses.
+ * a fake chain (FakeChain) and token transfers (FakeTokenChain), a fixed 32.50 THB/USDC rate, the simulated
+ * onramp delivering on the fake token chain, and anvil's quote-signer key and addresses.
  */
 export async function buildTestApp(
   options: { env?: Record<string, string>; adapters?: Partial<Adapters> } = {},
@@ -36,9 +42,21 @@ export async function buildTestApp(
     ...options.env,
   });
   const chain = new FakeChain();
-  const container = buildContainer(env, { repositories: repos, gateway: chain, ...options.adapters });
+  const tokens = new FakeTokenChain(env.CHAIN_ID);
+  const onramp = new SimulatedOnrampProvider({
+    rates: new FixedRateProvider(env.FIXED_USDC_THB_RATE),
+    deliver: async (to, amount) => tokens.send(env.USDC_ADDRESS, [{ to, value: amount }]),
+  });
+  const container = buildContainer(env, {
+    repositories: repos,
+    gateway: chain,
+    tokens,
+    onrampTokens: tokens,
+    onramp,
+    ...options.adapters,
+  });
   const app = await buildApp({ container, logger: false });
-  return { app, repos, env, container, chain };
+  return { app, repos, env, container, chain, tokens };
 }
 
 /** Signs in through the HTTP API with a wallet key, as the app would. */

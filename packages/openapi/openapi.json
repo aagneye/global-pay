@@ -40,6 +40,82 @@
         ],
         "additionalProperties": false
       },
+      "Deposit": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "token": {
+            "type": "string",
+            "pattern": "^0x[a-fA-F0-9]{40}$",
+            "example": "0x15d34AAf54267DB7D7c367839AAf71A00a2C6A65"
+          },
+          "amount": {
+            "type": "string",
+            "pattern": "^\\d+$",
+            "description": "Token base units"
+          },
+          "from": {
+            "type": "string",
+            "pattern": "^0x[a-fA-F0-9]{40}$",
+            "example": "0x15d34AAf54267DB7D7c367839AAf71A00a2C6A65"
+          },
+          "transaction": {
+            "$ref": "#/components/schemas/DepositTransaction"
+          },
+          "onrampOrderId": {
+            "description": "The Add-money order this completed",
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+          }
+        },
+        "required": [
+          "id",
+          "token",
+          "amount",
+          "from",
+          "transaction",
+          "createdAt"
+        ],
+        "additionalProperties": false
+      },
+      "DepositList": {
+        "type": "object",
+        "properties": {
+          "deposits": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Deposit"
+            }
+          }
+        },
+        "required": [
+          "deposits"
+        ],
+        "additionalProperties": false
+      },
+      "DepositTransaction": {
+        "type": "object",
+        "properties": {
+          "hash": {
+            "type": "string",
+            "pattern": "^0x[a-fA-F0-9]{64}$"
+          },
+          "url": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "hash",
+          "url"
+        ],
+        "additionalProperties": false
+      },
       "Eip712Domain": {
         "type": "object",
         "properties": {
@@ -286,6 +362,134 @@
         ],
         "additionalProperties": false,
         "description": "The on-chain Quote struct, as signed. Send it back unchanged with the payment."
+      },
+      "OnrampCheckout": {
+        "type": "object",
+        "properties": {
+          "order": {
+            "$ref": "#/components/schemas/OnrampOrder"
+          },
+          "checkoutUrl": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "order",
+          "checkoutUrl"
+        ],
+        "additionalProperties": false
+      },
+      "OnrampOrder": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "CREATED",
+              "PENDING",
+              "COMPLETED",
+              "FAILED",
+              "EXPIRED"
+            ],
+            "description": "CREATED: waiting for you to pay. PENDING: paid, USDC on its way. COMPLETED: USDC arrived in your wallet (checked on-chain). FAILED: the purchase failed. EXPIRED: not paid in time."
+          },
+          "provider": {
+            "type": "string"
+          },
+          "fiatCurrency": {
+            "type": "string"
+          },
+          "fiatAmount": {
+            "type": "string",
+            "pattern": "^\\d+$",
+            "description": "THB satang you pay"
+          },
+          "tokenAmount": {
+            "description": "USDC base units: received, or promised by the partner",
+            "type": "string",
+            "pattern": "^\\d+$"
+          },
+          "transaction": {
+            "$ref": "#/components/schemas/OnrampTransaction"
+          },
+          "failureReason": {
+            "type": "string"
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+          }
+        },
+        "required": [
+          "id",
+          "status",
+          "provider",
+          "fiatCurrency",
+          "fiatAmount",
+          "expiresAt",
+          "createdAt",
+          "updatedAt"
+        ],
+        "additionalProperties": false
+      },
+      "OnrampOrderList": {
+        "type": "object",
+        "properties": {
+          "orders": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OnrampOrder"
+            }
+          }
+        },
+        "required": [
+          "orders"
+        ],
+        "additionalProperties": false
+      },
+      "OnrampOrderRequest": {
+        "type": "object",
+        "properties": {
+          "fiatAmountMinor": {
+            "description": "THB satang, e.g. \"80000\" = 800.00 THB",
+            "type": "string",
+            "pattern": "^\\d+$"
+          }
+        },
+        "required": [
+          "fiatAmountMinor"
+        ]
+      },
+      "OnrampTransaction": {
+        "type": "object",
+        "properties": {
+          "hash": {
+            "type": "string",
+            "pattern": "^0x[a-fA-F0-9]{64}$"
+          },
+          "url": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "hash",
+          "url"
+        ],
+        "additionalProperties": false
       },
       "Payment": {
         "type": "object",
@@ -1332,6 +1536,221 @@
           }
         }
       }
+    },
+    "/me/deposits": {
+      "get": {
+        "operationId": "listDeposits",
+        "summary": "USDC that arrived in your wallet from outside, newest first (last 50)",
+        "tags": [
+          "account"
+        ],
+        "description": "Found on-chain by the deposit watcher, a few blocks after they land. Refunds show on their payment instead.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DepositList"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/onramp/orders": {
+      "post": {
+        "operationId": "createOnrampOrder",
+        "summary": "Add money: start buying USDC with baht",
+        "tags": [
+          "onramp"
+        ],
+        "description": "Returns the partner's checkout page to open in the browser (a Custom Tab). The USDC goes to the signed-in user's wallet. Poll GET /onramp/orders/{id} until COMPLETED, FAILED or EXPIRED. checkoutUrl may be relative to the API (the local simulator).",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OnrampOrderRequest"
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OnrampCheckout"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "operationId": "listOnrampOrders",
+        "summary": "Your Add-money orders, newest first (last 20)",
+        "tags": [
+          "onramp"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OnrampOrderList"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/onramp/orders/{id}": {
+      "get": {
+        "operationId": "getOnrampOrder",
+        "summary": "An Add-money order, checked with the partner if due",
+        "tags": [
+          "onramp"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            },
+            "in": "path",
+            "name": "id",
+            "required": true
+          }
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OnrampOrder"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "tags": [
@@ -1353,7 +1772,11 @@
     },
     {
       "name": "account",
-      "description": "Balance and history (iteration 4)"
+      "description": "Balance, payments and deposits"
+    },
+    {
+      "name": "onramp",
+      "description": "Add money: buy USDC with baht (iteration 8)"
     },
     {
       "name": "system"

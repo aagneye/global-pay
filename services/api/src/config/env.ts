@@ -2,6 +2,21 @@ import { z } from 'zod';
 import { FIAT_DECIMALS, RATE_DECIMALS, parseDecimal } from '../domain/money.js';
 import { addressSchema, privateKeySchema } from '../shared/schemas.js';
 
+/** A THB amount like "5000" or "5000.00", as satang. */
+function thbAmount(name: string, fallback: string) {
+  return z
+    .string()
+    .default(fallback)
+    .transform((value, ctx) => {
+      const minor = parseDecimal(value, FIAT_DECIMALS.THB);
+      if (minor === null) {
+        ctx.addIssue({ code: 'custom', message: `${name} must be a THB amount, e.g. 5000 or 5000.00` });
+        return z.NEVER;
+      }
+      return minor;
+    });
+}
+
 const testDestinationsSchema = z.record(
   z.string(),
   z.object({ channelCode: z.string(), accountNumber: z.string(), accountHolderName: z.string() }),
@@ -62,17 +77,7 @@ export const envSchema = z.object({
   /** A payout still pending after this long becomes UNKNOWN. */
   PAYOUT_PENDING_DEADLINE_MS: z.coerce.number().int().min(60_000).default(30 * 60_000),
   /** Refuse quotes when the partner's float minus the amount would go below this (THB). */
-  PAYOUT_FLOAT_BUFFER_THB: z
-    .string()
-    .default('0')
-    .transform((value, ctx) => {
-      const minor = parseDecimal(value, FIAT_DECIMALS.THB);
-      if (minor === null) {
-        ctx.addIssue({ code: 'custom', message: 'PAYOUT_FLOAT_BUFFER_THB must be a THB amount, e.g. 5000 or 5000.00' });
-        return z.NEVER;
-      }
-      return minor;
-    }),
+  PAYOUT_FLOAT_BUFFER_THB: thbAmount('PAYOUT_FLOAT_BUFFER_THB', '0'),
 
   // Simulated partner
   PAYOUT_DELAY_MS: z.coerce.number().int().min(0).default(3_000),
@@ -114,17 +119,39 @@ export const envSchema = z.object({
   /** Alert when the relayer has less than this much ETH. */
   OPS_MIN_RELAYER_ETH: z.string().regex(/^\d+(\.\d+)?$/).default('0.005'),
   /** Alert when the payout float is below this (THB). */
-  OPS_MIN_PAYOUT_FLOAT_THB: z
-    .string()
-    .default('0')
-    .transform((value, ctx) => {
-      const minor = parseDecimal(value, FIAT_DECIMALS.THB);
-      if (minor === null) {
-        ctx.addIssue({ code: 'custom', message: 'OPS_MIN_PAYOUT_FLOAT_THB must be a THB amount, e.g. 5000 or 5000.00' });
-        return z.NEVER;
-      }
-      return minor;
-    }),
+  OPS_MIN_PAYOUT_FLOAT_THB: thbAmount('OPS_MIN_PAYOUT_FLOAT_THB', '0'),
+
+  // Add money (onramp). `simulated`: a local checkout page that mints test USDC on anvil. `moonpay`: MoonPay.
+  ONRAMP_PROVIDER: z.enum(['simulated', 'moonpay']).default('simulated'),
+  /** MoonPay's minimum for THB is 800. */
+  ONRAMP_MIN_THB: thbAmount('ONRAMP_MIN_THB', '800'),
+  ONRAMP_MAX_THB: thbAmount('ONRAMP_MAX_THB', '50000'),
+  /** An order nobody paid for expires after this long. */
+  ONRAMP_ORDER_TTL_MS: z.coerce.number().int().min(60_000).default(60 * 60_000),
+  ONRAMP_MAX_OPEN_ORDERS: z.coerce.number().int().min(1).default(3),
+  ONRAMP_POLL_MS: z.coerce.number().int().min(200).default(5_000),
+  /** How often to ask the partner about an open order. */
+  ONRAMP_RECHECK_MS: z.coerce.number().int().min(0).default(15_000),
+  /** Where the partner delivers, if not the payment chain (MoonPay's sandbox delivers on Ethereum Sepolia). */
+  ONRAMP_RPC_URL: z.url().optional(),
+  ONRAMP_CHAIN_ID: z.coerce.number().int().positive().optional(),
+  ONRAMP_TOKEN_ADDRESS: addressSchema.optional(),
+  ONRAMP_EXPLORER_URL: z.url().optional(),
+  /** Blocks to wait after the delivering transfer; defaults to INDEXER_CONFIRMATIONS. */
+  ONRAMP_CONFIRMATIONS: z.coerce.number().int().min(0).optional(),
+  /** Where the widget sends the user afterwards: an https link back to the app (optional). */
+  ONRAMP_REDIRECT_URL: z.url().optional(),
+
+  // MoonPay
+  MOONPAY_PUBLISHABLE_KEY: z.string().min(1).optional(),
+  MOONPAY_SECRET_KEY: z.string().min(1).optional(),
+  MOONPAY_WEBHOOK_KEY: z.string().min(1).optional(),
+  MOONPAY_WIDGET_URL: z.url().default('https://buy-sandbox.moonpay.com'),
+  MOONPAY_API_URL: z.url().default('https://api.moonpay.com'),
+  MOONPAY_CURRENCY_CODE: z.string().min(1).default('usdc_base'),
+
+  /** How often to look for USDC arriving in users' wallets. */
+  DEPOSITS_POLL_MS: z.coerce.number().int().min(200).default(10_000),
 
   INDEXER_POLL_MS: z.coerce.number().int().min(200).default(4_000),
   INDEXER_CONFIRMATIONS: z.coerce.number().int().min(0).default(2),
@@ -150,6 +177,19 @@ function checkCombinations(env: Env, ctx: z.RefinementCtx): void {
   }
   if (env.NODE_ENV === 'production' && env.PAYOUT_PROVIDER === 'simulated') {
     ctx.addIssue({ code: 'custom', path: ['PAYOUT_PROVIDER'], message: 'Production needs a real payout partner' });
+  }
+  if (env.ONRAMP_PROVIDER === 'moonpay' && (!env.MOONPAY_PUBLISHABLE_KEY || !env.MOONPAY_SECRET_KEY)) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['MOONPAY_SECRET_KEY'],
+      message: 'ONRAMP_PROVIDER=moonpay needs MOONPAY_PUBLISHABLE_KEY and MOONPAY_SECRET_KEY',
+    });
+  }
+  if (env.NODE_ENV === 'production' && env.ONRAMP_PROVIDER === 'simulated') {
+    ctx.addIssue({ code: 'custom', path: ['ONRAMP_PROVIDER'], message: 'Production needs a real onramp partner' });
+  }
+  if (env.ONRAMP_MIN_THB > env.ONRAMP_MAX_THB) {
+    ctx.addIssue({ code: 'custom', path: ['ONRAMP_MIN_THB'], message: 'ONRAMP_MIN_THB is above ONRAMP_MAX_THB' });
   }
 }
 

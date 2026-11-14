@@ -15,7 +15,7 @@ import { buildPromptPayQr } from '../../src/lib/promptpay/build.js';
 import type { Repositories } from '../../src/ports/repositories.js';
 import { testEnv } from '../helpers.js';
 import { ANVIL } from '../support/anvil.js';
-import { createQuote, signAuthorization, signInVerified, submitPayment } from '../support/app.js';
+import { createQuote, signAuthorization, signIn, signInVerified, submitPayment } from '../support/app.js';
 import { createMemoryRepositories } from '../support/memory-repositories.js';
 import { type Anvil, CONTRACTS_DIR, deployLocal, findFoundryBin, startAnvil } from './foundry.js';
 
@@ -196,6 +196,26 @@ describe.skipIf(!anvilBin || !forgeBin)('settlement loop on anvil', () => {
     });
     expect(await reader.getPaymentStatus(quote.quote.quoteId)).toBe('Settled');
     expect(await balance(TREASURY)).toBe(before.treasury + BigInt(quote.quote.tokenAmount));
+  }, 60_000);
+
+  it('adds money: the simulated onramp mints test USDC, proved on-chain and found as a deposit', async () => {
+    const { app, container, balance } = await stack();
+    const session = await signIn(app, generatePrivateKey());
+    const created = await app.inject({ method: 'POST', url: '/onramp/orders', headers: session.auth, payload: { fiatAmountMinor: '80000' } });
+    expect(created.statusCode).toBe(201);
+    const { order, checkoutUrl } = created.json();
+
+    const form = { 'content-type': 'application/x-www-form-urlencoded' };
+    expect((await app.inject({ method: 'POST', url: `${checkoutUrl}/pay`, headers: form, payload: '' })).statusCode).toBe(303);
+
+    // 800 THB at 33.00 THB/USDC, minted to the user's wallet and checked through the real token reader.
+    const done = (await app.inject({ method: 'GET', url: `/onramp/orders/${order.id}`, headers: session.auth })).json();
+    expect(done).toMatchObject({ status: 'COMPLETED', tokenAmount: '24242424' });
+    expect(await balance(session.address)).toBe(24_242_424n);
+
+    await container.workers.deposits.tick();
+    const deposits = (await app.inject({ method: 'GET', url: '/me/deposits', headers: session.auth })).json().deposits;
+    expect(deposits).toEqual([expect.objectContaining({ amount: '24242424', onrampOrderId: order.id })]);
   }, 60_000);
 
   it('rejects a payment the contract would revert, without sending it', async () => {

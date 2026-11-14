@@ -62,7 +62,7 @@ export const errorResponseSchema = z
 /**
  * Error responses, for the OpenAPI spec. They all share the named `Error` schema, so clients get one
  * error type: 400 invalid request, 401 not signed in, 403 not allowed, 404 not found,
- * 422 rejected (see `error`), 503 a dependency (rate feed, chain, config) is unavailable.
+ * 422 rejected (see `error`), 429 too many at once, 503 a dependency (rate feed, chain, config) is unavailable.
  */
 export const errorResponses = {
   400: errorResponseSchema,
@@ -70,6 +70,7 @@ export const errorResponses = {
   403: errorResponseSchema,
   404: errorResponseSchema,
   422: errorResponseSchema,
+  429: errorResponseSchema,
   503: errorResponseSchema,
 } as const;
 

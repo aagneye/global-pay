@@ -11,6 +11,16 @@ const BalanceDto = z.object({
   decimals: z.number().int(),
 }).meta({ id: 'Balance' });
 
+const DepositDto = z.object({
+  id: z.string(),
+  token: out.address,
+  amount: out.uint.meta({ description: 'Token base units' }),
+  from: out.address,
+  transaction: z.object({ hash: out.bytes32, url: z.string() }).meta({ id: 'DepositTransaction' }),
+  onrampOrderId: z.string().optional().meta({ description: 'The Add-money order this completed' }),
+  createdAt: out.dateTime,
+}).meta({ id: 'Deposit' });
+
 export const accountRoutes: FastifyPluginAsyncZod<{ account: AccountService }> = async (app, { account }) => {
   app.get(
     '/me/balance',
@@ -44,5 +54,23 @@ export const accountRoutes: FastifyPluginAsyncZod<{ account: AccountService }> =
       },
     },
     async (request) => ({ payments: await account.payments(requireUserId(request)) }),
+  );
+
+  app.get(
+    '/me/deposits',
+    {
+      schema: {
+        tags: ['account'],
+        summary: 'USDC that arrived in your wallet from outside, newest first (last 50)',
+        operationId: 'listDeposits',
+        description: 'Found on-chain by the deposit watcher, a few blocks after they land. Refunds show on their payment instead.',
+        security: bearerAuth,
+        response: {
+          200: z.object({ deposits: z.array(DepositDto) }).meta({ id: 'DepositList' }),
+          401: errorResponses[401],
+        },
+      },
+    },
+    async (request) => ({ deposits: await account.deposits(requireUserId(request)) }),
   );
 };

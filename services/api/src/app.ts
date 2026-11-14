@@ -14,6 +14,9 @@ import type { Container } from './container.js';
 import { accountRoutes } from './modules/account/routes.js';
 import { authRoutes } from './modules/auth/routes.js';
 import { kycRoutes } from './modules/kyc/routes.js';
+import { onrampRoutes } from './modules/onramp/routes.js';
+import { onrampSimulatorRoutes } from './modules/onramp/simulator-routes.js';
+import { onrampWebhookRoutes } from './modules/onramp/webhook-routes.js';
 import { opsRoutes } from './modules/ops/routes.js';
 import { paymentRoutes } from './modules/payments/routes.js';
 import { payoutWebhookRoutes } from './modules/payouts/webhook-routes.js';
@@ -79,7 +82,8 @@ export async function buildApp({ container, logger = true }: BuildAppOptions): P
         { name: 'kyc', description: 'Identity verification (mock) and limits' },
         { name: 'quotes', description: 'Signed quotes for PromptPay QRs' },
         { name: 'payments', description: 'Submit and track payments (iteration 4)' },
-        { name: 'account', description: 'Balance and history (iteration 4)' },
+        { name: 'account', description: 'Balance, payments and deposits' },
+        { name: 'onramp', description: 'Add money: buy USDC with baht (iteration 8)' },
         { name: 'system' },
       ],
       components: {
@@ -111,6 +115,9 @@ export async function buildApp({ container, logger = true }: BuildAppOptions): P
   await app.register(accountRoutes, { account: services.account });
   await app.register(payoutWebhookRoutes, { tracker: services.payouts });
   await app.register(opsRoutes, { ops: services.ops, token: container.opsToken });
+  await app.register(onrampRoutes, { onramp: services.onramp });
+  await app.register(onrampWebhookRoutes, { onramp: services.onramp });
+  await app.register(onrampSimulatorRoutes, { onramp: services.onramp });
 
   return app;
 }

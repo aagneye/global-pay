@@ -17,11 +17,15 @@ const app = await buildApp({ container });
 
 container.workers.indexer.start(app.log);
 container.workers.payouts.start(app.log);
+container.workers.onramp.start(app.log);
+container.workers.deposits.start(app.log);
 
 async function shutdown(signal: string): Promise<void> {
   app.log.info({ signal }, 'shutting down');
   await container.workers.indexer.stop();
   await container.workers.payouts.stop();
+  await container.workers.onramp.stop();
+  await container.workers.deposits.stop();
   await app.close();
   await container.close();
   process.exit(0);
