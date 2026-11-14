@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Release and profile builds: HTTPS only, trusting only the system's certificate authorities.
+     Debug builds replace this file (src/debug/res/xml) so they can reach the local backend over HTTP.
+     Dart's own HTTP client (Dio) doesn't read this file: AppConfig refuses an http API_BASE_URL in
+     release builds. test/release/android_manifest_test.dart keeps cleartext out of here. -->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false">
+        <trust-anchors>
+            <certificates src="system"/>
+        </trust-anchors>
+    </base-config>
+</network-security-config>
