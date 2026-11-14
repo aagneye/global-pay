@@ -101,6 +101,21 @@ adb shell am start -n com.globalpay.globalpay/.MainActivity --ez enable-impeller
 | `DEV_WALLET_PRIVATE_KEY` | none | Optional, local chains only: the dev wallet's key on first start. Never a real key: dart-defines end up in the app. Ignored by release builds. |
 | `PRIVY_APP_ID`, `PRIVY_CLIENT_ID` | none | Email sign-in with Privy's embedded wallet (see below). Without them, debug builds offer only the dev wallet and release builds say sign-in isn't set up. |
 | `FIREBASE_API_KEY`, `FIREBASE_APP_ID`, `FIREBASE_SENDER_ID`, `FIREBASE_PROJECT_ID` | none | Push for tap to pay, from your Firebase project's Android app settings (no `google-services.json` needed). Without them push is off and the payer's screen polls. |
+| `SETTLEMENT_RAIL` | `evm` | `near` for the NEAR testnet rail. Must match the backend's `SETTLEMENT_RAIL`. |
+| `NEAR_USDC_CONTRACT`, `NEAR_SETTLEMENT_CONTRACT` | none | NEAR rail: the test USDC and settlement contracts. When set, the wallet refuses to sign a payment of any other token or to any other recipient. |
+| `NEAR_SIGN_IN_RECIPIENT` | `globalpay.local` | NEAR rail: the NEP-413 sign-in recipient. Must equal the backend's `SIWE_DOMAIN`. |
+
+### Run on NEAR testnet
+
+Start the backend with `SETTLEMENT_RAIL=near` (`services/api/README.md`), then:
+
+```bash
+flutter run --dart-define=API_BASE_URL=http://10.0.2.2:3001 --dart-define=SETTLEMENT_RAIL=near --dart-define=NEAR_USDC_CONTRACT=<usdc account> --dart-define=NEAR_SETTLEMENT_CONTRACT=<settlement account> --dart-define=NEAR_SIGN_IN_RECIPIENT=globalpay.local
+```
+
+The sign-in screen offers only "Continue with NEAR testnet wallet": the app makes an ed25519 key on the phone (sealed by the fingerprint vault when there is one; release builds require it), and the account is the key's implicit account, so there's no account to create. Sign-in signs a NEP-413 message. Paying signs a NEP-366 delegate action (`ft_transfer_call` on the test USDC), which the backend relays and pays the gas for; before signing, the app checks it against the quote (`lib/domain/signing/near_payment_check.dart`). Tap to pay and Add money are EVM-only and hidden.
+
+`test/fixtures/near_vectors.json` holds near-api-js's bytes for the key, NEP-413 and the delegate action, which the tests reproduce. Regenerate it with `tool/near_vectors.mjs` (instructions at its top).
 
 ### Sign in with email (Privy)
 

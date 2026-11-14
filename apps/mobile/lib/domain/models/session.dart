@@ -18,7 +18,7 @@ class Session {
   final DateTime expiresAt;
   final String userId;
 
-  /// Checksummed 0x address of the user's wallet.
+  /// The user's wallet: a checksummed 0x address, or on the NEAR rail the implicit account id (64 hex).
   final String walletAddress;
 
   /// Usable for at least another minute.
