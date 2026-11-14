@@ -67,6 +67,11 @@ android {
     buildTypes {
         release {
             signingConfig = signingConfigs.getByName(if (hasReleaseKey) "release" else "debug")
+            // R8: shrink, optimise and obfuscate the code, then drop unused resources. The Flutter
+            // plugin turns these on by default; set here so release builds don't depend on that.
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
     }
 }
