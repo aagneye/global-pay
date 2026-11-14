@@ -8,7 +8,7 @@ Stack: Flutter 3.32+, Riverpod 3, go_router, Dio with a client generated from th
 
 Iteration 5 is done. The whole flow works against the local backend:
 
-1. **Sign in:** the dev wallet signs the backend's Sign-In with Ethereum message.
+1. **Sign in:** with an email code (Privy embedded wallet, iteration 11), or the dev wallet in debug builds. The wallet signs the backend's Sign-In with Ethereum message.
 2. **Verify:** mock KYC. The app opens once the user can pay.
 3. **Home:** USDC balance, wallet address, recent payments.
 4. **Scan:** camera, or paste the QR text (handy on emulators). The QR is checked on the device first.
@@ -29,7 +29,7 @@ Iteration 5 is done. The whole flow works against the local backend:
    - **Native code** is in `android/app/src/main/kotlin/.../TapCard.kt` and `KeyVault.kt`.
 10. **Release builds** (iteration 10): HTTPS only, no test keys, no logging, no backups, signed with your own key and shrunk by R8. See [Release build](#release-build).
 
-The embedded wallet (Privy) replaces the dev wallet in iteration 7. See [docs/roadmap.md](../../docs/roadmap.md).
+The embedded wallet (Privy) is the default wallet when its IDs are set; see "Sign in with email (Privy)" below and [docs/roadmap.md](../../docs/roadmap.md).
 
 ## Layout
 
@@ -51,7 +51,8 @@ lib/
     repositories/            auth (Sign-In with Ethereum), KYC, payments, account
     session_store.dart       the signed-in session, kept across restarts
   services/wallet/           WalletService, DevWalletService (local key), LocalKeySigner
-                             (EIP-191 / EIP-712), PrivyWalletService (iteration 7)
+                             (EIP-191 / EIP-712), PrivyWalletService (embedded wallet, behind
+                             PrivyClient), WalletSwitch (the wallet the user signed in with)
   features/                  auth, kyc, home, receive, scan, pay, history
 test/                        unit and widget tests; test/e2e runs against a live backend
 ```
@@ -91,7 +92,33 @@ adb shell am start -n com.globalpay.globalpay/.MainActivity --ez enable-impeller
 | `CHAIN_ID` | `84532` | Base Sepolia; `31337` for anvil |
 | `EXPLORER_URL` | `https://sepolia.basescan.org` | Not used by the app yet; the backend sends transaction links |
 | `DEV_WALLET_PRIVATE_KEY` | none | Optional, local chains only: the dev wallet's key on first start. Never a real key: dart-defines end up in the app. Ignored by release builds. |
+| `PRIVY_APP_ID`, `PRIVY_CLIENT_ID` | none | Email sign-in with Privy's embedded wallet (see below). Without them, debug builds offer only the dev wallet and release builds say sign-in isn't set up. |
 | `FIREBASE_API_KEY`, `FIREBASE_APP_ID`, `FIREBASE_SENDER_ID`, `FIREBASE_PROJECT_ID` | none | Push for tap to pay, from your Firebase project's Android app settings (no `google-services.json` needed). Without them push is off and the payer's screen polls. |
+
+### Sign in with email (Privy)
+
+With `PRIVY_APP_ID` and `PRIVY_CLIENT_ID` set, the sign-in screen asks for an email, then the code Privy emails. That opens the user's embedded wallet (Privy creates it on first sign-in), which then signs the backend's Sign-In with Ethereum message as before. Privy keeps the key; GlobalPay never holds funds ([ADR 0003](../../docs/adr/0003-embedded-non-custodial-wallet.md)). Signing out also signs out of Privy; signing in again with the same email returns the same wallet.
+
+The dev wallet button appears only in debug builds. A release build without the Privy IDs shows "Sign-in isn't set up" instead.
+
+Set up a Privy app once:
+
+1. Create an app at [dashboard.privy.io](https://dashboard.privy.io).
+2. **Login methods:** turn on Email.
+3. **App settings → Basics:** copy the **App ID** (`PRIVY_APP_ID`).
+4. **App settings → Clients:** add an app client for the mobile app, allow the Android application ID `com.globalpay.globalpay`, and copy its **Client ID** (`PRIVY_CLIENT_ID`).
+
+Both IDs are public identifiers, not secrets, but don't commit them: pass them at build time.
+
+```bash
+flutter run --dart-define=PRIVY_APP_ID=<app id> --dart-define=PRIVY_CLIENT_ID=<client id>
+```
+
+Notes:
+- The SDK is `privy_flutter` 0.11.0. Its Android library needs **minSdk 28** (Android 9) and Kotlin 2.1+, so the app's minSdk is 28. Two of its dependencies ship the same `META-INF/versions/9/OSGI-INF/MANIFEST.MF`, which `android/app/build.gradle.kts` excludes.
+- Embedded wallets sign EIP-712 data for any chain (the chain ID is in the typed data), so no network switch is needed for Base Sepolia.
+- Only `lib/services/wallet/privy_sdk_client.dart` imports the SDK. Tests use `test/support/fake_privy.dart` instead.
+- Google sign-in is supported by the SDK on Android but not wired up yet. It needs Google turned on in the dashboard, an allowed app URL scheme, Privy's `PrivyRedirectActivity` with that scheme in `AndroidManifest.xml`, and `privy.oAuth.login(provider: OAuthProvider.google, appUrlScheme: ...)`.
 
 ### Live backend test
 
