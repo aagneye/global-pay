@@ -1,6 +1,7 @@
 import type { Address, Hex } from 'viem';
 import type { FiatAmount } from '../domain/money.js';
 import type { Deposit, OnrampOrder, OnrampStatus } from '../domain/onramp.js';
+import type { Device, P2pStatus, PaymentRequest } from '../domain/p2p.js';
 import type { Payment, PaymentStatus, Payout, PayoutEvent, PayoutStatus } from '../domain/payment.js';
 import type { Quote, SignedQuote } from '../domain/quote.js';
 import type { KycRecord, User } from '../domain/user.js';
@@ -12,6 +13,8 @@ export interface UserRepository {
   findById(id: string): Promise<User | null>;
   /** Every user's wallet, for the deposit watcher. */
   listWallets(): Promise<User[]>;
+  /** Sets the name others see. It's the user's own word, so it's never marked verified here. */
+  updateProfile(id: string, profile: { displayName: string }): Promise<User>;
 }
 
 /** One-time nonces for Sign-In with Ethereum. */
@@ -148,6 +151,8 @@ export interface Repositories {
   opsActions: OpsActionRepository;
   onrampOrders: OnrampOrderRepository;
   deposits: DepositRepository;
+  devices: DeviceRepository;
+  paymentRequests: PaymentRequestRepository;
 }
 
 /** Order fields that change alongside, or without, a status change. `null` clears a field. */
@@ -186,4 +191,47 @@ export interface DepositRepository {
   record(deposit: Omit<Deposit, 'id' | 'createdAt'>): Promise<boolean>;
   /** Newest first, in chain order (block, then log). */
   listByUser(userId: string, limit: number): Promise<Deposit[]>;
+}
+
+export interface DeviceRepository {
+  /**
+   * Registers a phone, or refreshes its push token if this user already has it (un-revoking it).
+   * Throws `device_taken` (409) if another user registered the same key.
+   */
+  register(device: { userId: string; publicKey: string; platform: string; fcmToken?: string }): Promise<Device>;
+  findById(id: string): Promise<Device | null>;
+  /** The user's devices that aren't revoked. */
+  listActive(userId: string): Promise<Device[]>;
+  /** Drops a push token the push service says is no longer valid. */
+  forgetPushToken(fcmToken: string): Promise<void>;
+  /** False if the user has no such device. */
+  revoke(id: string, userId: string, now: Date): Promise<boolean>;
+}
+
+/** Request fields that change alongside a status change. `null` clears a field. */
+export type P2pFields = { txHash?: PaymentRequest['txHash'] | null; failureReason?: string | null };
+
+export interface PaymentRequestRepository {
+  create(
+    request: Pick<
+      PaymentRequest,
+      'receiverId' | 'receiverAddress' | 'recipientName' | 'nameVerified' | 'token' | 'amount' | 'nonce' | 'challenge' | 'validBefore' | 'expiresAt'
+    >,
+  ): Promise<PaymentRequest>;
+  findById(id: string): Promise<PaymentRequest | null>;
+  /**
+   * Sets the sender and uses up the challenge, in one conditional update: only while the request is
+   * CREATED, unexpired and its challenge unused. False otherwise (someone got there first, or too late).
+   */
+  identifySender(id: string, sender: { senderId: string; senderAddress: string; senderDeviceId?: string }, now: Date): Promise<boolean>;
+  /** Moves the request only if it's still in `from`; false if something else moved it first. */
+  transition(id: string, from: P2pStatus, to: P2pStatus, fields?: P2pFields): Promise<boolean>;
+  /** CREATED or SENDER_IDENTIFIED requests this user is receiving. */
+  countOpenByReceiver(receiverId: string): Promise<number>;
+  /** Unexpired requests waiting for this sender's approval, newest first. */
+  listAwaitingSender(senderId: string, now: Date): Promise<PaymentRequest[]>;
+  /** Requests this user received or sent, newest first. */
+  listByUser(userId: string, limit: number): Promise<PaymentRequest[]>;
+  /** Oldest first. */
+  listByStatus(statuses: readonly P2pStatus[], limit: number): Promise<PaymentRequest[]>;
 }

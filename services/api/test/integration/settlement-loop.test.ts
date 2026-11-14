@@ -68,7 +68,7 @@ describe.skipIf(!anvilBin || !forgeBin)('settlement loop on anvil', () => {
     const prisma = createPrismaClient(url, 1);
     databases.push(prisma);
     await prisma.$executeRawUnsafe(
-      'TRUNCATE "Deposit", "OnrampOrder", "OpsAction", "PayoutEvent", "Payout", "Payment", "Quote", "KycRecord", "SiweNonce", "User", "IndexerCursor" CASCADE',
+      'TRUNCATE "PaymentRequest", "Device", "Deposit", "OnrampOrder", "OpsAction", "PayoutEvent", "Payout", "Payment", "Quote", "KycRecord", "SiweNonce", "User", "IndexerCursor" CASCADE',
     );
     return createPrismaRepositories(prisma);
   }

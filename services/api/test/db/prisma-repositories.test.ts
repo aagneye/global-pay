@@ -31,7 +31,7 @@ describe.skipIf(!url)('Prisma repositories (Postgres)', () => {
 
   beforeEach(async () => {
     await prisma.$executeRawUnsafe(
-      'TRUNCATE "Deposit", "OnrampOrder", "OpsAction", "PayoutEvent", "Payout", "Payment", "Quote", "KycRecord", "SiweNonce", "User", "IndexerCursor" CASCADE',
+      'TRUNCATE "PaymentRequest", "Device", "Deposit", "OnrampOrder", "OpsAction", "PayoutEvent", "Payout", "Payment", "Quote", "KycRecord", "SiweNonce", "User", "IndexerCursor" CASCADE',
     );
   });
 
@@ -349,6 +349,67 @@ describe.skipIf(!url)('Prisma repositories (Postgres)', () => {
     const listed = await repos.deposits.listByUser(user.id, 10);
     expect(listed).toHaveLength(2);
     expect(listed[1]).toMatchObject({ token: ANVIL.usdc.toLowerCase(), from: ANVIL.accounts.treasury.address.toLowerCase(), amount: 5_000_000n, blockNumber: 123n });
+  });
+
+  it('registers devices: one owner per key, push tokens moved and forgotten, revocation', async () => {
+    const alice = await repos.users.upsertByWallet(PAYER);
+    const bob = await repos.users.upsertByWallet(ANVIL.accounts.treasury.address);
+    expect(await repos.users.updateProfile(alice.id, { displayName: 'Alice Shop' })).toMatchObject({ displayName: 'Alice Shop', nameVerified: false });
+
+    const phone = await repos.devices.register({ userId: alice.id, publicKey: 'key-a', platform: 'android', fcmToken: 'token-1' });
+    await expect(repos.devices.register({ userId: bob.id, publicKey: 'key-a', platform: 'android' })).rejects.toMatchObject({ code: 'device_taken' });
+    // The same install registers a new key: the push token moves to it.
+    const second = await repos.devices.register({ userId: alice.id, publicKey: 'key-b', platform: 'android', fcmToken: 'token-1' });
+    expect((await repos.devices.findById(phone.id))?.fcmToken).toBeUndefined();
+    expect((await repos.devices.findById(second.id))?.fcmToken).toBe('token-1');
+
+    await repos.devices.forgetPushToken('token-1');
+    expect((await repos.devices.findById(second.id))?.fcmToken).toBeUndefined();
+    await expect(repos.devices.revoke(second.id, bob.id, new Date())).resolves.toBe(false);
+    await expect(repos.devices.revoke(second.id, alice.id, new Date())).resolves.toBe(true);
+    expect((await repos.devices.listActive(alice.id)).map((d) => d.id)).toEqual([phone.id]);
+  });
+
+  it('uses a request challenge once, and only before it expires', async () => {
+    const receiver = await repos.users.upsertByWallet(PAYER);
+    const sender = await repos.users.upsertByWallet(ANVIL.accounts.treasury.address);
+    const now = new Date();
+    const make = (n: number, expiresAt: Date) =>
+      repos.paymentRequests.create({
+        receiverId: receiver.id,
+        receiverAddress: PAYER,
+        recipientName: 'Alice Shop',
+        nameVerified: false,
+        token: ANVIL.usdc,
+        amount: 5_000_000n,
+        nonce: `0x${String(n).repeat(64)}`,
+        challenge: `0x${String(n + 1).repeat(64)}`,
+        validBefore: 1_900_000_000n,
+        expiresAt,
+      });
+    const live = await make(1, new Date(now.getTime() + 60_000));
+    const stale = await make(3, new Date(now.getTime() - 1_000));
+    expect(live).toMatchObject({ status: 'CREATED', receiverAddress: PAYER.toLowerCase(), amount: 5_000_000n, validBefore: 1_900_000_000n });
+    await expect(repos.paymentRequests.countOpenByReceiver(receiver.id)).resolves.toBe(2);
+
+    const who = { senderId: sender.id, senderAddress: ANVIL.accounts.treasury.address, senderDeviceId: 'device-1' };
+    await expect(repos.paymentRequests.identifySender(stale.id, who, now)).resolves.toBe(false);
+    await expect(repos.paymentRequests.identifySender(live.id, who, now)).resolves.toBe(true);
+    await expect(repos.paymentRequests.identifySender(live.id, who, now)).resolves.toBe(false);
+    expect(await repos.paymentRequests.findById(live.id)).toMatchObject({
+      status: 'SENDER_IDENTIFIED',
+      senderId: sender.id,
+      senderAddress: ANVIL.accounts.treasury.address.toLowerCase(),
+      senderDeviceId: 'device-1',
+    });
+    expect((await repos.paymentRequests.listAwaitingSender(sender.id, now)).map((r) => r.id)).toEqual([live.id]);
+
+    const txHash = `0x${'ab'.repeat(32)}` as const;
+    await expect(repos.paymentRequests.transition(live.id, 'SENDER_IDENTIFIED', 'SUBMITTED', { txHash })).resolves.toBe(true);
+    await expect(repos.paymentRequests.transition(live.id, 'SUBMITTED', 'EXPIRED')).rejects.toThrow(/cannot move/);
+    expect((await repos.paymentRequests.findById(live.id))?.txHash).toBe(txHash);
+    expect((await repos.paymentRequests.listByUser(sender.id, 10)).map((r) => r.id)).toEqual([live.id]);
+    expect((await repos.paymentRequests.listByStatus(['CREATED'], 10)).map((r) => r.id)).toEqual([stale.id]);
   });
 
   it('saves the indexer cursor', async () => {

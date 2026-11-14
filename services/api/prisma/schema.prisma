@@ -11,16 +11,23 @@ datasource db {
 }
 
 model User {
-  id            String        @id @default(cuid())
+  id               String           @id @default(cuid())
   /// Lowercase 0x wallet address
-  walletAddress String        @unique
-  createdAt     DateTime      @default(now())
-  updatedAt     DateTime      @updatedAt
-  kyc           KycRecord?
-  quotes        Quote[]
-  payments      Payment[]
-  onrampOrders  OnrampOrder[]
-  deposits      Deposit[]
+  walletAddress    String           @unique
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+  kyc              KycRecord?
+  quotes           Quote[]
+  payments         Payment[]
+  onrampOrders     OnrampOrder[]
+  deposits         Deposit[]
+  /// The name others see when paying this user
+  displayName      String?
+  /// True only when the name comes from identity verification
+  nameVerified     Boolean          @default(false)
+  devices          Device[]
+  requestsReceived PaymentRequest[] @relation("receiver")
+  requestsSent     PaymentRequest[] @relation("sender")
 }
 
 enum KycStatus {
@@ -241,4 +248,68 @@ model Deposit {
 
   @@unique([chainId, txHash, logIndex])
   @@index([userId, createdAt])
+}
+
+/// A phone that can be tapped to pay (ADR 0010)
+model Device {
+  id        String    @id @default(cuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id])
+  /// SPKI DER, base64: the P-256 key in the phone's hardware keystore
+  publicKey String    @unique
+  fcmToken  String?
+  platform  String
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  revokedAt DateTime?
+
+  @@index([userId])
+  @@index([fcmToken])
+}
+
+/// See src/domain/p2p.ts
+enum PaymentRequestStatus {
+  CREATED
+  SENDER_IDENTIFIED
+  SUBMITTED
+  COMPLETED
+  FAILED
+  EXPIRED
+  DECLINED
+  CANCELLED
+}
+
+/// A person-to-person payment request: tap to pay, or scan the receiver's QR
+model PaymentRequest {
+  id              String               @id @default(cuid())
+  receiverId      String
+  receiver        User                 @relation("receiver", fields: [receiverId], references: [id])
+  /// Lowercase
+  receiverAddress String
+  /// Copied from the receiver's profile when the request is made
+  recipientName   String
+  nameVerified    Boolean
+  token           String
+  amount          BigInt
+  /// EIP-3009 nonce (bytes32, random)
+  nonce           String               @unique
+  /// One-time challenge for the tap or the QR
+  challenge       String               @unique
+  challengeUsedAt DateTime?
+  senderId        String?
+  sender          User?                @relation("sender", fields: [senderId], references: [id])
+  senderAddress   String?
+  senderDeviceId  String?
+  /// EIP-3009 validBefore, unix seconds
+  validBefore     BigInt
+  expiresAt       DateTime
+  status          PaymentRequestStatus @default(CREATED)
+  txHash          String?              @unique
+  failureReason   String?
+  createdAt       DateTime             @default(now())
+  updatedAt       DateTime             @updatedAt
+
+  @@index([receiverId, createdAt])
+  @@index([senderId, status])
+  @@index([status])
 }

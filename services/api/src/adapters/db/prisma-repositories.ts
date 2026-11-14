@@ -22,6 +22,7 @@ import {
 } from '../../generated/prisma/client.js';
 import { parsePromptPayQr } from '../../lib/promptpay/parse.js';
 import { PrismaDepositRepository, PrismaOnrampOrderRepository } from './prisma-onramp-repositories.js';
+import { PrismaDeviceRepository, PrismaPaymentRequestRepository } from './prisma-p2p-repositories.js';
 import type {
   CursorRepository,
   KycRepository,
@@ -60,13 +61,20 @@ export function createPrismaRepositories(prisma: PrismaClient): Repositories {
     opsActions: new PrismaOpsActionRepository(prisma),
     onrampOrders: new PrismaOnrampOrderRepository(prisma),
     deposits: new PrismaDepositRepository(prisma),
+    devices: new PrismaDeviceRepository(prisma),
+    paymentRequests: new PrismaPaymentRequestRepository(prisma),
   };
 }
 
 const lower = <T extends string>(value: T) => value.toLowerCase() as T;
 
-function toUser(row: { id: string; walletAddress: string }): User {
-  return { id: row.id, walletAddress: row.walletAddress as Address };
+function toUser(row: { id: string; walletAddress: string; displayName: string | null; nameVerified: boolean }): User {
+  return {
+    id: row.id,
+    walletAddress: row.walletAddress as Address,
+    ...(row.displayName === null ? {} : { displayName: row.displayName }),
+    nameVerified: row.nameVerified,
+  };
 }
 
 export class PrismaUserRepository implements UserRepository {
@@ -85,6 +93,10 @@ export class PrismaUserRepository implements UserRepository {
   async findById(id: string): Promise<User | null> {
     const row = await this.prisma.user.findUnique({ where: { id } });
     return row && toUser(row);
+  }
+
+  async updateProfile(id: string, profile: { displayName: string }): Promise<User> {
+    return toUser(await this.prisma.user.update({ where: { id }, data: { displayName: profile.displayName, nameVerified: false } }));
   }
 
   async listWallets(): Promise<User[]> {

@@ -11,6 +11,8 @@ import {
 import { type Deposit, type OnrampOrder, assertOnrampTransition } from '../../src/domain/onramp.js';
 import type { KycRecord, User } from '../../src/domain/user.js';
 import { alreadyCounted } from '../../src/adapters/db/prisma-onramp-repositories.js';
+import { deviceTaken } from '../../src/adapters/db/prisma-p2p-repositories.js';
+import { type Device, type PaymentRequest, assertP2pTransition } from '../../src/domain/p2p.js';
 import { buildPromptPayQr } from '../../src/lib/promptpay/build.js';
 import { parsePromptPayQr } from '../../src/lib/promptpay/parse.js';
 import type {
@@ -37,6 +39,10 @@ export function createMemoryRepositories() {
   const onrampOrders = new Map<string, OnrampOrder>();
   const deposits: Deposit[] = [];
   let nextOrderId = 1;
+  const devices = new Map<string, Device>();
+  const paymentRequests = new Map<string, PaymentRequest>();
+  let nextDeviceId = 1;
+  let nextRequestId = 1;
   let nextUserId = 1;
   let nextPaymentId = 1;
   let clock = 0;
@@ -66,6 +72,13 @@ export function createMemoryRepositories() {
       },
       async listWallets() {
         return [...users.values()];
+      },
+      async updateProfile(id, profile) {
+        const user = users.get(id);
+        if (!user) throw new Error(`no user ${id}`);
+        user.displayName = profile.displayName;
+        user.nameVerified = false;
+        return { ...user };
       },
     },
     nonces: {
@@ -324,6 +337,116 @@ export function createMemoryRepositories() {
           .map((d) => ({ ...d }));
       },
     },
+    devices: {
+      async register(device) {
+        const existing = [...devices.values()].find((d) => d.publicKey === device.publicKey);
+        if (existing && existing.userId !== device.userId) throw deviceTaken();
+        if (device.fcmToken) {
+          for (const d of devices.values()) if (d.fcmToken === device.fcmToken && d.publicKey !== device.publicKey) delete d.fcmToken;
+        }
+        if (existing) {
+          existing.platform = device.platform;
+          if (device.fcmToken) existing.fcmToken = device.fcmToken;
+          else delete existing.fcmToken;
+          delete existing.revokedAt;
+          return { ...existing };
+        }
+        const created: Device = {
+          id: `device_${nextDeviceId++}`,
+          userId: device.userId,
+          publicKey: device.publicKey,
+          platform: device.platform,
+          ...(device.fcmToken ? { fcmToken: device.fcmToken } : {}),
+          createdAt: now(),
+        };
+        devices.set(created.id, created);
+        return { ...created };
+      },
+      async findById(id) {
+        const device = devices.get(id);
+        return device ? { ...device } : null;
+      },
+      async listActive(userId) {
+        return [...devices.values()].filter((d) => d.userId === userId && !d.revokedAt).map((d) => ({ ...d }));
+      },
+      async forgetPushToken(fcmToken) {
+        for (const d of devices.values()) if (d.fcmToken === fcmToken) delete d.fcmToken;
+      },
+      async revoke(id, userId, at) {
+        const device = devices.get(id);
+        if (!device || device.userId !== userId || device.revokedAt) return false;
+        device.revokedAt = at;
+        delete device.fcmToken;
+        return true;
+      },
+    },
+    paymentRequests: {
+      async create(request) {
+        const at = now();
+        const created: PaymentRequest = {
+          ...request,
+          receiverAddress: request.receiverAddress.toLowerCase() as Address,
+          token: request.token.toLowerCase() as Address,
+          nonce: request.nonce.toLowerCase() as Hex,
+          challenge: request.challenge.toLowerCase() as Hex,
+          id: `request_${nextRequestId++}`,
+          status: 'CREATED',
+          createdAt: at,
+          updatedAt: at,
+        };
+        paymentRequests.set(created.id, created);
+        return { ...created };
+      },
+      async findById(id) {
+        const request = paymentRequests.get(id);
+        return request ? { ...request } : null;
+      },
+      async identifySender(id, sender, at) {
+        const request = paymentRequests.get(id);
+        if (!request || request.status !== 'CREATED' || request.challengeUsedAt || request.expiresAt <= at) return false;
+        Object.assign(request, {
+          status: 'SENDER_IDENTIFIED',
+          challengeUsedAt: at,
+          senderId: sender.senderId,
+          senderAddress: sender.senderAddress.toLowerCase(),
+          ...(sender.senderDeviceId ? { senderDeviceId: sender.senderDeviceId } : {}),
+          updatedAt: now(),
+        });
+        return true;
+      },
+      async transition(id, from, to, fields = {}) {
+        assertP2pTransition(from, to);
+        const request = paymentRequests.get(id);
+        if (!request || request.status !== from) return false;
+        applyFields(request, { ...fields, ...(fields.txHash ? { txHash: fields.txHash.toLowerCase() } : {}) });
+        request.status = to;
+        request.updatedAt = now();
+        return true;
+      },
+      async countOpenByReceiver(receiverId) {
+        return [...paymentRequests.values()].filter((r) => r.receiverId === receiverId && (r.status === 'CREATED' || r.status === 'SENDER_IDENTIFIED')).length;
+      },
+      async listAwaitingSender(senderId, at) {
+        return [...paymentRequests.values()]
+          .filter((r) => r.senderId === senderId && r.status === 'SENDER_IDENTIFIED' && r.expiresAt > at)
+          .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
+          .map((r) => ({ ...r }));
+      },
+      async listByUser(userId, limit) {
+        return [...paymentRequests.values()]
+          .filter((r) => r.receiverId === userId || r.senderId === userId)
+          .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
+          .slice(0, limit)
+          .map((r) => ({ ...r }));
+      },
+      async listByStatus(statuses, limit) {
+        return [...paymentRequests.values()]
+          .filter((r) => statuses.includes(r.status))
+          .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime())
+          .slice(0, limit)
+          .map((r) => ({ ...r }));
+      },
+    },
     cursors: {
       async get(id) {
         return cursors.get(id) ?? null;
@@ -337,7 +460,7 @@ export function createMemoryRepositories() {
   return {
     ...repositories,
     /** Test-only views of the stored data. */
-    state: { users, nonces, kyc, quotes, payments, payouts, cursors, payoutEvents, opsActions, onrampOrders, deposits },
+    state: { users, nonces, kyc, quotes, payments, payouts, cursors, payoutEvents, opsActions, onrampOrders, deposits, devices, paymentRequests },
   };
 }
 

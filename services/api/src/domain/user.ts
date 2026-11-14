@@ -4,6 +4,10 @@ export interface User {
   id: string;
   /** Lowercase 0x address of the user's wallet. */
   walletAddress: Address;
+  /** The name others see when paying this user. */
+  displayName?: string;
+  /** True only when the name comes from identity verification, not from the user. */
+  nameVerified?: boolean;
 }
 
 export type KycTier = 0 | 1 | 2;
