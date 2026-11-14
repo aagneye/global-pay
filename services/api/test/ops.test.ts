@@ -1,3 +1,4 @@
+import type { Hex } from 'viem';
 import { afterEach, describe, expect, it } from 'vitest';
 import { SimulatedPromptPayProvider } from '../src/adapters/payouts/simulated-promptpay-provider.js';
 import type { Adapters } from '../src/container.js';
@@ -215,6 +216,74 @@ describe('operator console', () => {
     const items = (await ops('GET', '/exceptions')).json().items;
     expect(items).toEqual([expect.objectContaining({ kind: 'payment_unconfirmed', escalated: true, paymentId: id, paymentStatus: 'SUBMITTED' })]);
     expect(items[0].lastError).toMatch(/reverted.*shows the quote as Paid/);
+  });
+
+  describe('stuck transactions', () => {
+    const minutesAgo = (n: number) => new Date(Date.now() - n * 60_000);
+
+    it('lists a settlement transaction with no receipt after OPS_STUCK_TX_AFTER_MS', async () => {
+      const { paid, ops, chain, container, repos } = await setup({ OPS_STUCK_TX_AFTER_MS: '600000' });
+      const id = await paid(1); // payout sent; the next check finds it SUCCEEDED
+      chain.autoMine = false;
+      await container.workers.payouts.tick(); // markSettled sent, never mined
+      const hash = repos.state.payments.get(id)?.settleTxHash;
+      expect(hash).toMatch(/^0x/);
+
+      const kinds = async () => (await ops('GET', '/exceptions')).json().items.map((i: { kind: string }) => i.kind);
+      expect(await kinds()).not.toContain('transaction_stuck');
+
+      repos.state.payments.get(id)!.updatedAt = minutesAgo(11);
+      const items = (await ops('GET', '/exceptions')).json().items;
+      expect(items).toEqual([expect.objectContaining({ kind: 'transaction_stuck', escalated: true, paymentId: id, txHash: hash })]);
+      expect(items[0].lastError).toMatch(/markSettled transaction .* has no receipt after 11 minutes/);
+    });
+
+    it('lists a payout outcome nobody has settled or refunded (the worker is not running)', async () => {
+      const { paid, ops, by, repos } = await setup({ PAYOUT_UNKNOWN_RATE: '1' });
+      const id = await paid();
+      await ops('POST', `/payouts/${id}/mark-paid`, { ...by, reference: 'KBANK-1' });
+      repos.state.payments.get(id)!.updatedAt = minutesAgo(11);
+      repos.state.payouts.get(id)!.updatedAt = minutesAgo(11);
+
+      const items = (await ops('GET', '/exceptions')).json().items;
+      expect(items).toEqual([expect.objectContaining({ kind: 'resolution_stuck', paymentId: id, payoutStatus: 'SUCCEEDED' })]);
+      expect(items[0].lastError).toMatch(/SUCCEEDED, but no markSettled was sent/);
+    });
+
+    it('lists a tap-to-pay transfer with no receipt', async () => {
+      const { ops, repos, chain } = await setup();
+      const receiver = await repos.users.upsertByWallet(ANVIL.accounts.treasury.address);
+      const request = await repos.paymentRequests.create({
+        receiverId: receiver.id,
+        receiverAddress: ANVIL.accounts.treasury.address,
+        recipientName: 'Somchai Coffee',
+        nameVerified: false,
+        token: ANVIL.usdc,
+        amount: 5_000_000n,
+        nonce: `0x${'01'.repeat(32)}`,
+        challenge: `0x${'02'.repeat(32)}`,
+        validBefore: 2_000_000_000n,
+        expiresAt: minutesAgo(-2),
+      });
+      const stored = repos.state.paymentRequests.get(request.id)!;
+      const hash: Hex = `0x${'ab'.repeat(32)}`;
+      Object.assign(stored, { status: 'SUBMITTED', txHash: hash, updatedAt: minutesAgo(11) });
+      const mined = { ...stored, id: 'request_mined', txHash: `0x${'cd'.repeat(32)}` as Hex };
+      repos.state.paymentRequests.set(mined.id, mined);
+      chain.receipts.set(mined.txHash, { status: 'success', blockNumber: 1n });
+
+      const items = (await ops('GET', '/exceptions')).json().items;
+      expect(items).toEqual([
+        expect.objectContaining({
+          kind: 'p2p_transaction_stuck',
+          escalated: true,
+          paymentId: request.id,
+          paymentStatus: 'SUBMITTED',
+          amount: { currency: 'USDC', minor: '5000000' },
+          txHash: hash,
+        }),
+      ]);
+    });
   });
 
   it('lists a payment stuck in PAID, and a settlement that keeps failing', async () => {

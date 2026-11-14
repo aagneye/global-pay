@@ -84,6 +84,11 @@ export interface PaymentRepository {
    * Oldest first (then by ID), after `after` if given.
    */
   listPayoutDue(now: Date, limit: number, after?: PageCursor): Promise<PaymentWithQuote[]>;
+  /**
+   * PAYOUT_PENDING payments whose payout is decided (SUCCEEDED or FAILED), so they wait only for
+   * markSettled or refund, and that haven't changed since `before`. Oldest first.
+   */
+  listAwaitingResolution(before: Date, limit: number): Promise<PaymentWithQuote[]>;
   /** Payments whose on-chain event didn't match their quote (`eventMismatch` set), oldest first. */
   listEventMismatches(limit: number): Promise<PaymentWithQuote[]>;
   update(id: string, fields: PaymentFields): Promise<void>;

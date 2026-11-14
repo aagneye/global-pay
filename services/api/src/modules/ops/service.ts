@@ -1,11 +1,13 @@
-import type { Address } from 'viem';
+import type { Address, Hex } from 'viem';
 import type { FiatAmount } from '../../domain/money.js';
+import type { P2pStatus } from '../../domain/p2p.js';
 import type { Payment, Payout, PayoutEvent, PayoutStatus } from '../../domain/payment.js';
 import type { PayoutProvider } from '../../ports/payout-provider.js';
 import type {
   OpsAction,
   OpsActionRepository,
   PaymentRepository,
+  PaymentRequestRepository,
   PaymentWithQuote,
   PayoutRepository,
 } from '../../ports/repositories.js';
@@ -16,6 +18,8 @@ import type { PayoutTracker } from '../payouts/payout-tracker.js';
 export interface OpsServiceDeps {
   payments: PaymentRepository;
   payouts: PayoutRepository;
+  /** Tap-to-pay requests, for transfers stuck without a receipt. */
+  requests: PaymentRequestRepository;
   actions: OpsActionRepository;
   tracker: PayoutTracker;
   payoutRail: Pick<PayoutProvider, 'name' | 'getBalance'>;
@@ -43,22 +47,31 @@ export type ExceptionKind =
   /** The on-chain payment differs from its quote (amount, payer, token or merchant): never paid out. */
   | 'event_mismatch'
   /** Still SUBMITTED long after its quote expired: no receipt, or paid on-chain without its event seen. */
-  | 'payment_unconfirmed';
+  | 'payment_unconfirmed'
+  /** A markSettled or refund transaction with no receipt after OPS_STUCK_TX_AFTER_MS. */
+  | 'transaction_stuck'
+  /** A tap-to-pay transfer with no receipt after OPS_STUCK_TX_AFTER_MS. `paymentId` is the request's ID. */
+  | 'p2p_transaction_stuck';
 
 export interface OpsException {
   kind: ExceptionKind;
   /** Needs a person now, not just attention. */
   escalated: boolean;
+  /** The payment, or for p2p_ kinds the tap-to-pay request. */
   paymentId: string;
-  paymentStatus: Payment['status'];
+  paymentStatus: Payment['status'] | P2pStatus;
   payoutStatus?: PayoutStatus;
-  amount: FiatAmount;
+  /** Baht for payments; USDC base units for p2p_ kinds. */
+  amount: FiatAmount | { currency: 'USDC'; minor: bigint };
+  /** The merchant, or for p2p_ kinds the receiver's address. */
   merchant: string;
   /** When it started: the payment's last change, or when the payout became UNKNOWN. */
   since: Date;
   lastError?: string;
   providerRef?: string;
   providerReference?: string;
+  /** The transaction with no receipt, for the stuck-transaction kinds. */
+  txHash?: Hex;
 }
 
 export interface OpsHealth {
@@ -124,7 +137,14 @@ export class OpsService {
       });
     }
 
+    // Settle or refund transactions without a receipt, and decided payouts nobody resolved, are listed
+    // once, with that reason, rather than as the payout's last error.
+    const stuck = await this.stuckResolutions(now, stuckTxMs);
+    items.push(...stuck);
+    const listed = new Set(stuck.map((item) => item.paymentId));
+
     for (const payout of await payouts.listNeedingAttention(LIMIT)) {
+      if (listed.has(payout.paymentId)) continue;
       const item = await payments.findById(payout.paymentId);
       if (!item) continue;
       const kind = classify(payout, item.payment);
@@ -136,6 +156,7 @@ export class OpsService {
       items.push({ ...describe(item, payout), kind, escalated, since });
     }
 
+    items.push(...(await this.stuckTransfers(now, stuckTxMs)));
     return items.sort((a, b) => Number(b.escalated) - Number(a.escalated) || a.since.getTime() - b.since.getTime());
   }
 
@@ -273,6 +294,73 @@ export class OpsService {
     return payout;
   }
 
+  /**
+   * Payouts decided at least `stuckTxMs` ago whose payment is still PAYOUT_PENDING: the markSettled or
+   * refund transaction has no receipt, or none was sent and nothing has failed (the worker isn't running).
+   * Mined transactions are left to the worker, which records them or retries a revert (with its error).
+   */
+  private async stuckResolutions(now: number, stuckTxMs: number): Promise<OpsException[]> {
+    const { payments, gateway } = this.deps;
+    const items: OpsException[] = [];
+    for (const item of await payments.listAwaitingResolution(new Date(now - stuckTxMs), LIMIT)) {
+      const payout = item.payout!;
+      const action = payout.status === 'SUCCEEDED' ? 'markSettled' : 'refund';
+      const hash = payout.status === 'SUCCEEDED' ? item.payment.settleTxHash : item.payment.refundTxHash;
+      if (hash) {
+        const receipt = await gateway.getReceipt(hash).catch(() => undefined);
+        if (receipt) continue;
+        const age = minutes(now - item.payment.updatedAt.getTime());
+        items.push({
+          ...describe(item, payout),
+          kind: 'transaction_stuck',
+          escalated: true,
+          since: item.payment.updatedAt,
+          txHash: hash,
+          lastError:
+            receipt === null
+              ? `${action} transaction ${hash} has no receipt after ${age} minutes`
+              : `${action} transaction ${hash} is ${age} minutes old; couldn't check the chain for its receipt`,
+        });
+      } else if (!payout.lastError && now - payout.updatedAt.getTime() >= stuckTxMs) {
+        items.push({
+          ...describe(item, payout),
+          kind: 'resolution_stuck',
+          escalated: true,
+          since: payout.updatedAt,
+          lastError: `Payout ${payout.status}, but no ${action} was sent after ${minutes(now - payout.updatedAt.getTime())} minutes; is the payout worker running?`,
+        });
+      }
+    }
+    return items;
+  }
+
+  /** Tap-to-pay transfers sent at least `stuckTxMs` ago without a receipt. */
+  private async stuckTransfers(now: number, stuckTxMs: number): Promise<OpsException[]> {
+    const { requests, gateway } = this.deps;
+    const items: OpsException[] = [];
+    for (const request of await requests.listByStatus(['APPROVING', 'SUBMITTED'], LIMIT)) {
+      if (!request.txHash || now - request.updatedAt.getTime() < stuckTxMs) continue;
+      const receipt = await gateway.getReceipt(request.txHash).catch(() => undefined);
+      if (receipt) continue;
+      const age = minutes(now - request.updatedAt.getTime());
+      items.push({
+        kind: 'p2p_transaction_stuck',
+        escalated: true,
+        paymentId: request.id,
+        paymentStatus: request.status,
+        amount: { currency: 'USDC', minor: request.amount },
+        merchant: request.receiverAddress,
+        since: request.updatedAt,
+        txHash: request.txHash,
+        lastError:
+          receipt === null
+            ? `Transfer ${request.txHash} has no receipt after ${age} minutes`
+            : `Transfer ${request.txHash} is ${age} minutes old; couldn't check the chain for its receipt`,
+      });
+    }
+    return items;
+  }
+
   /** What the chain says about a payment that is still SUBMITTED. */
   private async whyUnconfirmed(payment: Payment): Promise<string> {
     const { gateway } = this.deps;
@@ -335,6 +423,8 @@ function describe({ payment, quote }: PaymentWithQuote, payout?: Payout) {
       : {}),
   };
 }
+
+const minutes = (ms: number) => Math.floor(ms / 60_000);
 
 function formatMinor(minor: bigint): string {
   const sign = minor < 0n ? '-' : '';

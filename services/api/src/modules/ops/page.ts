@@ -118,6 +118,8 @@ export const OPS_SCRIPT = `
   }
 
   const baht = (amount) => (Number(amount.minor) / 100).toFixed(2) + ' ' + amount.currency;
+  // Tap-to-pay rows carry USDC base units (6 decimals).
+  const money = (amount) => (amount.currency === 'USDC' ? (Number(amount.minor) / 1e6).toFixed(2) + ' USDC' : baht(amount));
   const when = (iso) => new Date(iso).toLocaleString();
 
   function renderHealth(health) {
@@ -176,10 +178,12 @@ export const OPS_SCRIPT = `
       cell(row, item.escalated ? '!' : '', item.escalated ? 'escalated' : '');
       cell(row, item.kind.replaceAll('_', ' '));
       const id = cell(row, item.paymentId, 'mono');
-      id.title = 'Show detail';
-      id.style.cursor = 'pointer';
-      id.addEventListener('click', () => detail(item.paymentId));
-      cell(row, baht(item.amount));
+      if (!item.kind.startsWith('p2p_')) {
+        id.title = 'Show detail';
+        id.style.cursor = 'pointer';
+        id.addEventListener('click', () => detail(item.paymentId));
+      }
+      cell(row, money(item.amount));
       cell(row, item.merchant, 'mono');
       cell(row, [item.paymentStatus, item.payoutStatus, item.providerReference].filter(Boolean).join(' / '));
       cell(row, when(item.since));

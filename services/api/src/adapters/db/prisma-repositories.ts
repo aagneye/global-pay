@@ -296,6 +296,16 @@ export class PrismaPaymentRepository implements PaymentRepository {
     return rows.map(withQuote);
   }
 
+  async listAwaitingResolution(before: Date, limit: number): Promise<PaymentWithQuote[]> {
+    const rows = await this.prisma.payment.findMany({
+      where: { status: 'PAYOUT_PENDING', updatedAt: { lte: before }, payout: { is: { status: { in: ['SUCCEEDED', 'FAILED'] } } } },
+      orderBy: { createdAt: 'asc' },
+      take: limit,
+      include: { quote: true, payout: true },
+    });
+    return rows.map(withQuote);
+  }
+
   async listEventMismatches(limit: number): Promise<PaymentWithQuote[]> {
     const rows = await this.prisma.payment.findMany({
       where: { eventMismatch: { not: null } },

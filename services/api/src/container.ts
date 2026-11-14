@@ -227,6 +227,8 @@ export function buildContainer(env: Env, overrides: Partial<Adapters> = {}): Con
       ops: new OpsService({
         payments: repositories.payments,
         payouts: repositories.payouts,
+        requests: repositories.paymentRequests,
+        stuckTxMs: env.OPS_STUCK_TX_AFTER_MS,
         actions: repositories.opsActions,
         tracker: payoutTracker,
         payoutRail: payoutProvider,

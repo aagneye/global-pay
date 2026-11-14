@@ -154,6 +154,8 @@ export const envSchema = z.object({
   OPS_ESCALATE_AFTER_MS: z.coerce.number().int().min(0).default(30 * 60_000),
   /** An operator can approve a refund only after the payout has been UNKNOWN this long. */
   OPS_REFUND_COOLOFF_MS: z.coerce.number().int().min(0).default(60 * 60_000),
+  /** A transaction (settle, refund, tap-to-pay transfer) without a receipt after this long is shown as stuck. */
+  OPS_STUCK_TX_AFTER_MS: z.coerce.number().int().min(0).default(10 * 60_000),
   /** Alert when the relayer has less than this much ETH. */
   OPS_MIN_RELAYER_ETH: z.string().regex(/^\d+(\.\d+)?$/).default('0.005'),
   /** Alert when the payout float is below this (THB). */

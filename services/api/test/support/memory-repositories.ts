@@ -171,6 +171,14 @@ export function createMemoryRepositories() {
           .slice(0, limit)
           .map(withQuote);
       },
+      async listAwaitingResolution(before, limit) {
+        const decided = (payout: Payout | undefined) => payout?.status === 'SUCCEEDED' || payout?.status === 'FAILED';
+        return [...payments.values()]
+          .filter((p) => p.status === 'PAYOUT_PENDING' && p.updatedAt <= before && decided(payouts.get(p.id)))
+          .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime())
+          .slice(0, limit)
+          .map(withQuote);
+      },
       async listEventMismatches(limit) {
         return [...payments.values()]
           .filter((p) => p.eventMismatch !== undefined)

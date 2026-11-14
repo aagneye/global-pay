@@ -274,6 +274,10 @@ describe.skipIf(!url)('Prisma repositories (Postgres)', () => {
     const last = first.at(-1)!.payment;
     const rest = await repos.payments.listPayoutDue(now, 2, { createdAt: last.createdAt, id: last.id });
     expect(rest.map((p) => p.payment.id)).toEqual([ids[3]]);
+
+    // Only the decided payout waits for markSettled; unchanged since a time in the future, not since one long ago.
+    expect((await repos.payments.listAwaitingResolution(new Date(Date.now() + 60_000), 10)).map((p) => p.payment.id)).toEqual([ids[3]]);
+    await expect(repos.payments.listAwaitingResolution(new Date(Date.now() - 3_600_000), 10)).resolves.toEqual([]);
   });
 
   it('creates one payout per payment, moves it only from the expected status, and keeps an audit trail', async () => {
