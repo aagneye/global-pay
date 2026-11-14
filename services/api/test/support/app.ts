@@ -8,6 +8,7 @@ import { testEnv } from '../helpers.js';
 import { ANVIL } from './anvil.js';
 import { FakeChain } from './fake-chain.js';
 import { FakeTokenChain } from './fake-token-chain.js';
+import { RecordingPushSender } from './fake-push.js';
 import { SimulatedOnrampProvider } from '../../src/adapters/onramp/simulated-onramp-provider.js';
 import { FixedRateProvider } from '../../src/adapters/rates/fixed-rate-provider.js';
 import { type MemoryRepositories, createMemoryRepositories } from './memory-repositories.js';
@@ -20,6 +21,8 @@ export interface TestApp {
   chain: FakeChain;
   /** Token transfers (deposits, onramp deliveries). */
   tokens: FakeTokenChain;
+  /** Push notifications the app sent. */
+  push: RecordingPushSender;
 }
 
 /**
@@ -47,8 +50,10 @@ export async function buildTestApp(
     rates: new FixedRateProvider(env.FIXED_USDC_THB_RATE),
     deliver: async (to, amount) => tokens.send(env.USDC_ADDRESS, [{ to, value: amount }]),
   });
+  const push = new RecordingPushSender();
   const container = buildContainer(env, {
     repositories: repos,
+    push,
     gateway: chain,
     tokens,
     onrampTokens: tokens,
@@ -56,7 +61,7 @@ export async function buildTestApp(
     ...options.adapters,
   });
   const app = await buildApp({ container, logger: false });
-  return { app, repos, env, container, chain, tokens };
+  return { app, repos, env, container, chain, tokens, push };
 }
 
 /** Signs in through the HTTP API with a wallet key, as the app would. */

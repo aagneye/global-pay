@@ -18,6 +18,7 @@ import { onrampRoutes } from './modules/onramp/routes.js';
 import { onrampSimulatorRoutes } from './modules/onramp/simulator-routes.js';
 import { onrampWebhookRoutes } from './modules/onramp/webhook-routes.js';
 import { opsRoutes } from './modules/ops/routes.js';
+import { p2pRoutes } from './modules/p2p/routes.js';
 import { paymentRoutes } from './modules/payments/routes.js';
 import { payoutWebhookRoutes } from './modules/payouts/webhook-routes.js';
 import { quoteRoutes } from './modules/quotes/routes.js';
@@ -84,6 +85,7 @@ export async function buildApp({ container, logger = true }: BuildAppOptions): P
         { name: 'payments', description: 'Submit and track payments (iteration 4)' },
         { name: 'account', description: 'Balance, payments and deposits' },
         { name: 'onramp', description: 'Add money: buy USDC with baht (iteration 8)' },
+        { name: 'p2p', description: 'Tap to pay: person-to-person USDC requests (iteration 9)' },
         { name: 'system' },
       ],
       components: {
@@ -116,6 +118,7 @@ export async function buildApp({ container, logger = true }: BuildAppOptions): P
   await app.register(payoutWebhookRoutes, { tracker: services.payouts });
   await app.register(opsRoutes, { ops: services.ops, token: container.opsToken });
   await app.register(onrampRoutes, { onramp: services.onramp });
+  await app.register(p2pRoutes, { p2p: services.p2p });
   await app.register(onrampWebhookRoutes, { onramp: services.onramp });
   await app.register(onrampSimulatorRoutes, { onramp: services.onramp });
 

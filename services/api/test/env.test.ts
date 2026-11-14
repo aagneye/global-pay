@@ -49,6 +49,15 @@ describe('loadEnv', () => {
     expect(() => testEnv(production)).toThrow(/real onramp partner/);
   });
 
+  it('reads the tap-to-pay settings', () => {
+    const env = testEnv();
+    expect(env.P2P_MAX_AMOUNT_USDC).toBe(1_000_000_000n);
+    expect(env.P2P_REQUEST_TTL_MS).toBe(120_000);
+    expect(env.FCM_SERVICE_ACCOUNT_FILE).toBeUndefined();
+    expect(testEnv({ P2P_MAX_AMOUNT_USDC: '25.5' }).P2P_MAX_AMOUNT_USDC).toBe(25_500_000n);
+    expect(() => testEnv({ P2P_MAX_AMOUNT_USDC: '0' })).toThrow(/positive USDC amount/);
+  });
+
   it('reads THB thresholds as satang', () => {
     const env = testEnv({ PAYOUT_FLOAT_BUFFER_THB: '5000.50', OPS_MIN_PAYOUT_FLOAT_THB: '100' });
     expect(env.PAYOUT_FLOAT_BUFFER_THB).toBe(500_050n);

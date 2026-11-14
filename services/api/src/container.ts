@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { parseEther } from 'viem';
 import { ViemQuoteSigner } from './adapters/chain/viem-quote-signer.js';
 import { ViemSettlementGateway } from './adapters/chain/viem-settlement-gateway.js';
@@ -5,6 +6,7 @@ import { ViemTokenReader } from './adapters/chain/viem-token-reader.js';
 import { createPrismaClient, createPrismaRepositories } from './adapters/db/prisma-repositories.js';
 import { MockKycProvider } from './adapters/kyc/mock-kyc-provider.js';
 import { MoonPayOnrampProvider } from './adapters/onramp/moonpay-provider.js';
+import { DisabledPushSender, FcmPushSender, type ServiceAccount } from './adapters/push/fcm-push-sender.js';
 import { SimulatedOnrampProvider, mintOnLocalChain } from './adapters/onramp/simulated-onramp-provider.js';
 import { SimulatedPromptPayProvider } from './adapters/payouts/simulated-promptpay-provider.js';
 import { XenditPayoutProvider } from './adapters/payouts/xendit-provider.js';
@@ -19,11 +21,13 @@ import { KycService } from './modules/kyc/service.js';
 import { OnrampTracker } from './modules/onramp/onramp-tracker.js';
 import { OnrampService } from './modules/onramp/service.js';
 import { OpsService } from './modules/ops/service.js';
+import { P2pService } from './modules/p2p/service.js';
 import { PayoutTracker } from './modules/payouts/payout-tracker.js';
 import { PaymentService } from './modules/payments/service.js';
 import { QuoteService } from './modules/quotes/service.js';
 import type { KycProvider } from './ports/kyc-provider.js';
 import type { OnrampProvider } from './ports/onramp-provider.js';
+import type { PushSender } from './ports/push-sender.js';
 import type { PayoutProvider } from './ports/payout-provider.js';
 import type { QuoteSigner } from './ports/quote-signer.js';
 import type { RateProvider } from './ports/rate-provider.js';
@@ -33,6 +37,7 @@ import type { TokenReader } from './ports/token-reader.js';
 import { DepositWorker } from './workers/deposit-worker.js';
 import { IndexerWorker } from './workers/indexer.js';
 import { OnrampWorker } from './workers/onramp-worker.js';
+import { P2pWorker } from './workers/p2p-worker.js';
 import { PayoutWorker } from './workers/payout-worker.js';
 
 /** Everything that talks to the outside world. Tests replace any of these. */
@@ -48,6 +53,7 @@ export interface Adapters {
   tokens: TokenReader;
   /** Token transfers where the onramp delivers: the payment chain unless ONRAMP_RPC_URL/ONRAMP_CHAIN_ID say otherwise. */
   onrampTokens: TokenReader;
+  push: PushSender;
 }
 
 export interface Container {
@@ -63,12 +69,14 @@ export interface Container {
     payouts: PayoutTracker;
     ops: OpsService;
     onramp: OnrampService;
+    p2p: P2pService;
   };
   workers: {
     indexer: IndexerWorker;
     payouts: PayoutWorker;
     onramp: OnrampWorker;
     deposits: DepositWorker;
+    p2p: P2pWorker;
   };
   /** Releases connections (database). */
   close(): Promise<void>;
@@ -131,6 +139,23 @@ export function buildContainer(env: Env, overrides: Partial<Adapters> = {}): Con
     recheckMs: env.ONRAMP_RECHECK_MS,
   });
 
+  const p2p = new P2pService({
+    users: repositories.users,
+    kyc: repositories.kyc,
+    devices: repositories.devices,
+    requests: repositories.paymentRequests,
+    gateway,
+    push: overrides.push ?? buildPushSender(env),
+    chainId: env.CHAIN_ID,
+    usdcAddress: env.USDC_ADDRESS,
+    requestTtlMs: env.P2P_REQUEST_TTL_MS,
+    authorizationTtlMs: env.P2P_AUTHORIZATION_TTL_MS,
+    maxAmount: env.P2P_MAX_AMOUNT_USDC,
+    maxOpenPerReceiver: env.P2P_MAX_OPEN_REQUESTS,
+    maxAwaitingPerSender: env.P2P_MAX_AWAITING_PER_SENDER,
+    explorerUrl: env.EXPLORER_URL,
+  });
+
   const tokens = new AccessTokens({ secret: env.JWT_SECRET, ttlSeconds: env.JWT_TTL_SECONDS });
   const payments = new PaymentService({
     quotes: repositories.quotes,
@@ -173,6 +198,7 @@ export function buildContainer(env: Env, overrides: Partial<Adapters> = {}): Con
       }),
       payments,
       payouts: payoutTracker,
+      p2p,
       onramp: new OnrampService({
         users: repositories.users,
         orders: repositories.onrampOrders,
@@ -228,6 +254,7 @@ export function buildContainer(env: Env, overrides: Partial<Adapters> = {}): Con
         enabled: Boolean(env.SETTLEMENT_ADDRESS && env.RELAYER_PRIVATE_KEY),
       }),
       onramp: new OnrampWorker({ orders: repositories.onrampOrders, tracker: onrampTracker, pollMs: env.ONRAMP_POLL_MS }),
+      p2p: new P2pWorker({ requests: repositories.paymentRequests, gateway, p2p, pollMs: env.P2P_POLL_MS }),
       deposits: new DepositWorker({
         users: repositories.users,
         deposits: repositories.deposits,
@@ -279,4 +306,14 @@ function buildOnrampProvider(env: Env, simulated: () => OnrampProvider): OnrampP
     });
   }
   return simulated();
+}
+
+/** FCM when a service-account key file is configured; otherwise no push (the apps poll). */
+function buildPushSender(env: Env): PushSender {
+  if (!env.FCM_SERVICE_ACCOUNT_FILE) return new DisabledPushSender();
+  const account = JSON.parse(readFileSync(env.FCM_SERVICE_ACCOUNT_FILE, 'utf8')) as ServiceAccount;
+  if (!account.project_id || !account.client_email || !account.private_key) {
+    throw new Error('FCM_SERVICE_ACCOUNT_FILE is not a Google service-account key (project_id, client_email, private_key)');
+  }
+  return new FcmPushSender({ account });
 }

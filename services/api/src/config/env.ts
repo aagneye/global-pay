@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { FIAT_DECIMALS, RATE_DECIMALS, parseDecimal } from '../domain/money.js';
+import { FIAT_DECIMALS, RATE_DECIMALS, TOKEN_DECIMALS, parseDecimal } from '../domain/money.js';
 import { addressSchema, privateKeySchema } from '../shared/schemas.js';
 
 /** A THB amount like "5000" or "5000.00", as satang. */
@@ -149,6 +149,30 @@ export const envSchema = z.object({
   MOONPAY_WIDGET_URL: z.url().default('https://buy-sandbox.moonpay.com'),
   MOONPAY_API_URL: z.url().default('https://api.moonpay.com'),
   MOONPAY_CURRENCY_CODE: z.string().min(1).default('usdc_base'),
+
+  // Tap to pay (person to person)
+  /** The sender must approve within this. */
+  P2P_REQUEST_TTL_MS: z.coerce.number().int().min(30_000).default(120_000),
+  /** EIP-3009 validBefore, from the request's creation. */
+  P2P_AUTHORIZATION_TTL_MS: z.coerce.number().int().min(60_000).default(600_000),
+  /** The most one request may ask for, in USDC. */
+  P2P_MAX_AMOUNT_USDC: z
+    .string()
+    .default('1000')
+    .transform((value, ctx) => {
+      const units = parseDecimal(value, TOKEN_DECIMALS.USDC);
+      if (units === null || units <= 0n) {
+        ctx.addIssue({ code: 'custom', message: 'P2P_MAX_AMOUNT_USDC must be a positive USDC amount' });
+        return z.NEVER;
+      }
+      return units;
+    }),
+  P2P_MAX_OPEN_REQUESTS: z.coerce.number().int().min(1).default(3),
+  /** Requests waiting for one sender's approval: stops a stranger spamming someone with taps. */
+  P2P_MAX_AWAITING_PER_SENDER: z.coerce.number().int().min(1).default(3),
+  P2P_POLL_MS: z.coerce.number().int().min(200).default(2_000),
+  /** A Google service-account key file (JSON) with Firebase Cloud Messaging access. Without it, no push. */
+  FCM_SERVICE_ACCOUNT_FILE: z.string().min(1).optional(),
 
   /** How often to look for USDC arriving in users' wallets. */
   DEPOSITS_POLL_MS: z.coerce.number().int().min(200).default(10_000),

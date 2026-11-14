@@ -17,6 +17,7 @@ import { testEnv } from '../helpers.js';
 import { ANVIL } from '../support/anvil.js';
 import { createQuote, signAuthorization, signIn, signInVerified, submitPayment } from '../support/app.js';
 import { createMemoryRepositories } from '../support/memory-repositories.js';
+import { phoneKey } from '../support/phone-key.js';
 import { type Anvil, CONTRACTS_DIR, deployLocal, findFoundryBin, startAnvil } from './foundry.js';
 
 /**
@@ -216,6 +217,35 @@ describe.skipIf(!anvilBin || !forgeBin)('settlement loop on anvil', () => {
     await container.workers.deposits.tick();
     const deposits = (await app.inject({ method: 'GET', url: '/me/deposits', headers: session.auth })).json().deposits;
     expect(deposits).toEqual([expect.objectContaining({ amount: '24242424', onrampOrderId: order.id })]);
+  }, 60_000);
+
+  it('tap to pay: a tap identifies the sender, whose signed transfer is relayed to the receiver', async () => {
+    const { app, container, balance } = await stack();
+    const receiver = await signInVerified(app, generatePrivateKey());
+    const sender = await signInVerified(app, PAYER_KEY);
+    const before = { sender: await balance(sender.address), receiver: await balance(receiver.address) };
+    const inject = (method: 'GET' | 'POST', url: string, who: { auth: { authorization: string } }, payload?: object) =>
+      app.inject({ method, url, headers: who.auth, ...(payload ? { payload } : {}) });
+
+    const phone = phoneKey();
+    const device = (await inject('POST', '/devices', sender, { publicKey: phone.publicKey, platform: 'android' })).json();
+    const request = (await inject('POST', '/p2p/requests', receiver, { amount: '3000000' })).json();
+    const tapped = await inject('POST', `/p2p/requests/${request.id}/tap`, receiver, { deviceId: device.id, signature: phone.signTap(request.challenge) });
+    expect(tapped.json().status).toBe('SENDER_IDENTIFIED');
+
+    // Signed against the real token's EIP-712 domain, relayed through the real relayer.
+    const typed = (await inject('GET', `/p2p/requests/${request.id}/authorization`, sender)).json();
+    const signature = await privateKeyToAccount(PAYER_KEY).signTypedData(typed);
+    const approved = await inject('POST', `/p2p/requests/${request.id}/approve`, sender, { signature });
+    expect(approved.json().status).toBe('SUBMITTED');
+
+    await container.workers.p2p.tick();
+    expect((await inject('GET', `/p2p/requests/${request.id}`, receiver)).json().status).toBe('COMPLETED');
+    expect(await balance(receiver.address)).toBe(before.receiver + 3_000_000n);
+    expect(await balance(sender.address)).toBe(before.sender - 3_000_000n);
+
+    // The same approval can't be used twice.
+    expect((await inject('POST', `/p2p/requests/${request.id}/approve`, sender, { signature })).statusCode).toBe(409);
   }, 60_000);
 
   it('rejects a payment the contract would revert, without sending it', async () => {
