@@ -1,0 +1,18 @@
+# Windows hosts with the GNU toolchain: link with the MinGW that ships with Rust, not a
+# system MinGW on PATH (an SJLJ gcc there cannot link Rust's SEH-based std).
+[target.x86_64-pc-windows-gnu]
+rustflags = ["-C", "link-self-contained=yes"]
+
+# Contract builds for the NEAR runtime, which takes WebAssembly MVP plus sign-ext ops:
+# - target-cpu=mvp: our crates emit no multi-value, reference-types or bulk-memory code;
+# - --compress-relocations: std (prebuilt with reference-types) leaves padded 5-byte table
+#   indices in call_indirect, which NEAR's parser rejects; the linker rewrites them to the
+#   MVP single byte (and shrinks every other padded index too);
+# - -s: strip symbols and custom sections (required by --compress-relocations).
+# scripts/check-wasm.mjs verifies the result.
+[target.wasm32-unknown-unknown]
+rustflags = [
+  "-C", "target-cpu=mvp",
+  "-C", "link-arg=-s",
+  "-C", "link-arg=--compress-relocations",
+]

@@ -1,0 +1,24 @@
+[workspace]
+# Resolver 3 picks dependency versions that support rust-version (1.86).
+resolver = "3"
+members = ["test-usdc"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.86"
+license = "UNLICENSED"
+publish = false
+
+[workspace.dependencies]
+near-sdk = "5.27"
+near-contract-standards = "5.27"
+
+# NEAR contracts should be small and must never silently wrap around.
+[profile.release]
+codegen-units = 1
+opt-level = "z"
+lto = true
+debug = false
+panic = "abort"
+overflow-checks = true

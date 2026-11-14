@@ -1,0 +1,2 @@
+# Rust build tree. The release wasm in res/ is committed on purpose.
+target/

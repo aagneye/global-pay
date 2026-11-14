@@ -1,0 +1,4 @@
+# Rust 1.87+ emits wasm features the NEAR runtime rejects, so stay on 1.86.
+[toolchain]
+channel = "1.86.0"
+targets = ["wasm32-unknown-unknown"]
