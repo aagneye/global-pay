@@ -121,9 +121,11 @@ class NfcTapReader implements TapReader {
 }
 
 /// Keeps the wallet key encrypted by a hardware key that needs the user's fingerprint (or face) every
-/// time it's used. Android only; see KeyVault.kt.
+/// time it's used. On Android 11 and later, a phone without a strong biometric uses its screen lock
+/// instead. Android only; see KeyVault.kt.
 abstract interface class KeyVault {
-  /// Whether strong biometrics are enrolled, so the vault can be used.
+  /// Whether the vault can be used: a strong biometric is enrolled, or the phone runs Android 11 or later
+  /// and has a screen lock.
   Future<bool> isAvailable();
 
   /// Encrypts [secret]; asks for the fingerprint.

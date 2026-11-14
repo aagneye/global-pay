@@ -10,9 +10,10 @@ import 'package:globalpay/services/wallet/wallet_service.dart';
 /// dart-define) so a demo can use a funded test account. Signing out keeps the key, so the
 /// same wallet comes back next time.
 ///
-/// With a [vault] (strong biometrics enrolled), the key is stored only encrypted by a hardware key that
-/// needs the user's fingerprint every time: each signature asks for it, and a key stored the old way is
-/// moved into the vault. Without one (emulators, tests), the key sits in secure storage as before.
+/// With a [vault] (a strong biometric enrolled, or a screen lock on Android 11 and later), the key is
+/// stored only encrypted by a hardware key that needs the user's fingerprint (or screen lock) every time:
+/// each signature asks for it, and a key stored the old way is moved into the vault. Without one
+/// (emulators, tests), the key sits in secure storage as before.
 ///
 /// For testnet development and tests only. Never use it with real funds.
 class DevWalletService implements WalletService {
