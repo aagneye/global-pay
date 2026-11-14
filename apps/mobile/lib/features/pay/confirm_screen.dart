@@ -4,15 +4,24 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:globalpay/app/router.dart';
+import 'package:globalpay/core/config/app_config.dart';
 import 'package:globalpay/core/errors/app_exception.dart';
 import 'package:globalpay/core/providers.dart';
 import 'package:globalpay/core/widgets/common.dart';
 import 'package:globalpay/domain/models/promptpay_qr.dart';
 import 'package:globalpay/domain/models/quote.dart';
 import 'package:globalpay/domain/signing/authorization_check.dart';
+import 'package:globalpay/domain/signing/near_payment_check.dart';
 import 'package:globalpay/features/auth/session_controller.dart';
+import 'package:globalpay/services/wallet/wallet_switch.dart';
 
 final _amount = RegExp(r'^\d+(\.\d{1,2})?$');
+
+/// Shown instead of the backend's `near_account_not_found`: a first sign-in's account is still being set up.
+const nearAccountSettingUp = AppException(
+  'near_account_not_found',
+  'Your testnet account is still being set up. Try again in a few seconds.',
+);
 
 /// Parses "250", "250.5" or "250.50" baht into satang. Null if invalid or not positive.
 BigInt? parseThb(String text) {
@@ -78,15 +87,23 @@ class _ConfirmScreenState extends ConsumerState<ConfirmScreen> {
       if (minor == null) throw const FormatException('Enter an amount in baht, e.g. 120 or 59.50');
     }
     final payer = ref.read(sessionProvider).value!.walletAddress;
-    final quote = await ref
-        .read(paymentsRepositoryProvider)
-        .requestQuote(payer: payer, qrPayload: widget.qr.raw, fiatAmountMinor: minor);
+    final Quote quote;
+    try {
+      quote = await ref
+          .read(paymentsRepositoryProvider)
+          .requestQuote(payer: payer, qrPayload: widget.qr.raw, fiatAmountMinor: minor);
+    } on AppException catch (error) {
+      // NEAR rail: the new implicit account isn't on chain yet (testnet onboarding is still funding it).
+      if (error.code == 'near_account_not_found') throw nearAccountSettingUp;
+      rethrow;
+    }
     setState(() => _quote = quote);
   });
 
   Future<void> _pay(Quote quote) => _guarded(() async {
     // Never sign more, to anyone else or on another chain than this screen shows, whatever the backend sent.
     final config = ref.read(appConfigProvider);
+    if (config.isNear) return _payOnNear(quote, config);
     checkQuoteAuthorization(
       quote,
       wallet: ref.read(sessionProvider).value!.walletAddress,
@@ -98,6 +115,22 @@ class _ConfirmScreenState extends ConsumerState<ConfirmScreen> {
     final payment = await ref.read(paymentsRepositoryProvider).submit(quote, signature);
     if (mounted) context.pushReplacement(Routes.status(payment.id));
   });
+
+  /// NEAR rail: check the meta transaction, sign it (the relayer pays the gas), and hand it to the backend.
+  Future<void> _payOnNear(Quote quote, AppConfig config) async {
+    final wallet = ref.read(nearWalletProvider) ?? (throw WalletSwitch.notConfigured);
+    checkNearPayment(
+      quote,
+      account: ref.read(sessionProvider).value!.walletAddress,
+      publicKey: wallet.publicKey ?? (throw const AppException('wallet_not_connected', 'Sign in to use your wallet')),
+      usdcContract: config.nearUsdcContract,
+      settlementContract: config.nearSettlementContract,
+      now: DateTime.now(),
+    );
+    final signedDelegate = await wallet.signDelegate(quote.nearPayment!);
+    final payment = await ref.read(paymentsRepositoryProvider).submitSignedDelegate(quote, signedDelegate);
+    if (mounted) context.pushReplacement(Routes.status(payment.id));
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -183,8 +216,11 @@ class _ConfirmScreenState extends ConsumerState<ConfirmScreen> {
             ),
           const SizedBox(height: 8),
           Text(
-            'Paying asks your wallet to sign a USDC authorisation for exactly this quote. '
-            'No gas needed.',
+            ref.watch(appConfigProvider).isNear
+                ? 'Paying asks your wallet to sign a USDC transfer on NEAR testnet for exactly this quote. '
+                      'No gas needed: GlobalPay relays it.'
+                : 'Paying asks your wallet to sign a USDC authorisation for exactly this quote. '
+                      'No gas needed.',
             style: theme.textTheme.bodySmall,
             textAlign: TextAlign.center,
           ),

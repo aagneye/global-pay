@@ -31,6 +31,9 @@ class FakeBackend implements HttpClientAdapter {
   /// NEAR rail: changes the `nearPayment` a quote asks the wallet to sign, like a compromised backend would.
   void Function(Map<String, dynamic> nearPayment)? tamperNear;
 
+  /// NEAR rail: how many more quote requests fail with `near_account_not_found` (onboarding still running).
+  int nearAccountPending = 0;
+
   final String balanceUnits;
   final String finalStatus;
 
@@ -205,6 +208,10 @@ class FakeBackend implements HttpClientAdapter {
       ),
       ('POST', '/auth/verify') => _nearVerify(body as Map),
       ('GET', '/me/balance') => (200, {'token': nearUsdc, 'units': balanceUnits, 'decimals': 6}),
+      ('POST', '/quotes') when nearAccountPending > 0 => () {
+        nearAccountPending--;
+        return (409, {'error': 'near_account_not_found', 'message': 'The account does not exist on NEAR yet'});
+      }(),
       ('POST', '/quotes') => (201, _nearQuote((body as Map)['payer'] as String, expiresAt)),
       ('POST', '/payments') when (body as Map)['signedDelegate'] is! String || body.containsKey('signature') => (
         400,
