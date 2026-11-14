@@ -9,3 +9,7 @@ class AppException implements Exception {
   @override
   String toString() => 'AppException($code): $message';
 }
+
+/// Whether [error] means the user backed out of the fingerprint prompt. Nothing went wrong, so screens
+/// show no error for it.
+bool cancelledByUser(Object error) => error is AppException && error.code == 'biometric_cancelled';

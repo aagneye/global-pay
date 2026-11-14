@@ -81,11 +81,8 @@ class _ApproveScreenState extends ConsumerState<ApproveScreen> {
       if (!mounted) return;
       setState(() => _request = request);
       _timer = Timer(requestPollInterval, _load);
-    } on AppException catch (error) {
-      // Backing out of the fingerprint prompt isn't an error worth showing.
-      if (mounted && error.code != 'biometric_cancelled') setState(() => _error = error);
     } on Object catch (error) {
-      if (mounted) setState(() => _error = error);
+      if (mounted && !cancelledByUser(error)) setState(() => _error = error);
     } finally {
       if (mounted) setState(() => _busy = false);
     }

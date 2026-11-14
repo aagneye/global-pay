@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:globalpay/app/router.dart';
+import 'package:globalpay/core/errors/app_exception.dart';
 import 'package:globalpay/core/providers.dart';
 import 'package:globalpay/core/widgets/common.dart';
 import 'package:globalpay/domain/models/promptpay_qr.dart';
@@ -64,7 +65,7 @@ class _ConfirmScreenState extends ConsumerState<ConfirmScreen> {
     try {
       await action();
     } on Object catch (error) {
-      if (mounted) setState(() => _error = error);
+      if (mounted && !cancelledByUser(error)) setState(() => _error = error);
     } finally {
       if (mounted) setState(() => _busy = false);
     }

@@ -157,6 +157,33 @@ void main() {
     expect(find.text('USDC refunded'), findsOneWidget);
   });
 
+  testWidgets('backing out of the fingerprint prompt shows no error, and paying again works', (tester) async {
+    tester.view.physicalSize = const Size(1080, 2400);
+    tester.view.devicePixelRatio = 2.5;
+    addTearDown(tester.view.reset);
+    final backend = FakeBackend()..kycStatus = 'APPROVED';
+    final wallet = SpyWallet(store: MemorySecureStore(), importKey: testKey)..cancelNext = true;
+
+    await tester.pumpWidget(app(backend, MemorySecureStore(), wallet: wallet));
+    await pumpUntil(tester, find.text('Continue with dev wallet'));
+    await tap(tester, 'Continue with dev wallet');
+    await pumpUntil(tester, find.text('Scan & pay'));
+    await tap(tester, 'Scan & pay');
+    await pumpUntil(tester, find.byKey(const Key('qr-text')));
+    await tester.enterText(find.byKey(const Key('qr-text')), qr250);
+    await tap(tester, 'Continue');
+    await pumpUntil(tester, find.text('Pay 7.477454 USDC'));
+
+    await tap(tester, 'Pay 7.477454 USDC');
+    await tester.pump(const Duration(milliseconds: 200));
+    expect(find.textContaining('canceled'), findsNothing);
+    expect(backend.requests.where((r) => r.path == '/payments'), isEmpty);
+
+    await tap(tester, 'Pay 7.477454 USDC');
+    await pumpUntil(tester, find.byKey(const Key('status-headline')), maxFrames: 50);
+    expect(wallet.signedTypedData, hasLength(1));
+  });
+
   testWidgets('shows "Needs review", never "paid", while the payout outcome is unclear', (tester) async {
     tester.view.physicalSize = const Size(1080, 2400);
     tester.view.devicePixelRatio = 2.5;

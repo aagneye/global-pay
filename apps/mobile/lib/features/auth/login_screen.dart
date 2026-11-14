@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:globalpay/core/errors/app_exception.dart';
 import 'package:globalpay/core/providers.dart';
 import 'package:globalpay/core/widgets/common.dart';
 import 'package:globalpay/features/auth/session_controller.dart';
@@ -46,7 +47,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     try {
       await body();
     } on Object catch (error) {
-      if (mounted) setState(() => _error = error);
+      if (mounted && !cancelledByUser(error)) setState(() => _error = error);
     } finally {
       if (mounted) setState(() => _busy = null);
     }
