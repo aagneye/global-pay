@@ -1,7 +1,9 @@
 import 'dart:convert';
 import 'dart:typed_data';
 
+import 'package:blockchain_utils/blockchain_utils.dart';
 import 'package:dio/dio.dart';
+import 'package:globalpay/services/wallet/near/near_keys.dart';
 
 /// A canned GlobalPay backend for widget tests, plugged into Dio below the generated client.
 /// Responses follow packages/openapi/openapi.json.
@@ -12,7 +14,22 @@ class FakeBackend implements HttpClientAdapter {
     this.payoutStatus = 'PENDING',
     this.onrampFinalStatus = 'COMPLETED',
     this.p2pRole = 'receiver',
+    this.near = false,
   });
+
+  /// The NEAR rail (SETTLEMENT_RAIL=near): NEP-413 sign-in, quotes with a `nearPayment` to sign, payments with a
+  /// `signedDelegate`; tap to pay, Add money and deposits answer 503.
+  final bool near;
+
+  /// NEAR rail: the test contracts, and the key that signed in (set by /auth/verify).
+  static const nearUsdc = 'usdc.globalpay.testnet';
+  static const nearSettlement = 'settle.globalpay.testnet';
+  static const nearSignInRecipient = 'globalpay.local';
+  static final nearNonce = List.generate(32, (i) => i.toRadixString(16).padLeft(2, '0')).join();
+  String? nearPublicKey;
+
+  /// NEAR rail: changes the `nearPayment` a quote asks the wallet to sign, like a compromised backend would.
+  void Function(Map<String, dynamic> nearPayment)? tamperNear;
 
   final String balanceUnits;
   final String finalStatus;
@@ -76,6 +93,9 @@ class FakeBackend implements HttpClientAdapter {
   }
 
   (int, Object?) _route(String method, String path, Object? body) {
+    if (near) {
+      if (_nearRoute(method, path, body) case final response?) return response;
+    }
     final expiresAt = DateTime.now().add(const Duration(seconds: 60)).toUtc();
     return switch ((method, path)) {
       ('POST', '/auth/nonce') => (
@@ -166,6 +186,93 @@ class FakeBackend implements HttpClientAdapter {
       }(),
       _ => (404, {'error': 'not_found', 'message': 'No route $method $path'}),
     };
+  }
+
+  /// The NEAR rail's answers, or null where it answers like EVM (KYC, payment status, history, profile).
+  (int, Object?)? _nearRoute(String method, String path, Object? body) {
+    const notConfigured = (503, {'error': 'not_configured', 'message': 'Not available on the NEAR rail'});
+    if (path.startsWith('/p2p') || path.startsWith('/onramp') || path.startsWith('/devices')) return notConfigured;
+    final expiresAt = DateTime.now().add(const Duration(seconds: 60)).toUtc();
+    return switch ((method, path)) {
+      ('GET', '/me/deposits') => notConfigured,
+      ('POST', '/auth/nonce') => (
+        200,
+        {
+          'nonce': nearNonce,
+          'message': 'globalpay.local wants you to sign in with your NEAR account:\n${(body as Map)['address']}',
+          'expiresAt': expiresAt.toIso8601String(),
+        },
+      ),
+      ('POST', '/auth/verify') => _nearVerify(body as Map),
+      ('GET', '/me/balance') => (200, {'token': nearUsdc, 'units': balanceUnits, 'decimals': 6}),
+      ('POST', '/quotes') => (201, _nearQuote((body as Map)['payer'] as String, expiresAt)),
+      ('POST', '/payments') when (body as Map)['signedDelegate'] is! String || body.containsKey('signature') => (
+        400,
+        {'error': 'invalid_request', 'message': 'The NEAR rail needs signedDelegate'},
+      ),
+      _ => null,
+    };
+  }
+
+  /// Checks the NEP-413 signature like the backend: by the key whose implicit account signed in.
+  (int, Object?) _nearVerify(Map body) {
+    final message = body['message'] as String;
+    final publicKey = body['publicKey'] as String;
+    final key = parseNearPublicKey(publicKey);
+    final account = implicitAccountId(key);
+    final digest = nep413Digest(
+      message: message,
+      nonce: BytesUtils.fromHexString(nearNonce),
+      recipient: nearSignInRecipient,
+    );
+    final valid =
+        message.endsWith('\n$account') &&
+        Ed25519Verifier.fromKeyBytes(key).verify(digest, base64.decode(body['signature'] as String));
+    if (!valid) return (401, {'error': 'invalid_signature', 'message': 'Signature does not match'});
+    nearPublicKey = publicKey;
+    return (
+      200,
+      {
+        'token': 'test-token',
+        'tokenType': 'Bearer',
+        'expiresAt': DateTime.now().add(const Duration(days: 1)).toUtc().toIso8601String(),
+        'user': {'id': 'user_1', 'walletAddress': account},
+      },
+    );
+  }
+
+  Map<String, Object> _nearQuote(String payer, DateTime expiresAt) {
+    final quote = _quote(expiresAt)..remove('authorizationToSign');
+    final onChain = quote['quote']! as Map<String, Object>;
+    onChain['payer'] = payer;
+    onChain['token'] = nearUsdc;
+    final quoteJson = jsonEncode({
+      'quote_id': quoteId,
+      'payer': payer,
+      'token': nearUsdc,
+      'token_amount': onChain['tokenAmount'],
+      'fiat_currency': 'THB',
+      'fiat_amount': onChain['fiatAmount'],
+      'merchant_ref_hash': onChain['merchantRefHash'],
+      'expires_at_ms': expiresAt.millisecondsSinceEpoch,
+    });
+    final nearPayment = <String, dynamic>{
+      'signerId': payer,
+      'publicKey': nearPublicKey,
+      'receiverId': nearUsdc,
+      'methodName': 'ft_transfer_call',
+      'args': {
+        'receiver_id': nearSettlement,
+        'amount': onChain['tokenAmount'],
+        'msg': jsonEncode({'quote': quoteJson, 'signature': base64.encode(List.filled(64, 7))}),
+      },
+      'gas': '100000000000000',
+      'deposit': '1',
+      'nonce': '190000000000001',
+      'maxBlockHeight': '187654321',
+    };
+    tamperNear?.call(nearPayment);
+    return {...quote, 'signature': base64.encode(List.filled(64, 9)), 'nearPayment': nearPayment};
   }
 
   Map<String, Object> _p2p() {
@@ -339,7 +446,7 @@ class FakeBackend implements HttpClientAdapter {
       'status': status,
       'fiatCurrency': 'THB',
       'fiatAmount': '25000',
-      'token': '0x5FbDB2315678afecb367f032d93F642f64180aa3',
+      'token': near ? nearUsdc : '0x5FbDB2315678afecb367f032d93F642f64180aa3',
       'tokenAmount': '7477454',
       'merchant': {'kind': 'merchant', 'targetId': '099999999999901', 'name': 'GLOBALPAY TEST CAFE'},
       'transactions': {

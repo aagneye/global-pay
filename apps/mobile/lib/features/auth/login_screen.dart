@@ -11,6 +11,7 @@ import 'package:globalpay/services/wallet/wallet_switch.dart';
 /// Sign-in. With Privy configured: email, then the emailed code, which opens (or creates) the user's
 /// embedded wallet. Debug builds also offer the dev wallet. Either way the wallet then signs the
 /// backend's Sign-In with Ethereum message, and the router moves on once a session exists.
+/// On the NEAR rail (SETTLEMENT_RAIL=near) the only option is the NEAR testnet wallet, which signs a NEP-413 message.
 class LoginScreen extends ConsumerStatefulWidget {
   const LoginScreen({super.key});
 
@@ -20,7 +21,7 @@ class LoginScreen extends ConsumerStatefulWidget {
 
 enum _Step { email, code }
 
-enum _Action { sendCode, verify, dev }
+enum _Action { sendCode, verify, dev, near }
 
 class _LoginScreenState extends ConsumerState<LoginScreen> {
   final _emailController = TextEditingController();
@@ -83,6 +84,9 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   Future<void> _signInWithDevWallet() =>
       _run(_Action.dev, () => ref.read(sessionProvider.notifier).signIn(WalletKind.dev));
 
+  /// NEAR rail: the session controller signs in with the NEAR wallet (NEP-413).
+  Future<void> _signInWithNearWallet() => _run(_Action.near, () => ref.read(sessionProvider.notifier).signIn());
+
   /// The button's text, or a spinner while its action runs.
   Widget _label(String text, _Action action) => _busy == action
       ? const SizedBox.square(dimension: 20, child: CircularProgressIndicator(strokeWidth: 2))
@@ -91,8 +95,10 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final privy = ref.watch(privyWalletProvider);
-    final devWallet = ref.watch(devWalletEnabledProvider);
+    // The NEAR rail signs in only with the NEAR testnet wallet: no Privy, no dev wallet.
+    final near = ref.watch(appConfigProvider).isNear;
+    final privy = near ? null : ref.watch(privyWalletProvider);
+    final devWallet = !near && ref.watch(devWalletEnabledProvider);
     return Scaffold(
       body: SafeArea(
         child: LayoutBuilder(
@@ -118,9 +124,10 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                     ),
                     const Spacer(flex: 2),
                     if (privy != null) ..._emailSignIn(theme, privy),
-                    if (privy == null && !devWallet) _notConfigured(theme),
+                    if (privy == null && !devWallet && !near) _notConfigured(theme),
                     if (_error != null) ErrorView(error: _error!),
                     if (devWallet) ..._devWallet(theme, primary: privy == null),
+                    if (near) ..._nearWallet(theme),
                   ],
                 ),
               ),
@@ -227,4 +234,28 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       primary ? FilledButton(onPressed: onPressed, child: label) : OutlinedButton(onPressed: onPressed, child: label),
     ];
   }
+
+  /// NEAR rail: the only way in.
+  List<Widget> _nearWallet(ThemeData theme) => [
+    const SizedBox(height: 20),
+    Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Padding(padding: EdgeInsets.only(top: 1), child: AccentTag('TESTNET')),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Text(
+            'Your NEAR testnet wallet is a key made and kept on this phone. '
+            'Signing in signs a message with it; no funds move.',
+            style: theme.textTheme.bodySmall,
+          ),
+        ),
+      ],
+    ),
+    const SizedBox(height: 20),
+    FilledButton(
+      onPressed: _busy != null ? null : _signInWithNearWallet,
+      child: _label('Continue with NEAR testnet wallet', _Action.near),
+    ),
+  ];
 }

@@ -18,7 +18,8 @@ class SessionController extends AsyncNotifier<Session?> {
     }
   }
 
-  /// Sign-In with Ethereum, with [wallet] when given (otherwise the wallet chosen before).
+  /// Sign-In with Ethereum, with [wallet] when given (otherwise the wallet chosen before). On the NEAR rail,
+  /// a NEP-413 sign-in with the NEAR wallet (leave [wallet] out).
   /// Throws on failure and leaves the user signed out, so the sign-in screen can show the error.
   Future<void> signIn([WalletKind? wallet]) async {
     if (wallet != null) await ref.read(walletSwitchProvider).use(wallet);

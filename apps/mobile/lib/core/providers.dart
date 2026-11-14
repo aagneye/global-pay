@@ -15,6 +15,7 @@ import 'package:globalpay/data/repositories/payments_repository.dart';
 import 'package:globalpay/data/session_store.dart';
 import 'package:globalpay/features/auth/session_controller.dart';
 import 'package:globalpay/services/wallet/dev_wallet_service.dart';
+import 'package:globalpay/services/wallet/near/near_wallet_service.dart';
 import 'package:globalpay/services/wallet/privy_client.dart';
 import 'package:globalpay/services/wallet/privy_sdk_client.dart';
 import 'package:globalpay/services/wallet/privy_wallet_service.dart';
@@ -70,6 +71,19 @@ final walletSwitchProvider = Provider<WalletSwitch>(
   ),
 );
 
+/// The NEAR testnet wallet when the app runs on the NEAR rail (SETTLEMENT_RAIL=near); null on EVM.
+/// Release builds keep its key only in the fingerprint vault; debug builds fall back to secure storage,
+/// so emulators without a screen lock can still sign.
+final nearWalletProvider = Provider<NearWalletService?>(
+  (ref) => ref.watch(appConfigProvider).isNear
+      ? NearWalletService(
+          store: ref.watch(secureStoreProvider),
+          vault: ref.watch(keyVaultProvider),
+          requireVault: kReleaseMode,
+        )
+      : null,
+);
+
 /// The fingerprint-locked store for the wallet key (Android Keystore). Null disables it.
 final keyVaultProvider = Provider<KeyVault?>((ref) => const ChannelKeyVault());
 
@@ -93,6 +107,8 @@ final authRepositoryProvider = Provider<AuthRepository>(
     api: ref.watch(apiClientProvider),
     wallet: ref.watch(walletServiceProvider),
     sessions: ref.watch(sessionStoreProvider),
+    near: ref.watch(nearWalletProvider),
+    nearRecipient: ref.watch(appConfigProvider).nearSignInRecipient,
   ),
 );
 
