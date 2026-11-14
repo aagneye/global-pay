@@ -31,8 +31,8 @@ Use this runbook:
 | `MOONPAY_SECRET_KEY` (+ publishable key) | `.env.base-sepolia` | Secret manager | Widget URLs signed under our account | Checkout links already issued stop working | Yearly |
 | `MOONPAY_WEBHOOK_KEY` | `.env.base-sepolia` | Secret manager | Forged webhooks, which only trigger lookups | Webhooks refused until restart; polling covers it | On leak |
 | FCM service-account key | JSON file at `FCM_SERVICE_ACCOUNT_FILE` | No key file (workload identity), or a secret manager | Push messages to our users | Nothing visible | Every 90 days |
-| App upload / signing key | Not set up: release builds use the debug key | Play App Signing (Google holds the signing key; we hold an upload key in a vault) | A malicious "update" of the app | Nothing visible | Only on leak |
-| Dev wallet key | On the phone (`KeyVault`), or a `DEV_WALLET_PRIVATE_KEY` dart-define | None: replaced by the Privy wallet (iteration 11) | That wallet's test USDC | A new wallet is a new account | Never; replace it |
+| App upload / signing key | The owner's upload keystore, outside the repo, named in the gitignored `apps/mobile/android/key.properties`; not created yet (release builds fall back to the debug key) | Play App Signing (Google holds the signing key; we hold an upload key in a vault) | A malicious "update" of the app | Nothing visible | Only on leak |
+| Dev wallet key | On the phone (`KeyVault`), or a `DEV_WALLET_PRIVATE_KEY` dart-define (debug builds only) | None: users have the Privy wallet (iteration 11); the dev wallet exists only in debug builds | That wallet's test USDC | A new wallet is a new account | Never; replace it |
 | Device key (tap to pay) | Phone's Android Keystore | Same | Tap identification as that phone | Re-register the phone | When a phone is lost |
 | `DATABASE_URL` password | `.env.base-sepolia` | Secret manager | All data | A restart | Yearly |
 | RPC provider key (inside `RPC_URL`) | `.env.base-sepolia` | Secret manager | Our RPC quota | A restart | On leak |
@@ -258,12 +258,12 @@ If push breaks, tap to pay still works: the payer's screen polls.
 
 ### App release signing key
 
-Today there isn't one: release builds are signed with the debug key ([`build.gradle.kts`](../../apps/mobile/android/app/build.gradle.kts)). Setting it up is part of iteration 10.
+Release builds are signed with the key that the gitignored `apps/mobile/android/key.properties` names ([`build.gradle.kts`](../../apps/mobile/android/app/build.gradle.kts), [apps/mobile/README.md](../../apps/mobile/README.md#signing)). The owner hasn't created the upload key yet; until then release builds fall back to the debug key, and `tool/check_release.sh` fails.
 
 **Set up once:**
 1. Enrol in **Play App Signing**: Google keeps the app signing key, and we keep only an upload key.
 2. Make the upload key: `keytool -genkeypair -v -keystore upload-keystore.jks -keyalg RSA -keysize 2048 -validity 10000 -alias upload`.
-3. Keep the keystore and its passwords in the team vault. Never commit them: add `*.jks` and `key.properties` to `.gitignore` when release signing is wired up.
+3. Keep the keystore and its passwords in the team vault. Never commit them: both of the app's `.gitignore`s already exclude `key.properties`, `*.jks` and `*.keystore`.
 4. Protect the Play Console account with MFA. Uploading needs both the upload key and the account.
 
 **If the upload key is lost or leaked:**
@@ -272,7 +272,7 @@ Today there isn't one: release builds are signed with the debug key ([`build.gra
 
 The app signing key itself rarely changes. Play Console offers a one-time signing key upgrade (Android 9+ verifies the rotation), needed only if that key is compromised.
 
-**Verify a build:** `keytool -printcert -jarfile app-release.aab` (or `apksigner verify --print-certs app-release.apk`) must not show `CN=Android Debug`.
+**Verify a build:** `bash tool/check_release.sh` (in `apps/mobile`) fails on a debug-signed APK; or `keytool -printcert -jarfile app-release.aab` (`apksigner verify --print-certs app-release.apk`) must not show `CN=Android Debug`.
 
 ### Dev wallet
 
@@ -287,7 +287,7 @@ A `DEV_WALLET_PRIVATE_KEY` dart-define is compiled into the app, so only ever us
 
 ### Device keys (tap to pay)
 
-Each phone's P-256 key stays in its Keystore. If a phone is lost, revoke it with `DELETE /devices/:id` from the same account; the backend then refuses taps from it. A thief can't use the key without unlocking the phone (`requireDeviceUnlock`), and can't approve a payment without the fingerprint. With the dev wallet the account lives on the phone, so revoking from another phone needs the Privy wallet (iteration 11).
+Each phone's P-256 key stays in its Keystore. If a phone is lost, revoke it with `DELETE /devices/:id` from the same account; the backend then refuses taps from it. A thief can't use the key without unlocking the phone (`requireDeviceUnlock`), and can't approve a payment without the fingerprint. The phone's owner can also turn tap to pay off from the home screen's menu ("This phone"), which revokes it. With the Privy wallet the account isn't tied to the phone, so after signing in on another phone the lost one can be revoked through the API; the app has no list of devices yet. With the dev wallet (debug builds) the account lives on the phone.
 
 ## Verify after every rotation
 
