@@ -357,6 +357,8 @@ Errors are `{ "error": "<code>", "message": "…" }` with a stable code, for exa
 
 ## Security and compliance controls in the design
 
+The full [threat model](security.md) lists each threat with its control or remaining gap. Keys are replaced with the [key rotation runbook](runbooks/key-rotation.md), and the [launch checklist](launch-checklist.md) says what must be true before real money.
+
 - **No custody before payment:** funds stay in the user's own wallet until they authorise a specific quote.
 - **Short quotes:** quotes expire after 60 seconds (`QUOTE_TTL_SECONDS`). The contract and USDC both enforce the expiry.
 - **No replay:** each `quoteId` can be used once, enforced by both the contract state and the USDC nonce.

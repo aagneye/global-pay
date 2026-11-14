@@ -53,6 +53,9 @@ flowchart LR
 - [Research: production rails](docs/research/production-rails.md): payout partners, onramps and tap-to-pay, with endpoints and regulation
 - [Setup](docs/setup.md): toolchain and how to run each part
 - [Base Sepolia runbook](docs/testnet.md): keys, funding, deployment, and an end-to-end payment on testnet
+- [Threat model](docs/security.md): assets, actors, trust boundaries, and threats per component with today's controls and the gaps
+- [Key rotation runbook](docs/runbooks/key-rotation.md): replacing every key and secret safely, and what to do if one leaks
+- [Launch checklist](docs/launch-checklist.md): what must be true before real money, as automated checks and sign-offs
 
 ## Quick start
 
