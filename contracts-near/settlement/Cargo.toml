@@ -1,0 +1,19 @@
+[package]
+name = "globalpay-settlement"
+description = "GlobalPay settlement contract on NEAR: holds a NEP-141 payment until the payout settles or refunds it."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+near-sdk.workspace = true
+
+[dev-dependencies]
+near-sdk = { workspace = true, features = ["unit-testing"] }
+# Signs test quotes; already in the tree through near-sdk's unit-testing feature.
+ed25519-dalek = "2.2"

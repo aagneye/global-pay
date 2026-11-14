@@ -1,7 +1,7 @@
 [workspace]
 # Resolver 3 picks dependency versions that support rust-version (1.86).
 resolver = "3"
-members = ["test-usdc"]
+members = ["settlement", "test-usdc"]
 
 [workspace.package]
 version = "0.1.0"
