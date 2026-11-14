@@ -47,7 +47,7 @@ It settles on **NEAR** (testnet, the NEAR Hackathon entry below) or on **Base**,
 **Deployed on NEAR testnet:**
 - settlement contract: [`gp-oy8fad-settle.testnet`](https://testnet.nearblocks.io/address/gp-oy8fad-settle.testnet)
 - test USDC: [`gp-oy8fad-usdc.testnet`](https://testnet.nearblocks.io/address/gp-oy8fad-usdc.testnet)
-- a ₹500 UPI payment, Paid then Settled: [payment](UPI_PAY_TX) and [settlement](UPI_SETTLE_TX)
+- a ₹500 UPI payment to a made-up merchant (Meera Chai), approved with the card key, Paid then Settled: [payment (meta transaction)](https://testnet.nearblocks.io/txns/8aSGmFLCsCy8kcnQ8445DF5M2VpCphmqRwpzyNNTUmqT) and [settlement](https://testnet.nearblocks.io/txns/CRSZyQaRULLJ3kKRm41gQNtGXmiC6dvS5tBy1m8BNC4F). The contract records it with `fiat_currency` INR and `fiat_amount` 50000 (paise); the user paid 4.834665 USDC at 104.45 INR/USDC plus a 1% fee, and the simulated UPI partner returned UTR 298508372851
 - a ฿100 PromptPay payment, Paid then Settled: [payment (meta transaction)](https://testnet.nearblocks.io/txns/3iqZySU1L7h4ZnxRK4VpqTjPeRzkdCrAody9u3Uv4EYw) and [settlement](https://testnet.nearblocks.io/txns/Dnhybx9aZb51MjmQ9jyLQdo7T3ScjrHfrThg5zTjvLfT); the treasury received 2.978891 USDC
 - a ฿100 PromptPay payment whose payout failed (forced), then Refunded: [payment](https://testnet.nearblocks.io/txns/FFcw2gLVDNHNZTLD8xjW3VT6iGwrJbqow3HCWsFgQEy9) and [refund](https://testnet.nearblocks.io/txns/AYFScijZtFBpN7ME7FM35zAw2U6KLvB7ZTxpwjzgrksN)
 
@@ -64,7 +64,7 @@ It settles on **NEAR** (testnet, the NEAR Hackathon entry below) or on **Base**,
    - register the card key from **Home → Card key** (on the emulator, choose the **demo card**);
    - tap **Scan & pay** and paste `upi://pay?pa=meera.chai@demo&pn=Meera%20Chai&mc=5814&tr=GP0001&cu=INR` (a made-up merchant);
    - enter ₹500 and tap **Pay**;
-   - tap your card (the demo card on the emulator), then approve with your fingerprint (on the emulator, run `adb emu finger touch 1`);
+   - tap your card (the demo card on the emulator), then approve with your fingerprint if the phone has one set up (an emulator without a fingerprint signs right after the card tap);
    - the status moves through Paid, Merchant paid (with the UPI reference) and Settled.
 6. **A refund.** Restart the backend with `PAYOUT_FAILURE_RATE=1` set in the shell (it overrides the file), then pay again. You'll see **Refunded**, and the USDC is back in your balance.
 
