@@ -15,6 +15,7 @@ import 'package:globalpay/services/wallet/privy_wallet_service.dart';
 import 'package:globalpay/services/wallet/wallet_switch.dart';
 
 import '../support/fake_backend.dart';
+import '../support/fake_fingerprint.dart';
 import '../support/fake_privy.dart';
 import '../support/fake_tap.dart';
 
@@ -29,7 +30,7 @@ Widget app(FakeBackend backend, SecureStore store, {FakePrivyClient? privy, requ
     overrides: [
       appConfigProvider.overrideWithValue(config),
       secureStoreProvider.overrideWithValue(store),
-      privyWalletProvider.overrideWithValue(privy == null ? null : PrivyWalletService(privy)),
+      privyWalletProvider.overrideWithValue(privy == null ? null : PrivyWalletService(privy, gate: FakeGate())),
       devWalletEnabledProvider.overrideWithValue(debug),
       keyVaultProvider.overrideWithValue(null),
       apiClientProvider.overrideWith((ref) {

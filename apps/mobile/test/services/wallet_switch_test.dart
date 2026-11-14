@@ -5,6 +5,7 @@ import 'package:globalpay/services/wallet/dev_wallet_service.dart';
 import 'package:globalpay/services/wallet/privy_wallet_service.dart';
 import 'package:globalpay/services/wallet/wallet_switch.dart';
 
+import '../support/fake_fingerprint.dart';
 import '../support/fake_privy.dart';
 
 const anvil4 = '0x47e179ec197488593b187f80a00eb0da91f1b9d0b13f8733639f19c30a34926a';
@@ -24,7 +25,7 @@ void main() {
 
   WalletSwitch build({bool embedded = true, bool dev = true}) => WalletSwitch(
     store: store,
-    embedded: embedded ? PrivyWalletService(privy) : null,
+    embedded: embedded ? PrivyWalletService(privy, gate: FakeGate()) : null,
     dev: dev ? DevWalletService(store: store, importKey: anvil4) : null,
   );
 

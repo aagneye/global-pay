@@ -7,6 +7,7 @@ import 'package:globalpay/services/wallet/privy_sdk_client.dart';
 import 'package:globalpay/services/wallet/privy_wallet_service.dart';
 import 'package:privy_flutter/privy_flutter.dart';
 
+import '../support/fake_fingerprint.dart';
 import '../support/fake_privy.dart';
 
 const email = 'somchai@example.com';
@@ -14,16 +15,17 @@ const wallet = '0x70997970C51812dc3A010C7d01b50e0d17dc79C8';
 
 Matcher throwsAppException(String code) => throwsA(isA<AppException>().having((error) => error.code, 'code', code));
 
-/// A Privy user who is signed in and already has a wallet.
-(PrivyWalletService, FakePrivyClient) connected() {
+/// A Privy user who is signed in and already has a wallet. Every fingerprint check passes unless [gate]
+/// says otherwise.
+(PrivyWalletService, FakePrivyClient) connected({FakeGate? gate}) {
   final client = FakePrivyClient(authenticated: true, hasWallet: true);
-  return (PrivyWalletService(client), client);
+  return (PrivyWalletService(client, gate: gate ?? FakeGate()), client);
 }
 
 void main() {
   test('signs in with an email code and creates the wallet on first connect', () async {
     final client = FakePrivyClient();
-    final service = PrivyWalletService(client);
+    final service = PrivyWalletService(client, gate: FakeGate());
 
     await service.sendEmailCode(' $email ');
     expect(client.codesSentTo, [email]);
@@ -40,7 +42,7 @@ void main() {
 
   test('checks the email and the code before asking Privy', () async {
     final client = FakePrivyClient();
-    final service = PrivyWalletService(client);
+    final service = PrivyWalletService(client, gate: FakeGate());
 
     for (final bad in ['', 'somchai', 'somchai@', 'a b@example.com']) {
       await expectLater(service.sendEmailCode(bad), throwsAppException('email_invalid'), reason: bad);
@@ -51,7 +53,7 @@ void main() {
 
   test('a wrong code fails with email_code_invalid and leaves the user signed out', () async {
     final client = FakePrivyClient();
-    final service = PrivyWalletService(client);
+    final service = PrivyWalletService(client, gate: FakeGate());
 
     await service.sendEmailCode(email);
     await expectLater(service.verifyEmailCode(email: email, code: '000000'), throwsAppException('email_code_invalid'));
@@ -61,7 +63,10 @@ void main() {
 
   test('a failed send fails with email_code_not_sent', () async {
     final client = FakePrivyClient()..failures['sendEmailCode'] = PrivyFailure.sendCode;
-    await expectLater(PrivyWalletService(client).sendEmailCode(email), throwsAppException('email_code_not_sent'));
+    await expectLater(
+      PrivyWalletService(client, gate: FakeGate()).sendEmailCode(email),
+      throwsAppException('email_code_not_sent'),
+    );
   });
 
   test('sending a code signs out an earlier Privy user first', () async {
@@ -128,13 +133,58 @@ void main() {
     }
   });
 
-  test('refuses to sign before connecting', () async {
+  test('refuses to sign before connecting, without asking for the fingerprint', () async {
     final client = FakePrivyClient(authenticated: true, hasWallet: true);
-    final service = PrivyWalletService(client);
+    final gate = FakeGate();
+    final service = PrivyWalletService(client, gate: gate);
 
     await expectLater(service.signMessage('hi'), throwsAppException('wallet_not_connected'));
     await expectLater(service.signTypedData(const {}), throwsAppException('wallet_not_connected'));
     expect(client.signed, isEmpty);
+    expect(gate.reasons, isEmpty);
+  });
+
+  test('asks for the fingerprint before every signature', () async {
+    final gate = FakeGate();
+    final (service, client) = connected(gate: gate);
+    await service.connect();
+
+    await service.signMessage('hi');
+    await service.signTypedData(const {'primaryType': 'TransferWithAuthorization'});
+    await service.signTypedData(const {'primaryType': 'TransferWithAuthorization'});
+    expect(gate.reasons, ['Sign in to GlobalPay', 'Approve this payment', 'Approve this payment']);
+    expect(client.signed, hasLength(3));
+  });
+
+  test('never asks Privy to sign when the fingerprint check fails', () async {
+    final gate = FakeGate();
+    final (service, client) = connected(gate: gate);
+    await service.connect();
+
+    for (final code in ['biometric_cancelled', 'biometric_failed', 'biometric_unavailable', 'biometric_reset']) {
+      gate.failNext = AppException(code, 'no');
+      await expectLater(service.signTypedData(const {}), throwsAppException(code), reason: code);
+      gate.failNext = AppException(code, 'no');
+      await expectLater(service.signMessage('hi'), throwsAppException(code), reason: code);
+    }
+    expect(client.signed, isEmpty);
+  });
+
+  test('starts the fingerprint check over after a fresh email sign-in, not after a wrong code', () async {
+    final client = FakePrivyClient();
+    final gate = FakeGate();
+    final service = PrivyWalletService(client, gate: gate);
+
+    await service.sendEmailCode(email);
+    await expectLater(service.verifyEmailCode(email: email, code: '000000'), throwsAppException('email_code_invalid'));
+    expect(gate.startOvers, 0);
+
+    await service.verifyEmailCode(email: email, code: '123456');
+    expect(gate.startOvers, 1);
+
+    // Reconnecting a saved session doesn't.
+    await service.connect();
+    expect(gate.startOvers, 1);
   });
 
   test('maps every Privy failure to an AppException code', () async {

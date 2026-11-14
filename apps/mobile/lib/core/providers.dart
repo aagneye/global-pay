@@ -18,6 +18,7 @@ import 'package:globalpay/services/wallet/dev_wallet_service.dart';
 import 'package:globalpay/services/wallet/privy_client.dart';
 import 'package:globalpay/services/wallet/privy_sdk_client.dart';
 import 'package:globalpay/services/wallet/privy_wallet_service.dart';
+import 'package:globalpay/services/wallet/signature_gate.dart';
 import 'package:globalpay/services/wallet/wallet_service.dart';
 import 'package:globalpay/services/wallet/wallet_switch.dart';
 
@@ -35,8 +36,20 @@ final walletServiceProvider = Provider<WalletService>((ref) => ref.watch(walletS
 /// Privy's embedded wallet (email sign-in), or null when PRIVY_APP_ID and PRIVY_CLIENT_ID aren't set.
 final privyWalletProvider = Provider<PrivyWalletService?>((ref) {
   final settings = PrivySettings.fromEnvironment();
-  return settings.isConfigured ? PrivyWalletService(SdkPrivyClient(settings)) : null;
+  return settings.isConfigured
+      ? PrivyWalletService(SdkPrivyClient(settings), gate: ref.watch(signatureGateProvider))
+      : null;
 });
+
+/// The fingerprint check before every Privy signature. Release builds refuse to sign on a phone without a
+/// strong fingerprint (or face); debug builds skip the check there, so emulators can still sign.
+final signatureGateProvider = Provider<SignatureGate>(
+  (ref) => FingerprintGate(
+    vault: ref.watch(keyVaultProvider),
+    store: ref.watch(secureStoreProvider),
+    requireBiometrics: kReleaseMode,
+  ),
+);
 
 /// Whether the dev wallet (a local key) is offered: debug builds only. Tests override it.
 final devWalletEnabledProvider = Provider<bool>((ref) => kDebugMode);

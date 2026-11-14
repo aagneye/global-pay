@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:globalpay/core/errors/app_exception.dart';
 import 'package:globalpay/services/wallet/privy_client.dart';
+import 'package:globalpay/services/wallet/signature_gate.dart';
 import 'package:globalpay/services/wallet/wallet_service.dart';
 
 /// Embedded, non-custodial wallet through Privy (ADR 0003): users sign in with their email and a
@@ -10,10 +11,14 @@ import 'package:globalpay/services/wallet/wallet_service.dart';
 /// Signing in takes two steps before [connect]: [sendEmailCode], then [verifyEmailCode]. [connect] then
 /// returns the user's embedded wallet (created on first use). While Privy's session lasts, later
 /// launches reconnect without a code. Web3Auth is the fallback provider.
+///
+/// Every signature first passes the [SignatureGate]: the user's fingerprint, checked by the phone's
+/// hardware. A fresh email sign-in starts that check over.
 class PrivyWalletService implements WalletService {
-  PrivyWalletService(this._client);
+  PrivyWalletService(this._client, {required SignatureGate gate}) : _gate = gate;
 
   final PrivyClient _client;
+  final SignatureGate _gate;
   String? _address;
 
   static final _emailPattern = RegExp(r'^[^\s@]+@[^\s@]+\.[^\s@]+$');
@@ -30,11 +35,13 @@ class PrivyWalletService implements WalletService {
     });
   }
 
-  /// Step 2: signs in to Privy with the emailed code.
+  /// Step 2: signs in to Privy with the emailed code. Proving the email also starts the fingerprint
+  /// check over, which lifts the lock left when the phone's fingerprints changed.
   Future<void> verifyEmailCode({required String email, required String code}) async {
     final trimmed = code.trim();
     if (trimmed.isEmpty) throw const AppException('email_code_invalid', 'Enter the code from the email');
     await _guard(() => _client.loginWithEmailCode(email: email.trim(), code: trimmed));
+    await _gate.startOver();
   }
 
   @override
@@ -61,14 +68,18 @@ class PrivyWalletService implements WalletService {
 
   @override
   Future<String> signMessage(String message) =>
-      _sign((address) => _client.personalSign(address: address, message: message));
+      _sign('Sign in to GlobalPay', (address) => _client.personalSign(address: address, message: message));
 
   @override
-  Future<String> signTypedData(Map<String, Object?> typedData) =>
-      _sign((address) => _client.signTypedDataV4(address: address, typedDataJson: jsonEncode(typedData)));
+  Future<String> signTypedData(Map<String, Object?> typedData) => _sign(
+    'Approve this payment',
+    (address) => _client.signTypedDataV4(address: address, typedDataJson: jsonEncode(typedData)),
+  );
 
-  Future<String> _sign(Future<String> Function(String address) sign) async {
+  /// Asks for the fingerprint with [reason], then has Privy sign.
+  Future<String> _sign(String reason, Future<String> Function(String address) sign) async {
     final address = _address ?? (throw const AppException('wallet_not_connected', 'Sign in to use your wallet'));
+    await _gate.confirm(reason);
     final raw = (await _guard(() => sign(address))).trim();
     final signature = raw.startsWith('0x') ? raw : '0x$raw';
     if (!_signaturePattern.hasMatch(signature)) {
