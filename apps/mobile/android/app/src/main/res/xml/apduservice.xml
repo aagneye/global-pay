@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Tap to pay: GlobalPay's own application ID, F0 "GPAY" 00 01 (TapCard.kt, tap_protocol.dart).
+     The phone must be unlocked to answer, and the app answers only while "Pay by tap" is open. -->
+<host-apdu-service xmlns:android="http://schemas.android.com/apk/res/android"
+    android:description="@string/tap_service_description"
+    android:requireDeviceUnlock="true">
+    <aid-group android:description="@string/tap_service_description" android:category="other">
+        <aid-filter android:name="F0475041590001"/>
+    </aid-group>
+</host-apdu-service>

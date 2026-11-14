@@ -25,8 +25,8 @@ android {
         applicationId = "com.globalpay.globalpay"
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
-        // mobile_scanner and flutter_secure_storage need Android 6 (API 23).
-        minSdk = 23
+        // firebase_messaging (push for tap to pay) needs Android 7 (API 24).
+        minSdk = 24
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
@@ -43,4 +43,9 @@ android {
 
 flutter {
     source = "../.."
+}
+
+dependencies {
+    // BiometricPrompt with a CryptoObject, for the fingerprint-locked wallet key (KeyVault.kt).
+    implementation("androidx.biometric:biometric:1.1.0")
 }
