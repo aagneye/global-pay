@@ -73,3 +73,13 @@ All of these are settings (`P2P_*`).
 - **Not done yet:**
   - **No hardware test:** a tap between two physical phones, and push arriving while the app is closed, need two NFC phones and a Firebase project.
   - **No device attestation:** the backend can't yet check that a key really lives in a phone's hardware.
+
+## Update (iterations 10 and 11, 2026-11-14)
+
+- **APPROVING.** Approving first moves the request SENDER_IDENTIFIED → APPROVING (conditionally), so the receiver can't cancel it and the worker can't expire it while the transfer is relayed. The hash is recorded just before the transfer is broadcast. A request with no hash had nothing sent and goes back to SENDER_IDENTIFIED; one with a hash is followed to COMPLETED or FAILED by its receipt. Before this, a cancel or expiry during approval could move the money while the request said it hadn't.
+- **A daily limit per sender.** A sender may send at most `P2P_DAILY_LIMIT_USDC` (2,000 USDC) by tap in any 24 hours, counting APPROVING, SUBMITTED and COMPLETED requests. It's separate from the THB limits on merchant payments.
+- **History.** Sent and received tap payments show in the app's History. A received one isn't shown again as a deposit.
+- **"This phone" switch.** The home screen's menu can turn tap to pay off for the phone, which revokes its device registration (`DELETE /devices/:id`); turning it back on registers the phone again.
+- **The app checks the transfer before signing** it: recipient, amount, token, chain and nonce must match the request on screen.
+- **The fingerprint step depends on the wallet.** With the dev wallet, every signature still needs a strong biometric. With Privy (iteration 11), the default wallet, it doesn't yet; see [ADR 0003](0003-embedded-non-custodial-wallet.md) for the open decision.
+- **Stuck transfers** (no receipt after `OPS_STUCK_TX_AFTER_MS`) appear on `/ops`.

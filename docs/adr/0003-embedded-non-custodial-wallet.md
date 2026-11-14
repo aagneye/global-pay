@@ -20,3 +20,17 @@ The first users are freelancers, not crypto experts. Seed phrases cause drop-off
 - Switching provider means writing one new `WalletService` implementation.
 - Account recovery depends on the provider's recovery options.
 - External wallets (MetaMask, WalletConnect) can be added later as another `WalletService`, because `pay()` is permissionless.
+
+## Update: Privy is the default wallet (iteration 11, 2026-11-14)
+
+- **Privy is the app's wallet.** `PrivyWalletService` (`privy_flutter` 0.11.0) signs in with an email and a one-time code; Privy creates the embedded wallet on first sign-in and restores its session on later launches. `WalletSwitch` remembers which wallet the user signed in with.
+- **It must be an EOA.** Configure Privy for embedded EOA wallets, not smart wallets. The backend checks Sign-In with Ethereum offline (no ERC-1271), and `GlobalPaySettlement` calls USDC's `v, r, s` form of EIP-3009, so only plain ECDSA signatures work. The app refuses anything but a 65-byte signature.
+- **The dev wallet is for development.** `DevWalletService` is offered only in debug builds and tests. A release build without `PRIVY_APP_ID` and `PRIVY_CLIENT_ID` says sign-in isn't set up.
+- **The app checks what it signs.** Before any wallet signs, `authorization_check.dart` compares the typed data with what the screen shows and with the app's settings (chain, USDC, recipient, amount, nonce, expiry, and the settlement contract when `SETTLEMENT_ADDRESS` is set), so a compromised backend can't get a different transfer signed.
+- **Recovery** is Privy's (email). The fingerprint-sealed dev key and its loss on re-enrolment no longer matter for real users.
+- **Android needs API 28.** Privy's Android library is built for Android 9, so the app's `minSdk` went from 24 to 28. This is an owner decision: it drops Android 7 and 8 phones.
+
+Not settled yet:
+- **No fingerprint per Privy signature.** The dev wallet's key needed a strong biometric for every signature ([ADR 0010](0010-tap-to-pay.md)). Privy signs without one. The owner decides between gating Privy signatures behind a `BiometricPrompt` with a `CryptoObject` (e.g. opening a vault-sealed value before each signature) and Privy's own MFA for signing.
+- **Google sign-in** isn't wired up (it needs a redirect scheme and `PrivyRedirectActivity`).
+- **Not tried on a phone:** it needs a Privy app (an owner step). Unit and widget tests use a fake Privy client.

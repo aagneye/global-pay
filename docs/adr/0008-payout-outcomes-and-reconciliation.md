@@ -82,3 +82,15 @@ So a forged webhook can't settle anything. The route answers 200 for anything au
 - **Reversals are caught by webhooks only.** A REVERSED after settlement is seen only through the webhook: polling stops once the payment is final.
 - **The float check is a guard, not a reservation.** Payouts already in flight aren't subtracted.
 - **One shared operator token.** The operator name is self-declared. Per-person operator accounts come with production hardening (iteration 10).
+
+## Update: more exceptions on /ops (iteration 10, 2026-11-14)
+
+The exceptions list also shows:
+- `event_mismatch`: the on-chain payment differs from its quote, so it's never paid out;
+- `payment_unconfirmed`: still SUBMITTED long after its quote expired;
+- `transaction_stuck`: a `markSettled` or `refund` with no receipt after `OPS_STUCK_TX_AFTER_MS` (10 minutes);
+- `p2p_transaction_stuck`: the same for a tap-to-pay transfer (`paymentId` is the request's ID).
+
+The payout worker now asks only about payouts that are due (`nextCheckAt` passed), paging through them, so UNKNOWN payouts waiting out their backoff no longer block new payouts.
+
+The operator API is rate-limited (`RATE_LIMIT_OPS_MAX`), and wrong tokens count against that limit. **Still one shared token:** per-person operator accounts were planned for iteration 10 and moved to "Before real money" in the roadmap.

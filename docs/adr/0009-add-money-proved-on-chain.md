@@ -64,3 +64,10 @@ The order is then fetched again with `GET /v1/transactions/ext/{orderId}`, so du
   - **No operator view of stuck orders:** onramp orders don't appear on `/ops`.
   - **No sandbox run:** a real MoonPay sandbox purchase hasn't happened yet; it needs the owner's MoonPay keys.
   - **No legal review:** Thailand's Decree No. 2 on offshore digital-asset services needs counsel before launch.
+
+## Update (iteration 10, 2026-11-14)
+
+- **Expired orders are re-checked.** The onramp worker also asks about EXPIRED orders less than 24 hours old, so a purchase paid after its order expired still completes without a webhook or the user opening it.
+- **Stuck orders don't block others.** The worker pages through open orders (round robin) instead of taking the oldest 50 every time.
+- **Still not on `/ops`:** stuck onramp orders.
+- **Production refuses sandbox settings:** MoonPay test keys, the sandbox widget URL, and a missing `MOONPAY_WEBHOOK_KEY`.

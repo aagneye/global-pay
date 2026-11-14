@@ -39,3 +39,14 @@ Users' money is in the contract during that window, so nothing may be paid twice
 - Not handled yet:
   - replacing a transaction stuck at too low a gas price;
   - a FAILED payment that later shows up as paid on-chain. This needs a person; it's logged as an error.
+
+## Update: FAILED is corrected by the chain (iteration 10, 2026-11-14)
+
+The second "not handled" case is now handled, because it turned out to be reachable: two `pay()` transactions for one quote (the relayer re-signing after a nonce error that was a false alarm, or anyone relaying the same signatures) leave one of them reverted with `QuoteAlreadyUsed`.
+
+- **A payment fails only if the chain shows no payment.** The indexer reads `paymentOf` before failing a payment whose `pay()` reverted, as it already did for an expired quote.
+- **FAILED → PAID.** If a `PaymentReceived` event arrives for a FAILED payment, it becomes PAID and is paid out like any other. The app treats FAILED as final, so the change shows the next time the payment is loaded.
+- **Errors after sending keep the payment SUBMITTED.** `POST /payments` fails a payment only when nothing can have been sent: the simulation said it would revert, the chain was unreachable before signing, or there's no relayer key.
+- **Events must match their quote.** The indexer compares every field of the event (payer, token, amounts, currency, merchant) with the stored quote. A mismatch is recorded in `Payment.eventMismatch`, never paid out, and shown on `/ops`.
+- **Stuck transactions are shown, not fixed.** A `markSettled`, `refund` or tap-to-pay transfer with no receipt after `OPS_STUCK_TX_AFTER_MS` appears on `/ops`. Replacing it with a higher gas price is still not handled.
+- **Workers don't block on old work.** The payout and onramp workers page through what's due (round robin), so a pile of UNKNOWN payouts or stuck orders no longer starves new payments.
