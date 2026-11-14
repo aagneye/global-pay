@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:globalpay/core/config/app_config.dart';
@@ -14,7 +15,11 @@ import 'package:globalpay/data/repositories/payments_repository.dart';
 import 'package:globalpay/data/session_store.dart';
 import 'package:globalpay/features/auth/session_controller.dart';
 import 'package:globalpay/services/wallet/dev_wallet_service.dart';
+import 'package:globalpay/services/wallet/privy_client.dart';
+import 'package:globalpay/services/wallet/privy_sdk_client.dart';
+import 'package:globalpay/services/wallet/privy_wallet_service.dart';
 import 'package:globalpay/services/wallet/wallet_service.dart';
+import 'package:globalpay/services/wallet/wallet_switch.dart';
 
 /// Dependency graph. Tests override these with fakes through ProviderScope(overrides: ...).
 
@@ -24,12 +29,31 @@ final secureStoreProvider = Provider<SecureStore>((ref) => const FlutterSecureSt
 
 final sessionStoreProvider = Provider<SessionStore>((ref) => SessionStore(ref.watch(secureStoreProvider)));
 
-/// Switches to PrivyWalletService in iteration 7.
-final walletServiceProvider = Provider<WalletService>(
-  (ref) => DevWalletService(
+/// The wallet everything signs with: the one the user signed in with (see [walletSwitchProvider]).
+final walletServiceProvider = Provider<WalletService>((ref) => ref.watch(walletSwitchProvider));
+
+/// Privy's embedded wallet (email sign-in), or null when PRIVY_APP_ID and PRIVY_CLIENT_ID aren't set.
+final privyWalletProvider = Provider<PrivyWalletService?>((ref) {
+  final settings = PrivySettings.fromEnvironment();
+  return settings.isConfigured ? PrivyWalletService(SdkPrivyClient(settings)) : null;
+});
+
+/// Whether the dev wallet (a local key) is offered: debug builds only. Tests override it.
+final devWalletEnabledProvider = Provider<bool>((ref) => kDebugMode);
+
+/// The wallets this build signs in with: Privy's embedded wallet and, in debug builds, the dev wallet.
+/// With neither (a release build without Privy IDs), sign-in says it isn't set up.
+final walletSwitchProvider = Provider<WalletSwitch>(
+  (ref) => WalletSwitch(
     store: ref.watch(secureStoreProvider),
-    importKey: ref.watch(appConfigProvider).devWalletPrivateKey,
-    vault: ref.watch(keyVaultProvider),
+    embedded: ref.watch(privyWalletProvider),
+    dev: ref.watch(devWalletEnabledProvider)
+        ? DevWalletService(
+            store: ref.watch(secureStoreProvider),
+            importKey: ref.watch(appConfigProvider).devWalletPrivateKey,
+            vault: ref.watch(keyVaultProvider),
+          )
+        : null,
   ),
 );
 

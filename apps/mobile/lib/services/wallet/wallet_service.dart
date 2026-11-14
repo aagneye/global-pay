@@ -2,7 +2,9 @@
 ///
 /// Implementations:
 /// - [DevWalletService]: a local key in secure storage, for development and tests.
-/// - [PrivyWalletService]: an embedded wallet with email/Google login.
+/// - [PrivyWalletService]: Privy's embedded wallet, with email login.
+///
+/// The app uses [WalletSwitch], which passes calls to whichever of these the user signed in with.
 ///
 /// All addresses and signatures are 0x-prefixed hex strings.
 abstract interface class WalletService {
