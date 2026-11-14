@@ -69,9 +69,12 @@ export class FakeNearRpc {
   }
 
   private query(params: Record<string, unknown>): unknown {
+    // Error shapes as testnet's RPC sends them (checked against test.rpc.fastnear.com).
+    const inResult = (error: string) => ({ block_hash: this.blockHash, block_height: this.finalHeight, error, logs: [] });
     if (params.request_type === 'view_access_key') {
       const nonce = this.accessKeys.get(`${params.account_id}:${params.public_key}`);
-      return nonce === undefined ? rpcError('UNKNOWN_ACCESS_KEY') : { nonce: Number(nonce), permission: 'FullAccess' };
+      if (nonce === undefined) return inResult(`access key ${String(params.public_key)} does not exist while viewing`);
+      return { nonce: Number(nonce), permission: 'FullAccess' };
     }
     if (params.request_type === 'view_account') {
       const amount = this.accounts.get(String(params.account_id));
@@ -79,7 +82,7 @@ export class FakeNearRpc {
     }
     if (params.request_type === 'call_function') {
       const view = this.views.get(`${params.account_id}.${params.method_name}`);
-      if (!view) return rpcError('CONTRACT_EXECUTION_ERROR', { message: 'MethodNotFound' });
+      if (!view) return inResult('wasm execution failed with error: MethodResolveError(MethodNotFound)');
       const args = JSON.parse(Buffer.from(String(params.args_base64), 'base64').toString('utf8'));
       return { result: [...Buffer.from(JSON.stringify(view(args)))], logs: [], block_height: this.finalHeight };
     }

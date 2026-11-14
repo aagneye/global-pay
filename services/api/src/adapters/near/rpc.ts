@@ -86,6 +86,9 @@ export class NearRpc {
       throw new NearRpcError(kind, `NEAR RPC ${method}: ${kind} ${detail}`.trim(), data ?? cause?.info);
     }
     if (body.result === undefined) throw new NearRpcUnavailableError(`NEAR RPC ${method} returned no result`);
+    // Some query errors come back inside the result, e.g. {"error": "access key ... does not exist while viewing"}.
+    const inner = (body.result as { error?: unknown }).error;
+    if (method === 'query' && typeof inner === 'string') throw new NearRpcError(queryErrorKind(inner), `NEAR RPC query: ${inner}`);
     return body.result;
   }
 
@@ -127,6 +130,13 @@ export class NearRpc {
   txStatus(txHash: string, senderAccountId: string, waitUntil: TxWaitUntil): Promise<FinalExecutionOutcome> {
     return this.call('EXPERIMENTAL_tx_status', { tx_hash: txHash, sender_account_id: senderAccountId, wait_until: waitUntil });
   }
+}
+
+/** The structured error name for a query error the node reported as text. */
+function queryErrorKind(message: string): string {
+  if (/access key .* does not exist/i.test(message)) return 'UNKNOWN_ACCESS_KEY';
+  if (/account .* does not exist/i.test(message)) return 'UNKNOWN_ACCOUNT';
+  return 'CONTRACT_EXECUTION_ERROR';
 }
 
 interface RpcErrorBody {
