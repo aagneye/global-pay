@@ -388,3 +388,4 @@ impl Settlement {
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)] mod tests_edge;
