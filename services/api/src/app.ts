@@ -24,26 +24,14 @@ import { payoutWebhookRoutes } from './modules/payouts/webhook-routes.js';
 import { quoteRoutes } from './modules/quotes/routes.js';
 import { AppError } from './shared/errors.js';
 import { namedSchemasTransform } from './shared/openapi.js';
+import { type LogDestination, loggerOptions } from './shared/logging.js';
 import { registerRateLimits } from './shared/rate-limits.js';
-import { LOG_REDACT_PATHS, REDACTED } from './shared/redact.js';
 import { authHook } from './shared/request-user.js';
-
-/** Where logs go: stdout by default, or a stream (tests read one). */
-export interface LogDestination {
-  stream?: { write(line: string): void };
-  level?: string;
-}
 
 export interface BuildAppOptions {
   container: Container;
-  /** false: no logs. Secrets are redacted from whatever is logged. */
+  /** false: no logs. Secrets and personal data are kept out of whatever is logged. */
   logger?: boolean | LogDestination;
-}
-
-function loggerOptions(logger: boolean | LogDestination) {
-  if (logger === false) return false;
-  const { stream, level = 'info' } = logger === true ? {} : logger;
-  return { level, ...(stream ? { stream } : {}), redact: { paths: [...LOG_REDACT_PATHS], censor: REDACTED } };
 }
 
 export async function buildApp({ container, logger = true }: BuildAppOptions): Promise<FastifyInstance> {
@@ -74,14 +62,14 @@ export async function buildApp({ container, logger = true }: BuildAppOptions): P
       return reply.code(error.statusCode).send({ error: error.code, message: error.message });
     }
     if (isResponseSerializationError(error)) {
-      request.log.error({ err: error, cause: error.cause }, 'response did not match its schema');
+      request.log.error({ err: error }, 'response did not match its schema');
       return reply.code(500).send({ error: 'internal_error', message: 'Something went wrong' });
     }
     const statusCode = (error as { statusCode?: unknown }).statusCode;
     if (typeof statusCode === 'number' && statusCode >= 400 && statusCode < 500) {
       return reply.code(statusCode).send({ error: 'bad_request', message: (error as Error).message });
     }
-    request.log.error(error);
+    request.log.error({ err: error }, 'request failed');
     return reply.code(500).send({ error: 'internal_error', message: 'Something went wrong' });
   });
 

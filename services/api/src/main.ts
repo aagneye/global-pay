@@ -2,6 +2,7 @@ import { existsSync } from 'node:fs';
 import { buildApp } from './app.js';
 import { loadEnv } from './config/env.js';
 import { buildContainer } from './container.js';
+import { installCrashHandlers } from './shared/logging.js';
 
 // `--env <path>` loads that settings file instead of .env, e.g. .env.base-sepolia (from `npm run testnet -- init`).
 // Only one file is loaded, so two setups never mix. (Not --env-file: Node takes that one for itself.)
@@ -14,6 +15,8 @@ else if (flag !== -1) throw new Error(`No such env file: ${envFile}`);
 const env = loadEnv();
 const container = buildContainer(env);
 const app = await buildApp({ container });
+// From here on, anything nothing caught is logged scrubbed; an uncaught exception exits 1.
+installCrashHandlers(app.log);
 
 container.workers.indexer.start(app.log);
 container.workers.payouts.start(app.log);
@@ -36,4 +39,9 @@ async function shutdown(signal: string): Promise<void> {
 process.once('SIGINT', () => void shutdown('SIGINT'));
 process.once('SIGTERM', () => void shutdown('SIGTERM'));
 
-await app.listen({ host: env.HOST, port: env.PORT });
+try {
+  await app.listen({ host: env.HOST, port: env.PORT });
+} catch (error) {
+  app.log.fatal({ err: error }, 'could not start the server');
+  process.exit(1);
+}

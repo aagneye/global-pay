@@ -57,7 +57,7 @@ src/
   workers/            indexer (chain events), payout worker (pay out, then settle or refund),
                       onramp worker (Add-money orders), deposit watcher (incoming USDC),
                       p2p worker (tap-to-pay expiry and receipts)
-  shared/             errors, zod schemas, auth hook, rate limits
+  shared/             errors, zod schemas, auth hook, rate limits, log redaction and error scrubbing
   generated/prisma/   Prisma client (generated on npm install, gitignored)
 prisma/               schema and migrations
 scripts/              developer tools (demo QR generator, Xendit sandbox check, OpenAPI export)
@@ -185,6 +185,12 @@ Push needs `FCM_SERVICE_ACCOUNT_FILE`; without it the apps poll. The rules are i
 - fields: `signature`, `qrPayload`, `fcmToken`, `publicKey`, `displayName`, `challenge`, tokens, passwords, secret and private keys, bank account details and email.
 
 Fastify's request logs only show the method, URL and status anyway; redaction covers code that logs more. Don't put secrets in URLs.
+
+**Error reporting without personal data** (`src/shared/redact.ts`, `src/shared/logging.ts`). Logs are the error report: ship entries at level 50+ (error, fatal) from stdout to whichever error tracker you use. Before anything is written:
+- every logged error (`err`) is scrubbed in full: secret fields at any depth, its message, stack and causes;
+- in that text and in log messages, these are replaced: 32+ bytes of hex (keys, signatures, hashes), JWTs, `Bearer` values, PromptPay QR payloads, and credentials in URLs (`user:password@`, `?key=`, an RPC provider's `/v2/<key>`). 20-byte addresses stay, to follow a payment.
+
+`src/main.ts` installs process handlers. An uncaught exception is logged (scrubbed), then the process exits with 1 for the supervisor to restart it; the workers resume from the database and the chain. An unhandled promise rejection is logged and the server keeps running.
 
 **Production checks** (`src/config/env.ts`). With `NODE_ENV=production` the server refuses to start with:
 - the local anvil chain (`CHAIN_ID` or `ONRAMP_CHAIN_ID` 31337), or any of anvil's ten public keys as `QUOTE_SIGNER_PRIVATE_KEY` or `RELAYER_PRIVATE_KEY`;

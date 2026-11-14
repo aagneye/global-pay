@@ -79,4 +79,29 @@ describe('log redaction', () => {
     expect(nested.request.headers['moonpay-signature-v2']).toBe('[Redacted]');
     expect(logs.entries().some((entry) => entry.msg === 'incoming request')).toBe(true);
   });
+
+  it('logs a failing request with its error scrubbed, and tells the client nothing', async () => {
+    const logs = captureLogs();
+    testApp = await buildTestApp({ logger: { stream: logs.stream } });
+    const { app } = testApp;
+    const key = ANVIL.accounts.payer.privateKey;
+    const signature = `0x${'ef'.repeat(65)}`;
+    app.post('/test/fail', async () => {
+      // Like a chain library's error: the request it sent, signature and all.
+      const cause = Object.assign(new Error(`execution reverted; data ${signature}`), { request: { signature, qrPayload: 'qr', relayerKey: key } });
+      throw new Error(`relay failed with key ${key}`, { cause });
+    });
+
+    const response = await app.inject({ method: 'POST', url: '/test/fail', payload: {} });
+    expect(response.statusCode).toBe(500);
+    expect(response.json()).toEqual({ error: 'internal_error', message: 'Something went wrong' });
+
+    const text = logs.text();
+    expect(text).not.toContain(key.slice(2));
+    expect(text).not.toContain(signature.slice(2));
+    const failed = logs.entries().find((entry) => entry.msg === 'request failed') as { level: number; err: Record<string, any> };
+    expect(failed.level).toBe(50);
+    expect(failed.err.message).toBe('relay failed with key [Redacted hex]');
+    expect(failed.err.cause).toMatchObject({ message: 'execution reverted; data [Redacted hex]', request: { signature: '[Redacted]', qrPayload: '[Redacted]' } });
+  });
 });
