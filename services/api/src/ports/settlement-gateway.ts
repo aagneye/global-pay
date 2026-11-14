@@ -1,6 +1,6 @@
 import type { Address, Hex } from 'viem';
 import type { TransferAuthorization } from '../domain/p2p.js';
-import type { ReceiveAuthorization, SignedQuote } from '../domain/quote.js';
+import type { PaymentAuthorization, SignedQuote } from '../domain/quote.js';
 import { AppError } from '../shared/errors.js';
 
 /** Decoded `IGlobalPaySettlement.PaymentReceived` event. */
@@ -64,8 +64,12 @@ export interface BroadcastOptions {
  * Writes are simulated first: a call that would revert throws TransactionRejectedError and sends nothing.
  */
 export interface SettlementGateway {
-  /** Relayer submits `pay()` and pays the gas. Returns the transaction hash once the node accepted it. */
-  submitPayment(signed: SignedQuote, authorization: ReceiveAuthorization): Promise<Hex>;
+  /**
+   * Relayer submits the payment and pays the gas: `pay()` with the EIP-3009 authorisation (EVM rail), or the
+   * user's signed delegate action as a meta transaction (NEAR rail). Returns the transaction hash once the
+   * node accepted it.
+   */
+  submitPayment(signed: SignedQuote, authorization: PaymentAuthorization): Promise<Hex>;
   markSettled(quoteId: Hex): Promise<Hex>;
   /**
    * Relayer submits USDC `transferWithAuthorization` (person-to-person) and pays the gas.

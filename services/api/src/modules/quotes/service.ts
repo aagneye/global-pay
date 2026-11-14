@@ -2,7 +2,7 @@ import { randomBytes } from 'node:crypto';
 import { type Address, type Hex, bytesToHex, getAddress } from 'viem';
 import { FIAT_DECIMALS, TOKEN_DECIMALS } from '../../domain/money.js';
 import { type Price, priceInToken } from '../../domain/pricing.js';
-import type { AuthorizationToSign, Quote, QuoteRequest, SignedQuote } from '../../domain/quote.js';
+import type { AuthorizationToSign, NearPaymentToSign, Quote, QuoteRequest, SignedQuote } from '../../domain/quote.js';
 import { merchantRef, merchantRefHash } from '../../lib/promptpay/merchant-ref.js';
 import { parsePromptPayQr } from '../../lib/promptpay/parse.js';
 import { toUnixSeconds } from '../../lib/typed-data.js';
@@ -12,6 +12,7 @@ import type { RateProvider } from '../../ports/rate-provider.js';
 import type { KycRepository, PaymentRepository, QuoteRepository, UserRepository } from '../../ports/repositories.js';
 import type { SettlementGateway } from '../../ports/settlement-gateway.js';
 import { AppError } from '../../shared/errors.js';
+import { parseWallet } from '../../shared/schemas.js';
 import { enforceSpendingLimit } from '../kyc/limits.js';
 
 export interface QuoteServiceDeps {
@@ -38,8 +39,10 @@ export interface QuoteServiceDeps {
 
 export interface QuoteResponse extends SignedQuote {
   pricing: Price & { rateSource: string };
-  /** What the user's wallet must sign (USDC ReceiveWithAuthorization, nonce = quoteId). */
-  authorizationToSign: AuthorizationToSign;
+  /** EVM rail: what the user's wallet must sign (USDC ReceiveWithAuthorization, nonce = quoteId). */
+  authorizationToSign?: AuthorizationToSign;
+  /** NEAR rail: the `ft_transfer_call` the user's key signs as a delegate action. */
+  nearPayment?: NearPaymentToSign;
 }
 
 /**
@@ -61,6 +64,7 @@ export class QuoteService {
 
   async createQuote(request: QuoteRequest): Promise<QuoteResponse> {
     const { deps } = this;
+    parseWallet('evm', request.payer);
     const settlementAddress = deps.settlementAddress;
     if (!settlementAddress) {
       throw new AppError('not_configured', 'Quotes need SETTLEMENT_ADDRESS to be set', 503);

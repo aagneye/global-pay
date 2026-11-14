@@ -3,6 +3,7 @@ import { createSiweMessage, generateSiweNonce, parseSiweMessage, validateSiweMes
 import type { User } from '../../domain/user.js';
 import type { SiweNonceRepository, UserRepository } from '../../ports/repositories.js';
 import { AppError } from '../../shared/errors.js';
+import { isHex, parseWallet } from '../../shared/schemas.js';
 import type { AccessTokens } from './tokens.js';
 
 export interface AuthServiceDeps {
@@ -52,6 +53,7 @@ export class AuthService {
   }
 
   async createNonce(address: Address): Promise<NonceResponse> {
+    parseWallet('evm', address);
     const issuedAt = this.now();
     const expiresAt = new Date(issuedAt.getTime() + this.nonceTtlSeconds * 1000);
     const nonce = generateSiweNonce();
@@ -71,7 +73,8 @@ export class AuthService {
     return { nonce, message, expiresAt };
   }
 
-  async verify(message: string, signature: Hex): Promise<SignInResponse> {
+  async verify(message: string, signature: string, _publicKey?: string): Promise<SignInResponse> {
+    if (!isHex(signature)) throw new AppError('invalid_request', 'signature: expected 0x-prefixed hex', 400);
     const now = this.now();
     const fields = parseSiweMessage(message);
     const { address, nonce } = fields;

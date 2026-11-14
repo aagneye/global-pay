@@ -13,7 +13,7 @@ import {
 } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
 import type { TransferAuthorization } from '../../domain/p2p.js';
-import type { ReceiveAuthorization, SignedQuote } from '../../domain/quote.js';
+import type { PaymentAuthorization, SignedQuote } from '../../domain/quote.js';
 import { quoteStruct } from '../../lib/typed-data.js';
 import {
   type BroadcastOptions,
@@ -70,7 +70,10 @@ export class ViemSettlementGateway implements SettlementGateway {
     this.receiptTimeoutMs = options.receiptTimeoutMs ?? 120_000;
   }
 
-  async submitPayment({ quote, signature }: SignedQuote, authorization: ReceiveAuthorization): Promise<Hex> {
+  async submitPayment({ quote, signature }: SignedQuote, authorization: PaymentAuthorization): Promise<Hex> {
+    if (authorization.kind === 'near-delegate') {
+      throw new AppError('invalid_authorization', 'This server settles on the EVM rail; send the EIP-3009 authorisation', 422);
+    }
     const { v, yParity, r, s } = parseSignature(authorization.signature);
     return this.write('pay', [
       quoteStruct(quote),

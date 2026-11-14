@@ -1,5 +1,6 @@
 import type { Address, Hex } from 'viem';
 import { z } from 'zod';
+import { AppError } from './errors.js';
 
 /*
  * Request schemas validate and convert (e.g. integer strings → bigint).
@@ -10,12 +11,62 @@ const ADDRESS = /^0x[a-fA-F0-9]{40}$/;
 const HEX = /^0x(?:[a-fA-F0-9]{2})*$/;
 const BYTES32 = /^0x[a-fA-F0-9]{64}$/;
 const UINT = /^\d+$/;
+/** A NEAR implicit account: the 32-byte ed25519 public key as lowercase hex. */
+const NEAR_IMPLICIT_ACCOUNT = /^[0-9a-f]{64}$/;
+const BASE64 = /^[A-Za-z0-9+/]+={0,2}$/;
+const NEAR_PUBLIC_KEY = /^ed25519:[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 
 /** 0x-prefixed 20-byte EVM address. */
 export const addressSchema = z
   .string()
   .regex(ADDRESS, 'expected a 0x-prefixed 20-byte address')
   .transform((value) => value as Address);
+
+/**
+ * A wallet: a 0x-prefixed EVM address (EVM rail) or a NEAR implicit account, 64 lowercase hex (NEAR rail).
+ * A plain string here: the services check it against the active settlement rail (`parseWallet`).
+ * Typed `Address` for the shared code; on the NEAR rail it holds the account ID.
+ */
+export const walletSchema = z
+  .string()
+  .min(1)
+  .max(128)
+  .transform((value) => value as Address);
+
+export type SettlementRail = 'evm' | 'near';
+
+/**
+ * The wallet in the active rail's format: a checksum-insensitive 0x address (EVM) or a NEAR implicit
+ * account (NEAR). Anything else is a 400, like a schema error.
+ */
+export function parseWallet(rail: SettlementRail, value: string): Address {
+  if (rail === 'near') {
+    if (!NEAR_IMPLICIT_ACCOUNT.test(value)) {
+      throw new AppError('invalid_request', 'expected a NEAR implicit account (64 lowercase hex)', 400);
+    }
+    return value as Address;
+  }
+  if (!ADDRESS.test(value)) throw new AppError('invalid_request', 'expected a 0x-prefixed 20-byte address', 400);
+  return value as Address;
+}
+
+/** Standard base64, e.g. a borsh-encoded NEAR SignedDelegate or an ed25519 signature. */
+export const base64Schema = z.string().regex(BASE64, 'expected base64');
+
+/** A NEAR ed25519 public key, "ed25519:" + base58. */
+export const nearPublicKeySchema = z.string().regex(NEAR_PUBLIC_KEY, 'expected "ed25519:" followed by a base58 public key');
+
+export function isEvmAddress(value: string): value is Address {
+  return ADDRESS.test(value);
+}
+
+export function isNearImplicitAccount(value: string): boolean {
+  return NEAR_IMPLICIT_ACCOUNT.test(value);
+}
+
+export function isHex(value: string): value is Hex {
+  return HEX.test(value);
+}
 
 /** 0x-prefixed hex string with whole bytes (signatures, calldata). */
 export const hexSchema = z

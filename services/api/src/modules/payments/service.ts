@@ -1,5 +1,5 @@
 import { type Address, type Hex, isAddressEqual, recoverTypedDataAddress } from 'viem';
-import type { ReceiveAuthorization } from '../../domain/quote.js';
+import type { PaymentAuthorization, ReceiveAuthorization } from '../../domain/quote.js';
 import { RECEIVE_WITH_AUTHORIZATION_TYPES } from '../../lib/typed-data.js';
 import type { KycRepository, PaymentRepository, QuoteRepository, StoredQuote } from '../../ports/repositories.js';
 import {
@@ -25,7 +25,7 @@ export interface PaymentServiceDeps {
 export interface SubmitPaymentInput {
   userId: string;
   quoteId: Hex;
-  authorization: ReceiveAuthorization;
+  authorization: PaymentAuthorization;
 }
 
 /**
@@ -93,7 +93,14 @@ export class PaymentService {
   }
 
   /** The signature must be the payer's, over exactly this quote. Checking it here saves a doomed transaction. */
-  private async checkAuthorization({ quote }: StoredQuote, authorization: ReceiveAuthorization): Promise<void> {
+  private async checkAuthorization(stored: StoredQuote, authorization: PaymentAuthorization): Promise<void> {
+    if (authorization.kind === 'near-delegate') {
+      throw new AppError('invalid_authorization', 'This server settles on the EVM rail; sign authorizationToSign', 422);
+    }
+    await this.checkReceiveAuthorization(stored, authorization);
+  }
+
+  private async checkReceiveAuthorization({ quote }: StoredQuote, authorization: ReceiveAuthorization): Promise<void> {
     const settlementAddress = this.deps.settlementAddress;
     if (!settlementAddress) {
       throw new AppError('not_configured', 'Payments need SETTLEMENT_ADDRESS to be set', 503);

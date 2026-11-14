@@ -21,16 +21,17 @@ describe('http app', () => {
   });
 
   it('validates request bodies before calling services', async () => {
-    const response = await app.inject({
-      method: 'POST',
-      url: '/auth/nonce',
-      payload: { address: 'not-an-address' },
-    });
+    const response = await app.inject({ method: 'POST', url: '/auth/nonce', payload: { address: 42 } });
     expect(response.statusCode).toBe(400);
-    expect(response.json()).toMatchObject({
-      error: 'invalid_request',
-      issues: [{ path: '/address', message: 'expected a 0x-prefixed 20-byte address' }],
-    });
+    expect(response.json()).toMatchObject({ error: 'invalid_request', issues: [{ path: '/address' }] });
+  });
+
+  it("refuses a wallet in another rail's format", async () => {
+    const response = await app.inject({ method: 'POST', url: '/auth/nonce', payload: { address: 'not-an-address' } });
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toEqual({ error: 'invalid_request', message: 'expected a 0x-prefixed 20-byte address' });
+    const near = await app.inject({ method: 'POST', url: '/auth/nonce', payload: { address: 'ab'.repeat(32) } });
+    expect(near.statusCode).toBe(400);
   });
 
   it('serves the account routes to a signed-in user', async () => {

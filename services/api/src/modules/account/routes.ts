@@ -6,7 +6,7 @@ import { PaymentDto } from '../payments/routes.js';
 import type { AccountService } from './service.js';
 
 const BalanceDto = z.object({
-  token: out.address,
+  token: z.string().meta({ description: 'USDC: its 0x address (EVM rail) or contract account ID (NEAR rail)' }),
   units: out.uint.meta({ description: 'Token base units' }),
   decimals: z.number().int(),
 }).meta({ id: 'Balance' });
