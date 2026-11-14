@@ -1,10 +1,26 @@
+import 'dart:math';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:globalpay/core/errors/app_exception.dart';
+import 'package:globalpay/domain/models/money.dart';
 
 /// "0x15d3…6A65"
 String shortAddress(String address) =>
     address.length <= 12 ? address : '${address.substring(0, 6)}…${address.substring(address.length - 4)}';
+
+/// A token amount for display: grouped whole units and [fractionDigits] decimals, cut rather than rounded,
+/// so it never shows more than the wallet holds. 10000.129999 USDC -> (whole: "10,000", fraction: ".12").
+({String whole, String fraction}) displayParts(TokenAmount amount, {int fractionDigits = 2}) {
+  final digits = min(fractionDigits, amount.decimals);
+  final text = formatMinorUnits(amount.units ~/ BigInt.from(10).pow(amount.decimals - digits), digits);
+  final sign = text.startsWith('-') ? '-' : '';
+  final unsigned = text.substring(sign.length);
+  final dot = unsigned.indexOf('.');
+  final whole = dot == -1 ? unsigned : unsigned.substring(0, dot);
+  final grouped = whole.replaceAllMapped(RegExp(r'\B(?=(\d{3})+(?!\d))'), (_) => ',');
+  return (whole: '$sign$grouped', fraction: dot == -1 ? '' : unsigned.substring(dot));
+}
 
 /// A message for any error: the backend's own message for [AppException]s.
 String describeError(Object error) => switch (error) {

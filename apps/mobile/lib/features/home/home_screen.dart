@@ -2,8 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:globalpay/app/router.dart';
+import 'package:globalpay/app/theme.dart';
 import 'package:globalpay/core/providers.dart';
 import 'package:globalpay/core/widgets/common.dart';
+import 'package:globalpay/domain/models/money.dart';
 import 'package:globalpay/features/auth/session_controller.dart';
 import 'package:globalpay/features/history/history_screen.dart';
 import 'package:globalpay/features/home/account_providers.dart';
@@ -33,9 +35,12 @@ class HomeScreen extends ConsumerWidget {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('GlobalPay'),
+        titleSpacing: 20,
+        title: const Wordmark(),
         actions: [
           PopupMenuButton<String>(
+            icon: const Icon(Icons.more_horiz),
+            tooltip: 'Menu',
             onSelected: (value) {
               if (value == 'sign-out') ref.read(sessionProvider.notifier).signOut();
               if (value == 'name') _editName(context, ref);
@@ -47,116 +52,226 @@ class HomeScreen extends ConsumerWidget {
               PopupMenuItem(value: 'sign-out', child: Text('Sign out')),
             ],
           ),
+          const SizedBox(width: 8),
         ],
       ),
       body: RefreshIndicator(
         onRefresh: refresh,
         child: ListView(
-          padding: const EdgeInsets.all(16),
+          padding: const EdgeInsets.fromLTRB(20, 8, 20, 32),
           children: [
-            Card(
-              child: Padding(
-                padding: const EdgeInsets.all(20),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text('USDC balance', style: theme.textTheme.labelLarge),
-                    const SizedBox(height: 8),
-                    switch (balance) {
-                      AsyncData(:final value) => Text(
-                        value.amount.format(),
-                        key: const Key('balance'),
-                        style: theme.textTheme.headlineMedium,
-                      ),
-                      AsyncError(:final error) => Text(describeError(error), style: theme.textTheme.bodyMedium),
-                      _ => const LinearProgressIndicator(),
-                    },
-                    const SizedBox(height: 12),
-                    InkWell(
-                      onTap: () => copyToClipboard(context, address, label: 'Address copied'),
-                      child: Row(
-                        children: [
-                          Text(shortAddress(address), style: theme.textTheme.bodyMedium),
-                          const SizedBox(width: 6),
-                          Icon(Icons.copy, size: 16, color: theme.colorScheme.outline),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-            const SizedBox(height: 16),
-            FilledButton.icon(
-              onPressed: () => context.push(Routes.scan),
-              icon: const Icon(Icons.qr_code_scanner),
-              label: const Text('Scan & pay'),
-              style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(56)),
-            ),
-            const SizedBox(height: 12),
+            _BalanceCard(balance: balance, address: address),
+            const SizedBox(height: 28),
             Row(
               children: [
-                Expanded(
-                  child: FilledButton.tonalIcon(
-                    onPressed: () => context.push(Routes.request),
-                    icon: const Icon(Icons.call_received),
-                    label: const Text('Request'),
-                  ),
+                _QuickAction(icon: Icons.south_west, label: 'Request', onTap: () => context.push(Routes.request)),
+                _QuickAction(
+                  icon: Icons.contactless_outlined,
+                  label: 'Pay by tap',
+                  onTap: () => context.push(Routes.payByTap),
                 ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: FilledButton.tonalIcon(
-                    onPressed: () => context.push(Routes.payByTap),
-                    icon: const Icon(Icons.contactless),
-                    label: const Text('Pay by tap'),
+                _QuickAction(icon: Icons.add, label: 'Add money', onTap: () => context.push(Routes.addMoney)),
+                _QuickAction(icon: Icons.qr_code_2, label: 'Receive', onTap: () => context.push(Routes.receive)),
+              ],
+            ),
+            const SizedBox(height: 36),
+            Row(
+              children: [
+                Expanded(child: Text('Recent payments', style: theme.textTheme.titleMedium)),
+                TextButton(
+                  onPressed: () => context.push(Routes.history),
+                  child: const Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [Text('History'), SizedBox(width: 4), Icon(Icons.arrow_forward, size: 16)],
                   ),
                 ),
               ],
             ),
-            const SizedBox(height: 12),
-            FilledButton.tonalIcon(
-              onPressed: () => context.push(Routes.addMoney),
-              icon: const Icon(Icons.add_card),
-              label: const Text('Add money'),
-              style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(48)),
-            ),
-            const SizedBox(height: 12),
-            Row(
-              children: [
-                Expanded(
-                  child: OutlinedButton.icon(
-                    onPressed: () => context.push(Routes.receive),
-                    icon: const Icon(Icons.qr_code),
-                    label: const Text('Receive'),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: OutlinedButton.icon(
-                    onPressed: () => context.push(Routes.history),
-                    icon: const Icon(Icons.receipt_long),
-                    label: const Text('History'),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 24),
-            Text('Recent payments', style: theme.textTheme.titleMedium),
-            const SizedBox(height: 8),
+            const SizedBox(height: 4),
             switch (history) {
-              AsyncData(:final value) when value.isEmpty => Padding(
-                padding: const EdgeInsets.symmetric(vertical: 16),
-                child: Text('No payments yet.', style: theme.textTheme.bodyMedium),
-              ),
+              AsyncData(:final value) when value.isEmpty => const _NoPayments(),
               AsyncData(:final value) => Column(children: [for (final p in value.take(3)) PaymentTile(payment: p)]),
               AsyncError(:final error) => ErrorView(error: error, onRetry: () => ref.invalidate(historyProvider)),
               _ => const Padding(
-                padding: EdgeInsets.all(16),
-                child: Center(child: CircularProgressIndicator()),
+                padding: EdgeInsets.all(24),
+                child: Center(child: SizedBox.square(dimension: 20, child: CircularProgressIndicator(strokeWidth: 2))),
               ),
             },
           ],
         ),
+      ),
+    );
+  }
+}
+
+/// The black card: balance, address, and the main action.
+class _BalanceCard extends StatelessWidget {
+  const _BalanceCard({required this.balance, required this.address});
+
+  final AsyncValue<({TokenAmount amount, String token})> balance;
+  final String address;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    const soft = Color(0x99FFFFFF);
+    return Container(
+      padding: const EdgeInsets.fromLTRB(24, 22, 24, 24),
+      decoration: const BoxDecoration(color: Brand.ink, borderRadius: BorderRadius.all(Radius.circular(28))),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Text('Balance', style: theme.textTheme.labelLarge?.copyWith(color: soft)),
+              const Spacer(),
+              const AccentTag('USDC'),
+            ],
+          ),
+          const SizedBox(height: 16),
+          switch (balance) {
+            AsyncData(:final value) => _Amount(value.amount),
+            AsyncError(:final error) => Text(
+              describeError(error),
+              style: theme.textTheme.bodyMedium?.copyWith(color: Brand.paper),
+            ),
+            _ => const Padding(
+              padding: EdgeInsets.symmetric(vertical: 24),
+              child: LinearProgressIndicator(color: Brand.paper, backgroundColor: Color(0x33FFFFFF)),
+            ),
+          },
+          const SizedBox(height: 4),
+          InkWell(
+            onTap: () => copyToClipboard(context, address, label: 'Address copied'),
+            borderRadius: const BorderRadius.all(Radius.circular(8)),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 4),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    shortAddress(address),
+                    style: theme.textTheme.bodyMedium?.copyWith(color: soft, letterSpacing: 0.4),
+                  ),
+                  const SizedBox(width: 6),
+                  const Icon(Icons.copy_rounded, size: 14, color: soft),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 22),
+          SizedBox(
+            width: double.infinity,
+            child: FilledButton.icon(
+              onPressed: () => context.push(Routes.scan),
+              style: FilledButton.styleFrom(backgroundColor: Brand.paper, foregroundColor: Brand.ink),
+              icon: const Icon(Icons.qr_code_scanner),
+              label: const Text('Scan & pay'),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// "10,000" large, ".00" dimmed; screen readers hear the exact amount.
+class _Amount extends StatelessWidget {
+  const _Amount(this.amount);
+
+  final TokenAmount amount;
+
+  @override
+  Widget build(BuildContext context) {
+    final parts = displayParts(amount);
+    final style = Theme.of(context).textTheme.displaySmall?.copyWith(
+      color: Brand.paper,
+      fontSize: 46,
+      fontWeight: FontWeight.w500,
+      letterSpacing: -1.6,
+      fontFeatures: const [FontFeature.tabularFigures()],
+    );
+    return Text.rich(
+      key: const Key('balance'),
+      semanticsLabel: amount.format(),
+      maxLines: 1,
+      TextSpan(
+        children: [
+          TextSpan(text: parts.whole, style: style),
+          TextSpan(
+            text: parts.fraction,
+            style: style?.copyWith(color: const Color(0x80FFFFFF)),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// A round icon with its label underneath.
+class _QuickAction extends StatelessWidget {
+  const _QuickAction({required this.icon, required this.label, required this.onTap});
+
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Expanded(
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: const BorderRadius.all(Radius.circular(16)),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 6),
+          child: Column(
+            children: [
+              Container(
+                width: 58,
+                height: 58,
+                decoration: const BoxDecoration(color: Brand.mist, shape: BoxShape.circle),
+                child: Icon(icon, size: 24, color: Brand.ink),
+              ),
+              const SizedBox(height: 10),
+              Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: Theme.of(context).textTheme.labelMedium?.copyWith(fontWeight: FontWeight.w500),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _NoPayments extends StatelessWidget {
+  const _NoPayments();
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(vertical: 28, horizontal: 20),
+      decoration: BoxDecoration(
+        border: Border.all(color: Brand.line),
+        borderRadius: const BorderRadius.all(Radius.circular(20)),
+      ),
+      child: Column(
+        children: [
+          const Icon(Icons.receipt_long_outlined, color: Brand.muted),
+          const SizedBox(height: 10),
+          Text('No payments yet.', style: theme.textTheme.titleSmall),
+          const SizedBox(height: 4),
+          Text(
+            'Scan a PromptPay code to make your first one.',
+            style: theme.textTheme.bodySmall,
+            textAlign: TextAlign.center,
+          ),
+        ],
       ),
     );
   }
@@ -198,7 +313,11 @@ Future<void> _thisPhone(BuildContext context, WidgetRef ref) async {
   final deviceId = off ? null : await tapToPay.deviceId();
   if (!context.mounted) return;
   final (title, message, action) = switch ((off, deviceId)) {
-    (true, _) => ('Tap to pay is off', "This phone doesn't pay by tap. You can still pay by scanning a code.", 'Turn on'),
+    (true, _) => (
+      'Tap to pay is off',
+      "This phone doesn't pay by tap. You can still pay by scanning a code.",
+      'Turn on',
+    ),
     (false, null) => ('This phone', "This phone can't pay by tap. You can still pay by scanning a code.", null),
     (false, _) => (
       'Turn off tap to pay?',
@@ -222,7 +341,9 @@ Future<void> _thisPhone(BuildContext context, WidgetRef ref) async {
   String result;
   try {
     if (off) {
-      result = await tapToPay.turnOn() ? 'Tap to pay is on for this phone' : "Couldn't turn tap to pay on. Try again later.";
+      result = await tapToPay.turnOn()
+          ? 'Tap to pay is on for this phone'
+          : "Couldn't turn tap to pay on. Try again later.";
     } else {
       await tapToPay.turnOff();
       result = 'Tap to pay is off for this phone';

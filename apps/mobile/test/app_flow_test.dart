@@ -96,7 +96,7 @@ void main() {
     // KYC: the mock approves, and the router opens home.
     await tap(tester, 'Continue');
     await pumpUntil(tester, find.byKey(const Key('balance')));
-    expect(find.text('10000.000000 USDC'), findsOneWidget);
+    expect(find.text('10,000.00', findRichText: true), findsOneWidget);
     expect(backend.requests.last.auth, 'Bearer test-token');
 
     // Scan (pasted text), then confirm the quote.
