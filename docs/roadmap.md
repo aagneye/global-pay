@@ -315,21 +315,21 @@ The rules are in [ADR 0003](adr/0003-embedded-non-custodial-wallet.md).
   - "Sign-in isn't set up" in a release build without the Privy IDs.
 - [x] **Settings:** `PRIVY_APP_ID` and `PRIVY_CLIENT_ID` are dart-defines, never committed.
 - [x] **Android:** `minSdk` 24 → 28 (Privy's Android library), plus a packaging exclude for a duplicated `META-INF` file.
-- [x] **A fingerprint before every Privy signature** (owner decision, 2026-11-14): `FingerprintGate` opens a token sealed by the Keystore's fingerprint-locked key; changed fingerprints lock it until the next email sign-in. Release builds refuse to sign without a strong biometric.
+- [x] **A fingerprint before every Privy signature** (owner decision, 2026-11-14): `FingerprintGate` opens a token sealed by the Keystore's fingerprint-locked key; changed fingerprints lock it until the next email sign-in. Release builds refuse to sign on a phone that can't do the check.
+- [x] **The screen lock on phones without a strong fingerprint** (owner decision, 2026-11-14): on Android 11 and later, a phone with only face unlock, or no biometric, approves with its PIN, pattern or password through the same Keystore check. Android 9 and 10 still need a fingerprint.
 
 **Result:** the sign-in screen, the wallet, the switch and session restore are tested against a fake Privy client. The "done when" (a new user signs up with email and completes a payment) needs a real Privy app, so it hasn't been checked on a device yet.
 
 **Not done yet:**
 - **A real sign-up and payment** on an emulator or phone, with the owner's Privy app and a funded wallet (the simulated onramp on anvil, or a faucet on Base Sepolia).
 - **Google sign-in.** It needs an app URL scheme and Privy's `PrivyRedirectActivity`.
-- **The fingerprint gate on a phone:** a real fingerprint, a cancelled prompt, and the lock after changing fingerprints.
+- **The fingerprint gate on a phone:** a real fingerprint, a cancelled prompt, the lock after changing fingerprints, and a phone with only face unlock paying with its PIN.
 
 ## Decisions for the owner
 
 1. **minSdk 28 (Android 9 and later)** for Privy. It drops Android 7 and 8 phones. Accept it, or choose a wallet SDK that supports API 24.
-2. **Phones without a strong fingerprint.** Every Privy signature now needs the fingerprint (decided 2026-11-14), and release builds refuse to sign on a phone with only weak biometrics (most face unlock) or none. Accept that, or also allow the screen-lock PIN on Android 11 and later.
-3. **Configure Privy for embedded EOA wallets**, not smart wallets. The backend checks sign-in offline and the contract uses USDC's `v, r, s` EIP-3009, so smart-wallet signatures would fail.
-4. **Limits:**
+2. **Configure Privy for embedded EOA wallets**, not smart wallets. The backend checks sign-in offline and the contract uses USDC's `v, r, s` EIP-3009, so smart-wallet signatures would fail.
+3. **Limits:**
    - `P2P_DAILY_LIMIT_USDC` (2,000 USDC) and the KYC tier limits are demo values;
    - `MERCHANT_QR_ONLY` is now forced on in production, while Xendit's rail pays only personal (tag 29) QRs, so production needs a partner that pays merchant QRs (Krungsri or a licensed partner).
 

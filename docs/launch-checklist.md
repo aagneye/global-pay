@@ -125,7 +125,7 @@ The aim: no single person can move funds or change roles, and there's a written 
   - the financial features declaration, and Play's policy on cryptocurrency exchanges and software wallets (check its country-specific licensing rules for Thailand);
   - the notification permission (Android 13+) and NFC use explained to the user;
   - a review account that works without real money.
-- [ ] **MOB-7 [sign-off]** Tested on real phones: a tap between two NFC phones, push arriving with the app closed, and the Add-money Custom Tab (pending from iterations 8 and 9). With Privy: sign-in and every payment ask for the fingerprint, cancelling signs nothing, and changing the phone's fingerprints asks for an email sign-in before the next signature ([APP-1](security.md#51-mobile-app-appsmobile)).
+- [ ] **MOB-7 [sign-off]** Tested on real phones: a tap between two NFC phones, push arriving with the app closed, and the Add-money Custom Tab (pending from iterations 8 and 9). With Privy: sign-in and every payment ask for the fingerprint, cancelling signs nothing, changing the phone's fingerprints asks for an email sign-in before the next signature, and a phone with only face unlock (Android 11+) approves with its PIN ([APP-1](security.md#51-mobile-app-appsmobile)).
 - [ ] **MOB-8 [sign-off]** The first release is Android only. An iOS app needs its own security review first.
 
 ## 7. Data protection (PDPA)
