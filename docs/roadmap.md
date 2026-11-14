@@ -166,13 +166,34 @@ The runbook is [testnet.md](testnet.md).
 
 **Done when:** all three are visible on Basescan and the operator page.
 
-## Iteration 8: Add money
+## Iteration 8: Add money ✅ (sandbox run pending)
 
-1. **MoonPay** onramp (sandbox first): the backend creates an order and a signed MoonPay link for the user's own address; the app opens it in a browser tab.
-2. Status from signed webhooks and polling. "Received" only after the USDC transfer to the user's address is confirmed on-chain.
-3. "Deposit from another wallet": the receive screen plus a watcher for incoming USDC, shown in history.
+The rules are in [ADR 0009](adr/0009-add-money-proved-on-chain.md).
 
-**Done when:** a sandbox order completes end to end, and a deposit on Base Sepolia shows in the app.
+- [x] **Orders** (`OnrampOrder`: CREATED, PENDING, COMPLETED, FAILED, EXPIRED) and **deposits** (`Deposit`), in migration `20261114000000_onramp_and_deposits`.
+- [x] **`MoonPayOnrampProvider`:**
+  - widget URL signed over its query string;
+  - order lookup by our order ID;
+  - `Moonpay-Signature-V2` webhooks checked over the raw body, with a five-minute replay window;
+  - the sandbox host by default.
+- [x] **Proof on-chain:** COMPLETED only after a confirmed `Transfer` to the order's wallet, for the amount MoonPay reported. A unique index stops one transfer completing two orders, and a partner sending to another wallet never completes the order. The delivery chain is configurable, because the sandbox delivers on Ethereum Sepolia.
+- [x] **Expiry** after an hour, but only once the partner confirms nothing was paid. An expired order still completes if the payment turns up.
+- [x] **Deposit watcher:** incoming USDC to users' wallets, in 200-block ranges, skipping refunds. `GET /me/deposits` links each deposit to its order.
+- [x] **Simulated onramp for local use:** a checkout page on the API that mints mock USDC on anvil, so the whole flow runs without MoonPay keys. Production refuses it.
+- [x] **App:**
+  - Add money: a baht amount, then the checkout in a Custom Tab, never a WebView;
+  - the order status screen re-checks when the app comes back to the foreground;
+  - History shows payments and deposits together.
+
+**Result:**
+- **Tests:** backend tests cover MoonPay URL signing, status mapping, and webhooks (valid, tampered, wrong key, replayed). They also cover the on-chain checks: not yet mined, reverted, wrong amount, wrong recipient, wrong token, a transfer used twice, another wallet. Expiry and recovery, and the deposit watcher, are covered too.
+- **On anvil:** the integration test runs the simulated purchase, mints, proves the order COMPLETED, and finds the deposit.
+- **In the app:** 52 tests pass, including the Add-money flow.
+
+**Not done yet:**
+- **A MoonPay sandbox purchase:** it needs the owner's MoonPay sandbox keys.
+- **A deposit on Base Sepolia:** this waits on iteration 7's funding.
+- **The Custom Tab on a device:** it's tested in widget tests only, not yet on an emulator or phone.
 
 ## Iteration 9: Tap to pay
 

@@ -19,7 +19,8 @@ Iteration 5 is done. The whole flow works against the local backend:
 
    Paying signs the USDC authorisation for exactly that quote.
 6. **Status:** polls until Paid, Refunded or Failed, with the transactions.
-7. **Receive** (address QR with an EIP-681 USDC link) and **History**.
+7. **Receive** (address QR with an EIP-681 USDC link) and **History** (payments and deposits).
+8. **Add money** (iteration 8): pick a baht amount; the partner's checkout opens in a Custom Tab (never a WebView). The status screen re-checks when the app comes back, and shows "Added" only once the USDC is proved on-chain. Against the local backend, the checkout is the API's simulator page.
 
 The embedded wallet (Privy) replaces the dev wallet in iteration 7. See [docs/roadmap.md](../../docs/roadmap.md).
 

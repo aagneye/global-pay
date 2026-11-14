@@ -11,7 +11,7 @@ Stack: Fastify, zod (validation and OpenAPI), viem, Prisma 7 (Postgres), jose (J
 
 ## Status
 
-Iterations 3 (backend core), 4 (settlement loop) and 6 (payout confirmation and operations) are done. These work:
+Iterations 3 (backend core), 4 (settlement loop), 6 (payout confirmation and operations) and 8 (Add money) are done. These work:
 
 | Route | What it does |
 |---|---|
@@ -21,8 +21,11 @@ Iterations 3 (backend core), 4 (settlement loop) and 6 (payout confirmation and 
 | `POST /payments` | Checks the user's signed USDC authorisation, relays `pay()`, and returns `202 SUBMITTED` |
 | `GET /payments/:id`, `GET /me/payments` | Status (SUBMITTED → PAID → PAYOUT_PENDING → SETTLED / REFUNDED, or FAILED) with explorer links, plus the payout's status and bank reference |
 | `GET /me/balance` | The wallet's USDC balance, read from the chain |
+| `POST /onramp/orders`, `GET /onramp/orders[/:id]` | Add money: a signed MoonPay checkout for the user's own wallet; COMPLETED only once the USDC is proved on-chain |
+| `GET /me/deposits` | USDC that arrived from outside, linked to the Add-money order it completed |
 | `GET /docs` | OpenAPI docs (spec at `/docs/json`) |
 | `POST /webhooks/payouts/:partner` | Partner status webhooks: token checked, then the payout is re-fetched before anything changes |
+| `POST /webhooks/onramp/:partner` | MoonPay webhooks: signature over the raw body and its age checked, then the order is re-fetched |
 | `/ops`, `/ops/api/*` | Operator console (with `OPS_API_TOKEN`): exceptions, health, re-check, mark paid, approve refund |
 
 In the background, the **indexer** marks payments PAID from on-chain events. The **payout worker** then pays the merchant through the payout partner and settles or refunds on-chain. An unclear payout outcome is never settled or refunded automatically; it waits for the partner or an operator ([ADR 0008](../../docs/adr/0008-payout-outcomes-and-reconciliation.md)). See [docs/architecture.md](../../docs/architecture.md#settlement-loop) and [docs/roadmap.md](../../docs/roadmap.md).
@@ -46,9 +49,10 @@ src/
   lib/promptpay/      EMVCo PromptPay parser and builder (shared vectors in packages/fixtures)
   lib/typed-data.ts   EIP-712 types shared with the contracts (Quote, ReceiveWithAuthorization)
   modules/<feature>/  routes.ts (HTTP schemas) and service.ts (use case):
-                      auth, kyc, quotes, payments, account, ops (operator console)
+                      auth, kyc, quotes, payments, account, ops (operator console), onramp (Add money)
   modules/payouts/    PayoutTracker (partner answers → payout status, shared by worker, webhook and ops)
-  workers/            indexer (chain events) and payout worker (pay out, then settle or refund)
+  workers/            indexer (chain events), payout worker (pay out, then settle or refund),
+                      onramp worker (Add-money orders), deposit watcher (incoming USDC)
   shared/             errors, zod schemas, auth hook
   generated/prisma/   Prisma client (generated on npm install, gitignored)
 prisma/               schema and migrations
@@ -130,6 +134,16 @@ Set `OPS_API_TOKEN` (32+ characters) and open `http://localhost:3000/ops`. Enter
 - settlements that keep failing.
 
 It also shows the relayer's gas and the payout float. Its actions (re-check, mark paid with a bank reference, approve refund) each re-check the partner first, and each is recorded in the audit log ([ADR 0008](../../docs/adr/0008-payout-outcomes-and-reconciliation.md)).
+
+## Add money
+
+`ONRAMP_PROVIDER` picks the onramp:
+- **`simulated`** (the default): `POST /onramp/orders` returns `/onramp/simulator/<id>`, a page with "Pay with test card" and "Decline". Paying mints mock USDC to the user's wallet on anvil. The order completes once the onramp worker sees the transfer on-chain, and the deposit watcher lists it under `/me/deposits`.
+- **`moonpay`**: set `MOONPAY_PUBLISHABLE_KEY`, `MOONPAY_SECRET_KEY` and `MOONPAY_WEBHOOK_KEY`, using sandbox keys.
+  - **Delivery chain:** the sandbox delivers on Ethereum Sepolia, so point the `ONRAMP_RPC_URL`, `ONRAMP_CHAIN_ID`, `ONRAMP_TOKEN_ADDRESS` and `ONRAMP_EXPLORER_URL` settings there.
+  - **Webhooks:** register `<public URL>/webhooks/onramp/moonpay` in MoonPay's dashboard.
+
+An order is COMPLETED only once a confirmed transfer of the reported amount reaches the user's wallet, and each transfer completes one order ([ADR 0009](../../docs/adr/0009-add-money-proved-on-chain.md)).
 
 ## Conventions
 

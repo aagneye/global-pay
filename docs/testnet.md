@@ -112,6 +112,15 @@ Sign in, open **Receive** to see the wallet's address, and send it test USDC fro
    - copy its verification token into `XENDIT_CALLBACK_TOKEN`.
 4. Restart and `npm run testnet -- pay 100`. The payment should settle with a Xendit reference.
 
+## 7. Add money: the MoonPay sandbox (needs MoonPay sandbox keys)
+
+1. In MoonPay's dashboard (sandbox), copy the publishable key, the secret key and the webhook key.
+2. In `.env.base-sepolia`, set:
+   - `ONRAMP_PROVIDER=moonpay` and the three `MOONPAY_*` keys;
+   - for the sandbox's delivery chain (Ethereum Sepolia), `ONRAMP_CHAIN_ID=11155111`, an `ONRAMP_RPC_URL` for Sepolia, `ONRAMP_EXPLORER_URL=https://sepolia.etherscan.io`, and `ONRAMP_TOKEN_ADDRESS` set to the token MoonPay's sandbox sends.
+3. Register `<tunnel URL>/webhooks/onramp/moonpay` as the webhook.
+4. In the app, choose **Add money**, pay with MoonPay's sandbox test card, and come back. The order should reach COMPLETED once the transfer is confirmed.
+
 ## Checklist (iteration 7 is done when)
 
 - [ ] Contract deployed, roles checked by `npm run testnet -- status`, broadcast record committed
