@@ -34,6 +34,16 @@ class FakeBackend implements HttpClientAdapter {
   /// NEAR rail: how many more quote requests fail with `near_account_not_found` (onboarding still running).
   int nearAccountPending = 0;
 
+  /// The UPI QR last quoted (null for PromptPay): quotes and payments are then in INR, to its VPA.
+  ({String vpa, String? name, String paise, bool merchant})? _upi;
+  static const upiTokenAmount = '2994012';
+  static const upiReference = '412345678901';
+
+  static String _paise(String rupees) {
+    final [whole, fraction] = [...rupees.split('.'), ''].take(2).toList();
+    return BigInt.parse(whole + fraction.padRight(2, '0')).toString();
+  }
+
   final String balanceUnits;
   final String finalStatus;
 
@@ -79,6 +89,19 @@ class FakeBackend implements HttpClientAdapter {
     ));
     // Like Fastify: an empty body labelled as JSON is a 400.
     final contentType = options.contentType ?? options.headers[Headers.contentTypeHeader] as String?;
+    // A UPI QR is quoted (and paid) in rupees, to its VPA.
+    if (options.method == 'POST' && options.path == '/quotes' && body is Map) {
+      final payload = body['qrPayload'] as String;
+      final upi = payload.startsWith('upi:') ? Uri.parse(payload).queryParameters : null;
+      _upi = upi == null
+          ? null
+          : (
+              vpa: upi['pa']!,
+              name: upi['pn'],
+              paise: (body['fiatAmountMinor'] as String?) ?? _paise(upi['am'] ?? '0'),
+              merchant: upi.containsKey('mc'),
+            );
+    }
     // Like the API's validation: optional fields are left out, never null.
     final hasNull = body is Map && body.values.contains(null);
     final (status, json) = hasNull
@@ -258,7 +281,7 @@ class FakeBackend implements HttpClientAdapter {
       'payer': payer,
       'token': nearUsdc,
       'token_amount': onChain['tokenAmount'],
-      'fiat_currency': 'THB',
+      'fiat_currency': onChain['fiatCurrency'],
       'fiat_amount': onChain['fiatAmount'],
       'merchant_ref_hash': onChain['merchantRefHash'],
       'expires_at_ms': expiresAt.millisecondsSinceEpoch,
@@ -380,6 +403,30 @@ class FakeBackend implements HttpClientAdapter {
   }
 
   Map<String, Object> _quote(DateTime expiresAt) {
+    final quote = _promptPayQuote(expiresAt);
+    if (_upi case final upi?) {
+      (quote['quote']! as Map<String, Object>)
+        ..['tokenAmount'] = upiTokenAmount
+        ..['fiatCurrency'] = 'INR'
+        ..['fiatAmount'] = upi.paise;
+      quote['pricing'] = {
+        'rateE8': '8433000000',
+        'rateSource': 'coinbase',
+        'spreadBps': 100,
+        'baseTokenAmount': '2964368',
+        'feeTokenAmount': '29644',
+      };
+      quote['merchant'] = {
+        'kind': upi.merchant ? 'merchant' : 'personal',
+        'targetType': 'vpa',
+        'targetId': upi.vpa,
+        if (upi.name != null) 'merchantName': upi.name!,
+      };
+    }
+    return quote;
+  }
+
+  Map<String, Object> _promptPayQuote(DateTime expiresAt) {
     final seconds = expiresAt.millisecondsSinceEpoch ~/ 1000;
     return {
       'quote': {
@@ -447,15 +494,18 @@ class FakeBackend implements HttpClientAdapter {
 
   Map<String, Object> _payment(String status) {
     final now = DateTime.now().toUtc().toIso8601String();
+    final upi = _upi;
     return {
       'id': paymentId,
       'quoteId': quoteId,
       'status': status,
-      'fiatCurrency': 'THB',
-      'fiatAmount': '25000',
+      'fiatCurrency': upi == null ? 'THB' : 'INR',
+      'fiatAmount': upi?.paise ?? '25000',
       'token': near ? nearUsdc : '0x5FbDB2315678afecb367f032d93F642f64180aa3',
-      'tokenAmount': '7477454',
-      'merchant': {'kind': 'merchant', 'targetId': '099999999999901', 'name': 'GLOBALPAY TEST CAFE'},
+      'tokenAmount': upi == null ? '7477454' : upiTokenAmount,
+      'merchant': upi == null
+          ? {'kind': 'merchant', 'targetId': '099999999999901', 'name': 'GLOBALPAY TEST CAFE'}
+          : {'kind': 'upi', 'targetId': upi.vpa, if (upi.name != null) 'name': upi.name!},
       'transactions': {
         'pay': {'hash': '0x${'22' * 32}', 'url': 'https://explorer.test/tx/0x${'22' * 32}'},
         if (status == 'SETTLED') 'settle': {'hash': '0x${'33' * 32}', 'url': 'https://explorer.test/tx/0x${'33' * 32}'},
@@ -471,8 +521,8 @@ class FakeBackend implements HttpClientAdapter {
           case final payout?)
         'payout': {
           'status': payout,
-          'provider': 'simulated-promptpay',
-          if (payout == 'SUCCEEDED') 'reference': bankReference,
+          'provider': upi == null ? 'simulated-promptpay' : 'simulated-upi',
+          if (payout == 'SUCCEEDED') 'reference': upi == null ? bankReference : upiReference,
         },
       if (status == 'REFUNDED') 'failureReason': 'Simulated payout failure (PAYOUT_FAILURE_RATE)',
       'quoteExpiresAt': now,

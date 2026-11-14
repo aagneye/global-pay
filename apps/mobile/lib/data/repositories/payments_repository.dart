@@ -56,8 +56,12 @@ FiatAmount thb(String minor) => FiatAmount(currency: FiatCurrency.thb, minor: Bi
 FiatAmount fiat(String code, String minor) =>
     FiatAmount(currency: FiatCurrency.fromCode(code), minor: BigInt.parse(minor));
 
-/// What the history calls a merchant without a name: a UPI ID (card payments in India) or a PromptPay ID.
+/// What the history calls a merchant without a name: a UPI ID (payments in India) or a PromptPay ID.
 String merchantFallbackName(String kind, String targetId) => kind == 'upi' ? targetId : 'PromptPay $targetId';
+
+/// A quote's currency: INR for a UPI QR, THB for PromptPay (also for a currency this build doesn't know, which
+/// the merchant name then makes plain).
+FiatAmount _quoteFiat(dto.OnChainQuote quote) => fiat(quote.fiatCurrency.json ?? 'THB', quote.fiatAmount);
 
 Quote quoteFromDto(dto.QuoteResponse response) {
   final typed = response.authorizationToSign;
@@ -68,11 +72,12 @@ Quote quoteFromDto(dto.QuoteResponse response) {
     token: response.quote.token,
     tokenAmount: usdc(response.quote.tokenAmount),
     feeAmount: usdc(response.pricing.feeTokenAmount),
-    fiatAmount: thb(response.quote.fiatAmount),
+    fiatAmount: _quoteFiat(response.quote),
     rateE8: BigInt.parse(response.pricing.rateE8),
     spreadBps: response.pricing.spreadBps,
     merchant: QuoteMerchant(
       isMerchant: response.merchant.kind == dto.QuoteMerchantKind.merchant,
+      isUpi: response.merchant.targetType == dto.QuoteMerchantTargetType.vpa,
       targetId: response.merchant.targetId,
       name: response.merchant.merchantName,
       city: response.merchant.merchantCity,

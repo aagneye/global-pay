@@ -1,6 +1,6 @@
 import 'package:globalpay/domain/models/money.dart';
 
-/// A short-lived price quote from the backend for paying a PromptPay QR with USDC.
+/// A short-lived price quote from the backend for paying a PromptPay or UPI QR with USDC.
 class Quote {
   const Quote({
     required this.quoteId,
@@ -35,7 +35,7 @@ class Quote {
   /// What the merchant receives.
   final FiatAmount fiatAmount;
 
-  /// Mid-market THB per 1 USDC, scaled by 1e8, before the spread.
+  /// Mid-market fiat (THB or INR) per 1 USDC, scaled by 1e8, before the spread.
   final BigInt rateE8;
   final int spreadBps;
   final QuoteMerchant merchant;
@@ -59,16 +59,27 @@ class Quote {
 }
 
 class QuoteMerchant {
-  const QuoteMerchant({required this.isMerchant, required this.targetId, this.name, this.city, this.reference});
+  const QuoteMerchant({
+    required this.isMerchant,
+    required this.targetId,
+    this.isUpi = false,
+    this.name,
+    this.city,
+    this.reference,
+  });
 
-  /// A registered biller (bill payment), as opposed to a person.
+  /// A registered biller (bill payment) or UPI merchant, as opposed to a person.
   final bool isMerchant;
+
+  /// A UPI payee: [targetId] is their UPI ID (VPA).
+  final bool isUpi;
   final String targetId;
   final String? name;
   final String? city;
   final String? reference;
 
-  String get displayName => name ?? (isMerchant ? 'Biller $targetId' : 'PromptPay $targetId');
+  String get displayName =>
+      name ?? (isUpi ? targetId : (isMerchant ? 'Biller $targetId' : 'PromptPay $targetId'));
 }
 
 /// EIP-712 typed data (USDC ReceiveWithAuthorization) for eth_signTypedData_v4, plus the

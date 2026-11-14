@@ -8,8 +8,10 @@ import 'package:globalpay/core/config/app_config.dart';
 import 'package:globalpay/core/errors/app_exception.dart';
 import 'package:globalpay/core/providers.dart';
 import 'package:globalpay/core/widgets/common.dart';
-import 'package:globalpay/domain/models/promptpay_qr.dart';
+import 'package:globalpay/app/theme.dart';
+import 'package:globalpay/domain/models/payment_qr.dart';
 import 'package:globalpay/domain/models/quote.dart';
+import 'package:globalpay/domain/models/upi_qr.dart';
 import 'package:globalpay/domain/signing/authorization_check.dart';
 import 'package:globalpay/domain/signing/near_payment_check.dart';
 import 'package:globalpay/features/auth/session_controller.dart';
@@ -23,7 +25,8 @@ const nearAccountSettingUp = AppException(
   'Your testnet account is still being set up. Try again in a few seconds.',
 );
 
-/// Parses "250", "250.5" or "250.50" baht into satang. Null if invalid or not positive.
+/// Parses "250", "250.5" or "250.50" baht into satang (or rupees into paise: both have 2 decimals).
+/// Null if invalid or not positive.
 BigInt? parseThb(String text) {
   final value = text.trim();
   if (!_amount.hasMatch(value)) return null;
@@ -36,7 +39,8 @@ BigInt? parseThb(String text) {
 class ConfirmScreen extends ConsumerStatefulWidget {
   const ConfirmScreen({super.key, required this.qr});
 
-  final PromptPayQr qr;
+  /// A PromptPay or UPI QR.
+  final PaymentQr qr;
 
   @override
   ConsumerState<ConfirmScreen> createState() => _ConfirmScreenState();
@@ -84,7 +88,7 @@ class _ConfirmScreenState extends ConsumerState<ConfirmScreen> {
     BigInt? minor;
     if (widget.qr.amount == null) {
       minor = parseThb(_amountText.text);
-      if (minor == null) throw const FormatException('Enter an amount in baht, e.g. 120 or 59.50');
+      if (minor == null) throw FormatException('Enter an amount in ${widget.qr.currency.name}, e.g. 120 or 59.50');
     }
     final payer = ref.read(sessionProvider).value!.walletAddress;
     final Quote quote;
@@ -139,8 +143,10 @@ class _ConfirmScreenState extends ConsumerState<ConfirmScreen> {
     final quote = _quote;
     final left = quote?.timeLeft(DateTime.now()) ?? Duration.zero;
     final expired = quote != null && left == Duration.zero;
-    final merchantName =
-        qr.merchantName ?? (qr.kind == PromptPayKind.merchant ? 'Biller ${qr.targetId}' : 'PromptPay ${qr.targetId}');
+    final bigAmount = theme.textTheme.displayMedium?.copyWith(
+      fontWeight: FontWeight.w500,
+      fontFeatures: const [FontFeature.tabularFigures()],
+    );
 
     return Scaffold(
       appBar: AppBar(title: const Text('Confirm payment')),
@@ -149,27 +155,32 @@ class _ConfirmScreenState extends ConsumerState<ConfirmScreen> {
         children: [
           Card(
             child: ListTile(
-              leading: Icon(qr.kind == PromptPayKind.merchant ? Icons.storefront : Icons.person),
-              title: Text(merchantName),
-              subtitle: Text(
-                [
-                  qr.targetId,
-                  if (qr.merchantCity != null) qr.merchantCity!,
-                  if (qr.reference1 != null) 'Ref ${qr.reference1}',
-                ].join(' · '),
-              ),
+              contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+              leading: Icon(qr.isMerchant ? Icons.storefront : Icons.person),
+              title: Text(qr.payeeName),
+              subtitle: Text(qr.payeeDetail),
+              trailing: qr is UpiQr ? const AccentTag('UPI') : null,
             ),
           ),
           const SizedBox(height: 16),
           if (qr.amount != null)
             Text(qr.amount!.format(), style: theme.textTheme.displaySmall, textAlign: TextAlign.center)
           else
+            // A static QR: the payer types the amount, in the payee's currency.
             TextField(
               key: const Key('amount'),
               controller: _amountText,
               enabled: quote == null && !_busy,
+              autofocus: true,
+              textAlign: TextAlign.center,
+              style: bigAmount,
               keyboardType: const TextInputType.numberWithOptions(decimal: true),
-              decoration: const InputDecoration(labelText: 'Amount', prefixText: '฿ ', border: OutlineInputBorder()),
+              decoration: InputDecoration(
+                hintText: '0',
+                prefixText: qr.currency.symbol,
+                prefixStyle: bigAmount?.copyWith(color: Brand.muted),
+                helperText: 'Amount in ${qr.currency.name}',
+              ),
               onSubmitted: (_) => _requestQuote(),
             ),
           const SizedBox(height: 16),

@@ -4,7 +4,7 @@ import 'package:go_router/go_router.dart';
 import 'package:globalpay/domain/models/kyc.dart';
 import 'package:globalpay/features/add_money/add_money_screen.dart';
 import 'package:globalpay/features/add_money/onramp_status_screen.dart';
-import 'package:globalpay/domain/models/promptpay_qr.dart';
+import 'package:globalpay/domain/models/payment_qr.dart';
 import 'package:globalpay/domain/models/session.dart';
 import 'package:globalpay/features/auth/login_screen.dart';
 import 'package:globalpay/features/auth/session_controller.dart';
@@ -77,8 +77,8 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: Routes.confirm,
         // The scanned QR. Without it (e.g. a reload on the web), start again from the scanner.
-        redirect: (context, state) => state.extra is PromptPayQr ? null : Routes.scan,
-        builder: (context, state) => ConfirmScreen(qr: state.extra! as PromptPayQr),
+        redirect: (context, state) => state.extra is PaymentQr ? null : Routes.scan,
+        builder: (context, state) => ConfirmScreen(qr: state.extra! as PaymentQr),
       ),
       GoRoute(
         path: '/pay/status/:paymentId',

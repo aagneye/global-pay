@@ -6,7 +6,9 @@ import 'package:go_router/go_router.dart';
 import 'package:globalpay/app/router.dart';
 import 'package:globalpay/core/providers.dart';
 import 'package:globalpay/core/widgets/common.dart';
+import 'package:globalpay/domain/models/payment_qr.dart';
 import 'package:globalpay/domain/promptpay/promptpay_parser.dart';
+import 'package:globalpay/domain/upi/upi_parser.dart';
 import 'package:globalpay/features/p2p/p2p_support.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 
@@ -57,10 +59,13 @@ class _ScanScreenState extends ConsumerState<ScanScreen> {
       return;
     }
     try {
-      final qr = parsePromptPayQr(payload);
+      // An Indian UPI QR (upi://pay?...), or a Thai PromptPay QR.
+      final PaymentQr qr = isUpiPayload(payload) ? parseUpiQr(payload) : parsePromptPayQr(payload);
       _handled = true;
       context.pushReplacement(Routes.confirm, extra: qr);
     } on PromptPayParseException catch (e) {
+      setState(() => _error = e.message);
+    } on UpiParseException catch (e) {
       setState(() => _error = e.message);
     }
   }
@@ -115,7 +120,10 @@ class _ScanScreenState extends ConsumerState<ScanScreen> {
               ),
             ),
           const SizedBox(height: 16),
-          Text('Point the camera at a PromptPay QR, or paste its text.', style: theme.textTheme.bodyMedium),
+          Text(
+            'Point the camera at a PromptPay (Thailand) or UPI (India) QR, or paste its text.',
+            style: theme.textTheme.bodyMedium,
+          ),
           const SizedBox(height: 12),
           TextField(
             key: const Key('qr-text'),

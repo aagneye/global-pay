@@ -26,6 +26,9 @@ const qr250 =
     '00020101021230600016A00000067701011201150999999999999010207INV00010306TABLE753037645406250.005802TH'
     '5919GLOBALPAY TEST CAFE6007BANGKOK6304E9FD';
 
+/// A static UPI merchant QR (no amount): Chai Point in Bengaluru.
+const upiStatic = 'upi://pay?pa=chaipoint@okicici&pn=Chai%20Point&mc=5812&tr=CHAI42&cu=INR';
+
 /// The app on the NEAR rail, with the test contracts the fake backend uses.
 const nearConfig = AppConfig(
   apiBaseUrl: 'http://backend.test',
@@ -173,6 +176,71 @@ void main() {
     await pumpUntil(tester, find.byType(PaymentTile));
     expect(find.byIcon(Icons.error_outline), findsNothing);
     expect(backend.requests.where((r) => r.path.startsWith('/p2p') || r.path == '/me/deposits'), isEmpty);
+  });
+
+  testWidgets('pays a static UPI QR in rupees: ₹ amount entry, quote, gasless NEAR payment, merchant paid', (
+    tester,
+  ) async {
+    final backend = FakeBackend(near: true)..kycStatus = 'APPROVED';
+    final store = MemorySecureStore();
+    final wallet = SpyNearWallet(store: store, importSeed: nearTestSeed);
+    await start(tester, nearApp(backend, store, wallet));
+    await pumpUntil(tester, find.text(continueWithNear));
+    await tap(tester, continueWithNear);
+    await pumpUntil(tester, find.text('Scan & pay'));
+
+    await tap(tester, 'Scan & pay');
+    await pumpUntil(tester, find.byKey(const Key('qr-text')));
+    await tester.enterText(find.byKey(const Key('qr-text')), upiStatic);
+    await tap(tester, 'Continue');
+
+    // The payee from the QR, and the amount asked for in rupees.
+    await pumpUntil(tester, find.text('Chai Point'));
+    expect(find.text('chaipoint@okicici · Ref CHAI42'), findsOneWidget);
+    expect(find.text('UPI'), findsOneWidget);
+    expect(find.text('₹'), findsOneWidget);
+    expect(find.text('Amount in rupees'), findsOneWidget);
+    await tester.enterText(find.byKey(const Key('amount')), '250');
+    await tap(tester, 'Get quote');
+    await pumpUntil(tester, find.text('Pay 2.994012 USDC'));
+    final quoteRequest = backend.requests.lastWhere((r) => r.path == '/quotes').body as Map;
+    expect(quoteRequest['qrPayload'], upiStatic);
+    expect(quoteRequest['fiatAmountMinor'], '25000');
+    expect(find.text('₹250.00'), findsOneWidget);
+    expect(find.text('84.33 INR/USDC'), findsOneWidget);
+
+    await tap(tester, 'Pay 2.994012 USDC');
+    await pumpUntil(tester, find.text('Payment status'));
+    final delegate = decodeSignedDelegate(
+      (backend.requests.singleWhere((r) => r.path == '/payments').body as Map)['signedDelegate'] as String,
+    );
+    expect(delegate.methodName, 'ft_transfer_call');
+    expect(jsonDecode(delegate.args)['amount'], FakeBackend.upiTokenAmount);
+    expect(wallet.signedPayments, hasLength(1));
+
+    await pumpUntil(tester, find.text('The merchant received ₹250.00.'), maxFrames: 50);
+    expect(find.text('UPI reference'), findsOneWidget);
+    expect(find.text(FakeBackend.upiReference), findsOneWidget);
+    expect(find.text('Paying the merchant in rupees'), findsOneWidget);
+    await tap(tester, 'Done');
+    await pumpUntil(tester, find.byType(PaymentTile));
+    expect(find.descendant(of: find.byType(PaymentTile), matching: find.text('₹250.00')), findsOneWidget);
+    expect(find.descendant(of: find.byType(PaymentTile), matching: find.text('Chai Point')), findsOneWidget);
+  });
+
+  testWidgets('says what is wrong with a malformed UPI QR', (tester) async {
+    final backend = FakeBackend(near: true)..kycStatus = 'APPROVED';
+    final store = MemorySecureStore();
+    await start(tester, nearApp(backend, store, SpyNearWallet(store: store, importSeed: nearTestSeed)));
+    await pumpUntil(tester, find.text(continueWithNear));
+    await tap(tester, continueWithNear);
+    await pumpUntil(tester, find.text('Scan & pay'));
+    await tap(tester, 'Scan & pay');
+    await pumpUntil(tester, find.byKey(const Key('qr-text')));
+    await tester.enterText(find.byKey(const Key('qr-text')), 'upi://pay?pa=chaipoint@okicici&am=10&cu=USD');
+    await tap(tester, 'Continue');
+    await pumpUntil(tester, find.textContaining('Only rupees (INR) are supported'));
+    expect(backend.requests.where((r) => r.path == '/quotes'), isEmpty);
   });
 
   testWidgets("asks to try again while a new account's testnet onboarding finishes", (tester) async {
