@@ -49,8 +49,9 @@ void main() {
       expect(refusal('upi://pay?pa'), contains('no UPI ID (pa)'));
     });
 
-    test('is matched by its exact key: PA or Pa is not pa', () {
-      expect(refusal('upi://pay?PA=shop@paytm'), contains('no UPI ID (pa)'));
+    test('is matched ignoring key case, like the backend: PA and Pa count as pa', () {
+      expect(parseUpiQr('upi://pay?PA=shop@paytm').vpa, 'shop@paytm');
+      expect(parseUpiQr('upi://pay?Pa=shop@paytm&AM=10').amount!.minor, BigInt.from(1000));
     });
 
     test('is trimmed before it is checked', () {
@@ -254,9 +255,6 @@ void main() {
         }
         expect(refused != null || shown == 'attacker@ybl', isTrue, reason: 'the app shows $shown');
       },
-      skip:
-          'BUG: Dart Uri.queryParameters keeps the LAST repeated pa, the backend keeps the FIRST: '
-          'the confirm screen can show chaipoint@okicici while the backend pays attacker@ybl.',
     );
 
     test(
@@ -272,9 +270,6 @@ void main() {
         }
         expect(refused != null || shown == BigInt.from(999900), isTrue, reason: 'the app shows $shown paise');
       },
-      skip:
-          'BUG: the app keeps the LAST repeated am (₹10), the backend the FIRST (₹9,999): the confirm screen '
-          'shows a different amount from the one quoted.',
     );
 
     test(
@@ -290,15 +285,11 @@ void main() {
         }
         expect(refused != null || shown == 'attacker@ybl', isTrue, reason: 'the app shows $shown');
       },
-      skip:
-          'BUG: the backend lower-cases parameter names (PA counts as pa, first wins), the app only reads '
-          'lower-case pa: the confirm screen shows chaipoint@okicici while the backend pays attacker@ybl.',
     );
 
-    test('documents today: a repeated parameter keeps the last value in the app', () {
-      // Pins the current behaviour the two skipped tests above report, so a fix shows up here.
-      expect(parseUpiQr('upi://pay?pa=one@paytm&pa=two@paytm').vpa, 'two@paytm');
-      expect(parseUpiQr('upi://pay?pa=shop@paytm&am=1&am=2').amount!.minor, BigInt.from(200));
+    test('a repeated parameter keeps the first value, like the backend', () {
+      expect(parseUpiQr('upi://pay?pa=one@paytm&pa=two@paytm').vpa, 'one@paytm');
+      expect(parseUpiQr('upi://pay?pa=shop@paytm&am=1&am=2').amount!.minor, BigInt.from(100));
     });
   });
 

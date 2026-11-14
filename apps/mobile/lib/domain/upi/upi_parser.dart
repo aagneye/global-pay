@@ -32,9 +32,15 @@ UpiQr parseUpiQr(String payload) {
   if (uri == null || uri.scheme.toLowerCase() != 'upi' || uri.host.toLowerCase() != 'pay') {
     throw const UpiParseException('This is not a UPI payment QR.');
   }
-  final Map<String, String> params;
+  // Read parameters exactly as the backend does (services/api/src/lib/upi/parse.ts): names ignore case and
+  // the first value of a repeated name wins. Otherwise a QR with `pa` twice could show one payee here while
+  // the backend quotes and pays another.
+  final params = <String, String>{};
   try {
-    params = uri.queryParameters;
+    for (final MapEntry(:key, :value) in uri.queryParametersAll.entries) {
+      final name = key.toLowerCase();
+      if (value.isNotEmpty) params.putIfAbsent(name, () => value.first);
+    }
   } on FormatException {
     throw const UpiParseException('This UPI QR is malformed.');
   }
