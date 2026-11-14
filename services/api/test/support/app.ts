@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import type { Address, Hex } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
-import { buildApp } from '../../src/app.js';
+import { type BuildAppOptions, buildApp } from '../../src/app.js';
 import type { Env } from '../../src/config/env.js';
 import { type Adapters, type Container, buildContainer } from '../../src/container.js';
 import { testEnv } from '../helpers.js';
@@ -31,7 +31,7 @@ export interface TestApp {
  * onramp delivering on the fake token chain, and anvil's quote-signer key and addresses.
  */
 export async function buildTestApp(
-  options: { env?: Record<string, string>; adapters?: Partial<Adapters> } = {},
+  options: { env?: Record<string, string>; adapters?: Partial<Adapters>; logger?: BuildAppOptions['logger'] } = {},
 ): Promise<TestApp> {
   const repos = createMemoryRepositories();
   const env = testEnv({
@@ -60,7 +60,7 @@ export async function buildTestApp(
     onramp,
     ...options.adapters,
   });
-  const app = await buildApp({ container, logger: false });
+  const app = await buildApp({ container, logger: options.logger ?? false });
   return { app, repos, env, container, chain, tokens, push };
 }
 

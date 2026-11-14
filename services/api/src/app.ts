@@ -25,18 +25,32 @@ import { quoteRoutes } from './modules/quotes/routes.js';
 import { AppError } from './shared/errors.js';
 import { namedSchemasTransform } from './shared/openapi.js';
 import { registerRateLimits } from './shared/rate-limits.js';
+import { LOG_REDACT_PATHS, REDACTED } from './shared/redact.js';
 import { authHook } from './shared/request-user.js';
+
+/** Where logs go: stdout by default, or a stream (tests read one). */
+export interface LogDestination {
+  stream?: { write(line: string): void };
+  level?: string;
+}
 
 export interface BuildAppOptions {
   container: Container;
-  logger?: boolean;
+  /** false: no logs. Secrets are redacted from whatever is logged. */
+  logger?: boolean | LogDestination;
+}
+
+function loggerOptions(logger: boolean | LogDestination) {
+  if (logger === false) return false;
+  const { stream, level = 'info' } = logger === true ? {} : logger;
+  return { level, ...(stream ? { stream } : {}), redact: { paths: [...LOG_REDACT_PATHS], censor: REDACTED } };
 }
 
 export async function buildApp({ container, logger = true }: BuildAppOptions): Promise<FastifyInstance> {
   const { http } = container;
   const hops = http.trustProxy;
   const trustProxy = typeof hops === 'number' ? (_address: string, hop: number) => hop < hops : hops;
-  const app = Fastify({ logger, trustProxy }).withTypeProvider<ZodTypeProvider>();
+  const app = Fastify({ logger: loggerOptions(logger), trustProxy }).withTypeProvider<ZodTypeProvider>();
 
   // Route schemas are zod: they validate requests, shape responses, and generate the OpenAPI spec.
   app.setValidatorCompiler(validatorCompiler);

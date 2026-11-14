@@ -180,6 +180,12 @@ Push needs `FCM_SERVICE_ACCOUNT_FILE`; without it the apps poll. The rules are i
 - Counters live in memory, per process. Run several instances and each one counts on its own; a shared store (Redis) is the step after that.
 - Behind a load balancer, set `TRUST_PROXY` (e.g. `1`), or every client shares the balancer's IP.
 
+**Log redaction** (`src/shared/redact.ts`). Logs never contain these, wherever they appear in a log entry (top level, or up to two levels down, e.g. `req.headers.authorization` or `body.signature`). Each is replaced with `[Redacted]`:
+- headers: `authorization`, `cookie`, `set-cookie`, `x-ops-token`, `x-callback-token`, `moonpay-signature-v2`;
+- fields: `signature`, `qrPayload`, `fcmToken`, `publicKey`, `displayName`, `challenge`, tokens, passwords, secret and private keys, bank account details and email.
+
+Fastify's request logs only show the method, URL and status anyway; redaction covers code that logs more. Don't put secrets in URLs.
+
 ## Conventions
 
 - **Money:** integers in minor units (`bigint`). Over HTTP, amounts are integer strings (`"10000"` = 100.00 THB).
