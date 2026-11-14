@@ -32,6 +32,8 @@ describe('log redaction', () => {
       request.log.info({ headers: request.headers, body: request.body }, 'test: request as received');
       request.log.warn({ request: { headers: request.headers, body: request.body } }, 'test: nested');
       request.log.info(request.body as object, 'test: fields at the top');
+      const { privateKey, signature } = request.body as Record<string, string>;
+      request.log.warn(`test: a message that quotes ${privateKey} and ${signature}`);
       return { ok: true };
     });
 
@@ -78,6 +80,8 @@ describe('log redaction', () => {
     const nested = logs.entries().find((entry) => entry.msg === 'test: nested') as { request: { headers: Record<string, string> } };
     expect(nested.request.headers['moonpay-signature-v2']).toBe('[Redacted]');
     expect(logs.entries().some((entry) => entry.msg === 'incoming request')).toBe(true);
+    // Messages written by request loggers are scrubbed too.
+    expect(logs.entries().some((entry) => entry.msg === 'test: a message that quotes [Redacted hex] and [Redacted hex]')).toBe(true);
   });
 
   it('logs a failing request with its error scrubbed, and tells the client nothing', async () => {
