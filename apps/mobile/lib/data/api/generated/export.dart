@@ -26,6 +26,8 @@ export 'models/health.dart';
 export 'models/kyc_session.dart';
 export 'models/kyc_start.dart';
 export 'models/kyc_status.dart';
+export 'models/near_payment.dart';
+export 'models/near_transfer_call_args.dart';
 export 'models/nonce_request.dart';
 export 'models/nonce_response.dart';
 export 'models/on_chain_quote.dart';

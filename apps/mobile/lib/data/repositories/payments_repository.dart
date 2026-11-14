@@ -46,7 +46,7 @@ TokenAmount usdc(String units) => TokenAmount(symbol: 'USDC', units: BigInt.pars
 FiatAmount thb(String minor) => FiatAmount(currency: FiatCurrency.thb, minor: BigInt.parse(minor));
 
 Quote quoteFromDto(dto.QuoteResponse response) {
-  final typed = response.authorizationToSign;
+  final typed = response.authorizationToSign!;
   return Quote(
     quoteId: response.quote.quoteId,
     payer: response.quote.payer,

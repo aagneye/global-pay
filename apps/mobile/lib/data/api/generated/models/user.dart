@@ -16,6 +16,8 @@ class User {
   factory User.fromJson(Map<String, Object?> json) => _$UserFromJson(json);
   
   final String id;
+
+  /// 0x address (EVM rail) or NEAR implicit account (NEAR rail)
   final String walletAddress;
 
   Map<String, Object?> toJson() => _$UserToJson(this);

@@ -16,7 +16,7 @@ class QuoteRequest {
   
   factory QuoteRequest.fromJson(Map<String, Object?> json) => _$QuoteRequestFromJson(json);
   
-  /// Wallet that will pay; must be the signed-in user's wallet
+  /// Wallet that will pay; must be the signed-in user's wallet (a NEAR implicit account on the NEAR rail)
   final String payer;
 
   /// The scanned PromptPay QR text

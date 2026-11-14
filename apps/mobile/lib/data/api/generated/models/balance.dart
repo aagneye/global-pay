@@ -16,6 +16,7 @@ class Balance {
   
   factory Balance.fromJson(Map<String, Object?> json) => _$BalanceFromJson(json);
   
+  /// USDC: its 0x address (EVM rail) or contract account ID (NEAR rail)
   final String token;
 
   /// Token base units

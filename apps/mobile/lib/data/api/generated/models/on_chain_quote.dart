@@ -25,7 +25,11 @@ class OnChainQuote {
   factory OnChainQuote.fromJson(Map<String, Object?> json) => _$OnChainQuoteFromJson(json);
   
   final String quoteId;
+
+  /// 0x address (EVM rail) or NEAR implicit account (NEAR rail)
   final String payer;
+
+  /// USDC: its 0x address (EVM rail) or contract account ID (NEAR rail)
   final String token;
 
   /// USDC base units (6 decimals), spread included

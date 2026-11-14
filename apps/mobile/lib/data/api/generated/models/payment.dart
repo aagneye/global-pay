@@ -41,6 +41,8 @@ class Payment {
 
   /// THB satang the merchant receives
   final String fiatAmount;
+
+  /// USDC: its 0x address (EVM rail) or contract account ID (NEAR rail)
   final String token;
 
   /// USDC base units the user pays

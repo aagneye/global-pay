@@ -14,7 +14,7 @@ class NonceRequest {
   
   factory NonceRequest.fromJson(Map<String, Object?> json) => _$NonceRequestFromJson(json);
   
-  /// Wallet that will sign in
+  /// Wallet that will sign in: a 0x address (EVM rail) or a NEAR implicit account (NEAR rail)
   final String address;
 
   Map<String, Object?> toJson() => _$NonceRequestToJson(this);

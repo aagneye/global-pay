@@ -11,7 +11,7 @@ import 'typed_data_field.dart';
 
 part 'receive_authorization_typed_data.g.dart';
 
-/// EIP-712 typed data for the wallet (eth_signTypedData_v4): USDC ReceiveWithAuthorization
+/// EVM rail: EIP-712 typed data for the wallet (eth_signTypedData_v4): USDC ReceiveWithAuthorization. Absent on the NEAR rail.
 @JsonSerializable()
 class ReceiveAuthorizationTypedData {
   const ReceiveAuthorizationTypedData({

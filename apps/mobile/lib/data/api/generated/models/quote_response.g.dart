@@ -15,9 +15,14 @@ QuoteResponse _$QuoteResponseFromJson(Map<String, dynamic> json) =>
       merchant: QuoteMerchant.fromJson(
         json['merchant'] as Map<String, dynamic>,
       ),
-      authorizationToSign: ReceiveAuthorizationTypedData.fromJson(
-        json['authorizationToSign'] as Map<String, dynamic>,
-      ),
+      authorizationToSign: json['authorizationToSign'] == null
+          ? null
+          : ReceiveAuthorizationTypedData.fromJson(
+              json['authorizationToSign'] as Map<String, dynamic>,
+            ),
+      nearPayment: json['nearPayment'] == null
+          ? null
+          : NearPayment.fromJson(json['nearPayment'] as Map<String, dynamic>),
     );
 
 Map<String, dynamic> _$QuoteResponseToJson(QuoteResponse instance) =>
@@ -27,5 +32,6 @@ Map<String, dynamic> _$QuoteResponseToJson(QuoteResponse instance) =>
       'expiresAt': instance.expiresAt.toIso8601String(),
       'pricing': instance.pricing,
       'merchant': instance.merchant,
-      'authorizationToSign': instance.authorizationToSign,
+      'authorizationToSign': ?instance.authorizationToSign,
+      'nearPayment': ?instance.nearPayment,
     };

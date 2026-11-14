@@ -15,6 +15,7 @@ class TxLink {
   
   factory TxLink.fromJson(Map<String, Object?> json) => _$TxLinkFromJson(json);
   
+  /// 0x hash (EVM rail) or base58 hash (NEAR rail)
   final String hash;
   final String url;
 

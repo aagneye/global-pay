@@ -16,7 +16,7 @@ abstract class PaymentsClient {
 
   /// Pay a quote with the signed USDC authorisation.
   ///
-  /// Checks the signature and limits, then relays pay() and returns at once with status SUBMITTED. Poll GET /payments/{id} until SETTLED, REFUNDED or FAILED. Submitting the same quote again returns the same payment.
+  /// Checks the signature and limits, then relays the payment and returns at once with status SUBMITTED. EVM rail: send validAfter, validBefore and signature (relays pay()). NEAR rail: send signedDelegate (relays the meta transaction). Poll GET /payments/{id} until SETTLED, REFUNDED or FAILED. Submitting the same quote again returns the same payment.
   @POST('/payments')
   Future<Payment> submitPayment({
     @Body() required PaymentRequest body,

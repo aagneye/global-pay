@@ -16,9 +16,10 @@ class NonceResponse {
   
   factory NonceResponse.fromJson(Map<String, Object?> json) => _$NonceResponseFromJson(json);
   
+  /// EVM rail: the SIWE nonce. NEAR rail: the NEP-413 nonce, 32 bytes as hex
   final String nonce;
 
-  /// EIP-4361 message to sign with personal_sign, unchanged
+  /// EVM rail: EIP-4361 message to sign with personal_sign, unchanged. NEAR rail: the NEP-413 `message` to sign, unchanged, with this nonce and recipient = the sign-in domain
   final String message;
   final DateTime expiresAt;
 
