@@ -37,7 +37,7 @@ class P2pRequest {
   /// Your side of the request
   final P2pRequestRole role;
 
-  /// CREATED: waiting for a tap or a scan. SENDER_IDENTIFIED: waiting for the sender to approve. SUBMITTED: transfer sent. COMPLETED and FAILED: the transfer was mined (or reverted). EXPIRED, DECLINED, CANCELLED: nothing moved.
+  /// CREATED: waiting for a tap or a scan. SENDER_IDENTIFIED: waiting for the sender to approve. APPROVING: the sender approved and the transfer is being sent; it can no longer be cancelled. SUBMITTED: transfer sent. COMPLETED and FAILED: the transfer was mined (or reverted). EXPIRED, DECLINED, CANCELLED: nothing moved.
   final P2pRequestStatus status;
   final String token;
 

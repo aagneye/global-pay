@@ -4,13 +4,15 @@
 
 import 'package:json_annotation/json_annotation.dart';
 
-/// CREATED: waiting for a tap or a scan. SENDER_IDENTIFIED: waiting for the sender to approve. SUBMITTED: transfer sent. COMPLETED and FAILED: the transfer was mined (or reverted). EXPIRED, DECLINED, CANCELLED: nothing moved.
+/// CREATED: waiting for a tap or a scan. SENDER_IDENTIFIED: waiting for the sender to approve. APPROVING: the sender approved and the transfer is being sent; it can no longer be cancelled. SUBMITTED: transfer sent. COMPLETED and FAILED: the transfer was mined (or reverted). EXPIRED, DECLINED, CANCELLED: nothing moved.
 @JsonEnum()
 enum P2pRequestStatus {
   @JsonValue('CREATED')
   created('CREATED'),
   @JsonValue('SENDER_IDENTIFIED')
   senderIdentified('SENDER_IDENTIFIED'),
+  @JsonValue('APPROVING')
+  approving('APPROVING'),
   @JsonValue('SUBMITTED')
   submitted('SUBMITTED'),
   @JsonValue('COMPLETED')
