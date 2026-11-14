@@ -25,3 +25,10 @@
     public static int d(...);
     public static int i(...);
 }
+
+# privy_flutter (the embedded wallet, android: io.privy:privy-core). Its dependencies bring their own rules
+# (kotlinx-serialization, Ktor, OkHttp, coroutines, DataStore) and the SDK uses no reflection that we found,
+# but Privy's own example app turns R8 off and nothing has run a shrunk build on a phone yet. Keep the SDK
+# whole until a release build has signed in and signed on a real device.
+-keep class io.privy.** { *; }
+-keepattributes Signature,InnerClasses,EnclosingMethod,RuntimeVisibleAnnotations,AnnotationDefault
