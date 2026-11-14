@@ -11,8 +11,10 @@ abstract interface class SignatureGate {
   /// Returns once the user has passed the check with [reason] on screen. Otherwise it throws:
   /// - `biometric_cancelled`: the user backed out;
   /// - `biometric_failed`: the check failed;
-  /// - `biometric_unavailable`: no strong fingerprint (or face) is set up on this phone;
-  /// - `biometric_reset`: the phone's fingerprints changed, so the user must sign in with their email again.
+  /// - `biometric_unavailable`: neither a strong fingerprint (or face) nor, on Android 11 and later, a
+  ///   screen lock is set up on this phone;
+  /// - `biometric_reset`: the phone's fingerprints or screen lock changed, so the user must sign in with
+  ///   their email again.
   Future<void> confirm(String reason);
 
   /// Called after a fresh email sign-in: the next [confirm] starts a new check, and a reset is lifted.
@@ -28,6 +30,10 @@ abstract interface class SignatureGate {
 /// The first check seals a new token, which itself needs the fingerprint. If fingerprints are added or
 /// removed, Android destroys the key. The gate then stays locked until the user signs in with an email
 /// code again, so someone who knows the phone's PIN can't add their own fingerprint and pay.
+///
+/// A phone without a strong biometric (most face unlock is weak) uses its screen lock instead, on
+/// Android 11 and later (owner decision, 2026-11-14). There the PIN does approve payments, and removing
+/// the screen lock locks the gate the same way.
 class FingerprintGate implements SignatureGate {
   FingerprintGate({required KeyVault? vault, required SecureStore store, required bool requireBiometrics})
     : _vault = vault,
@@ -40,18 +46,18 @@ class FingerprintGate implements SignatureGate {
 
   static const unavailable = AppException(
     'biometric_unavailable',
-    "Set up a fingerprint in your phone's settings to approve payments.",
+    "Set up a screen lock in your phone's settings to approve payments. On Android 10 or older, also add a fingerprint.",
   );
 
   static const reset = AppException(
     'biometric_reset',
-    'Your fingerprint settings changed. To keep your wallet safe, sign out and sign in again with your email.',
+    "Your phone's fingerprints or screen lock changed. To keep your wallet safe, sign out and sign in again with your email.",
   );
 
   final KeyVault? _vault;
   final SecureStore _store;
 
-  /// False only in debug builds, so emulators without a fingerprint can still sign.
+  /// False only in debug builds, so emulators without a fingerprint or screen lock can still sign.
   final bool _requireBiometrics;
 
   @override

@@ -85,10 +85,10 @@ void main() {
     expect(vault.secrets, hasLength(2));
   });
 
-  test('without a strong fingerprint, release builds refuse and debug builds skip the check', () async {
+  test('without a fingerprint or screen lock, release builds refuse and debug builds skip the check', () async {
     vault.available = false;
     await expectLater(gate().confirm('Approve this payment'), throwsAppException('biometric_unavailable'));
-    expect(FingerprintGate.unavailable.message, contains('Set up a fingerprint'));
+    expect(FingerprintGate.unavailable.message, contains('Set up a screen lock'));
 
     final noVault = FingerprintGate(vault: null, store: store, requireBiometrics: true);
     await expectLater(noVault.confirm('Approve this payment'), throwsAppException('biometric_unavailable'));
