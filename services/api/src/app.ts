@@ -98,12 +98,13 @@ export async function buildApp({ container, logger = true }: BuildAppOptions): P
         title: 'GlobalPay API',
         version: '0.1.0',
         description:
-          'Pay Thai PromptPay QRs with USDC on Base. Testnet demo: partners are simulated.\n\n' +
+          'Pay Thai PromptPay QRs with USDC on Base or NEAR (one settlement rail per server, SETTLEMENT_RAIL). ' +
+          'Testnet demo: partners are simulated.\n\n' +
           'Money is sent as integer strings in minor units: THB satang ("10000" = 100.00 THB) and ' +
           'USDC base units ("1000000" = 1 USDC). Rates are THB per USDC × 1e8.',
       },
       tags: [
-        { name: 'auth', description: 'Sign-In with Ethereum' },
+        { name: 'auth', description: 'Sign-In with Ethereum (EVM rail) or NEP-413 (NEAR rail)' },
         { name: 'kyc', description: 'Identity verification (mock) and limits' },
         { name: 'quotes', description: 'Signed quotes for PromptPay QRs' },
         { name: 'payments', description: 'Submit and track payments (iteration 4)' },
