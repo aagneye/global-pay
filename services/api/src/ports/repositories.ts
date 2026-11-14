@@ -52,6 +52,12 @@ export interface PaymentWithQuote {
   payout?: Payout;
 }
 
+/** Where a worker's last page ended: lists ordered by creation continue after it. */
+export interface PageCursor {
+  createdAt: Date;
+  id: string;
+}
+
 /** Fields that change without a status change, or alongside one. */
 export type PaymentFields = Partial<
   Pick<Payment, 'payTxHash' | 'paidBlock' | 'settleTxHash' | 'refundTxHash' | 'failureReason'>
@@ -68,6 +74,13 @@ export interface PaymentRepository {
   listByUser(userId: string, limit: number): Promise<PaymentWithQuote[]>;
   /** Oldest first, for the workers. */
   listByStatus(statuses: readonly PaymentStatus[], limit: number): Promise<PaymentWithQuote[]>;
+  /**
+   * PAYOUT_PENDING payments the payout worker has something to do for at `now`: no payout yet, a payout
+   * to settle or refund (SUCCEEDED, FAILED), or a PENDING or UNKNOWN one whose next check is due (no
+   * nextCheckAt, or it has passed). Payouts waiting out a backoff, and REVERSED ones, are left out.
+   * Oldest first (then by ID), after `after` if given.
+   */
+  listPayoutDue(now: Date, limit: number, after?: PageCursor): Promise<PaymentWithQuote[]>;
   update(id: string, fields: PaymentFields): Promise<void>;
   /**
    * Moves the payment from `from` to `to`, setting `fields`, only if it's still in `from`.
@@ -176,6 +189,15 @@ export interface OnrampOrderRepository {
   listByUser(userId: string, limit: number): Promise<OnrampOrder[]>;
   /** Oldest first. */
   listByStatus(statuses: readonly OnrampStatus[], limit: number): Promise<OnrampOrder[]>;
+  /**
+   * Orders in `statuses` the onramp worker should look at: never checked with the partner, or last
+   * checked at or before `checkedBefore`, plus PENDING ones with a delivery to verify on-chain.
+   * Only those created after `createdAfter`, if given. Oldest first (then by ID), after `after` if given.
+   */
+  listDue(
+    query: { statuses: readonly OnrampStatus[]; checkedBefore: Date; createdAfter?: Date; after?: PageCursor },
+    limit: number,
+  ): Promise<OnrampOrder[]>;
   /** CREATED or PENDING orders of this user. */
   countOpen(userId: string): Promise<number>;
   update(id: string, fields: OnrampFields): Promise<OnrampOrder>;

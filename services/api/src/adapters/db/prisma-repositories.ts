@@ -21,6 +21,7 @@ import {
   type Quote as QuoteRow,
 } from '../../generated/prisma/client.js';
 import { parsePromptPayQr } from '../../lib/promptpay/parse.js';
+import { afterCursor } from './paging.js';
 import { PrismaDepositRepository, PrismaOnrampOrderRepository } from './prisma-onramp-repositories.js';
 import { PrismaDeviceRepository, PrismaPaymentRequestRepository } from './prisma-p2p-repositories.js';
 import type {
@@ -28,6 +29,7 @@ import type {
   KycRepository,
   OpsAction,
   OpsActionRepository,
+  PageCursor,
   PaymentFields,
   PaymentRepository,
   PaymentWithQuote,
@@ -266,6 +268,28 @@ export class PrismaPaymentRepository implements PaymentRepository {
     const rows = await this.prisma.payment.findMany({
       where: { status: { in: [...statuses] } },
       orderBy: { createdAt: 'asc' },
+      take: limit,
+      include: { quote: true, payout: true },
+    });
+    return rows.map(withQuote);
+  }
+
+  async listPayoutDue(now: Date, limit: number, after?: PageCursor): Promise<PaymentWithQuote[]> {
+    const rows = await this.prisma.payment.findMany({
+      where: {
+        status: 'PAYOUT_PENDING',
+        OR: [
+          { payout: { is: null } },
+          { payout: { is: { status: { in: ['SUCCEEDED', 'FAILED'] } } } },
+          {
+            payout: {
+              is: { status: { in: ['PENDING', 'UNKNOWN'] }, OR: [{ nextCheckAt: null }, { nextCheckAt: { lte: now } }] },
+            },
+          },
+        ],
+        AND: [afterCursor(after)],
+      },
+      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
       take: limit,
       include: { quote: true, payout: true },
     });

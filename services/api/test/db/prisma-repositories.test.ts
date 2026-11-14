@@ -221,6 +221,37 @@ describe.skipIf(!url)('Prisma repositories (Postgres)', () => {
     expect((await repos.payments.listByStatus(['FAILED'], 10))[0]?.payment.failureReason).toBe('test');
   });
 
+  it('lists the payout-pending payments due a payout step, in pages', async () => {
+    const user = await repos.users.upsertByWallet(PAYER);
+    const now = new Date();
+    const ids: string[] = [];
+    for (const n of [1, 2, 3, 4, 5]) {
+      const quoteId = `0x${String(n).padStart(64, '0')}` as const;
+      await storeQuote(user.id, quoteId, 10_00n);
+      const { payment } = await repos.payments.createForQuote(quoteId, user.id);
+      await repos.payments.transition(payment.id, 'SUBMITTED', 'PAID');
+      await repos.payments.transition(payment.id, 'PAID', 'PAYOUT_PENDING');
+      ids.push(payment.id);
+    }
+    const amount = { currency: 'THB' as const, minor: 10_00n };
+    const payout = (i: number) => repos.payouts.createForPayment({ paymentId: ids[i]!, provider: 'sim', amount, idempotencyKey: ids[i]! });
+    // 0: no payout yet. 1: UNKNOWN, backing off. 2: UNKNOWN, due again. 3: SUCCEEDED, to settle. 4: REVERSED.
+    for (const i of [1, 2, 3, 4]) await payout(i);
+    await repos.payouts.transition(ids[1]!, 'PENDING', 'UNKNOWN', { nextCheckAt: new Date(now.getTime() + 60_000) });
+    await repos.payouts.transition(ids[2]!, 'PENDING', 'UNKNOWN', { nextCheckAt: new Date(now.getTime() - 1_000) });
+    await repos.payouts.transition(ids[3]!, 'PENDING', 'SUCCEEDED', { providerReference: 'REF' });
+    await repos.payouts.transition(ids[4]!, 'PENDING', 'SUCCEEDED', { providerReference: 'REF' });
+    await repos.payouts.transition(ids[4]!, 'SUCCEEDED', 'REVERSED');
+
+    const due = await repos.payments.listPayoutDue(now, 10);
+    expect(due.map((p) => p.payment.id)).toEqual([ids[0], ids[2], ids[3]]);
+    const first = await repos.payments.listPayoutDue(now, 2);
+    expect(first.map((p) => p.payment.id)).toEqual([ids[0], ids[2]]);
+    const last = first.at(-1)!.payment;
+    const rest = await repos.payments.listPayoutDue(now, 2, { createdAt: last.createdAt, id: last.id });
+    expect(rest.map((p) => p.payment.id)).toEqual([ids[3]]);
+  });
+
   it('creates one payout per payment, moves it only from the expected status, and keeps an audit trail', async () => {
     const user = await repos.users.upsertByWallet(PAYER);
     const quoteId = `0x${'cd'.repeat(32)}` as const;
@@ -329,6 +360,39 @@ describe.skipIf(!url)('Prisma repositories (Postgres)', () => {
     ).rejects.toMatchObject({ code: 'transfer_already_counted' });
     expect((await repos.onrampOrders.listByStatus(['CREATED'], 10)).map((o) => o.id)).toEqual([second.id]);
     await expect(repos.onrampOrders.transition(second.id, 'COMPLETED', 'FAILED')).rejects.toThrow(/cannot move/);
+  });
+
+  it('lists the onramp orders due a check, in pages', async () => {
+    const user = await repos.users.upsertByWallet(PAYER);
+    const now = new Date();
+    const order = () =>
+      repos.onrampOrders.create({
+        userId: user.id,
+        provider: 'moonpay',
+        walletAddress: PAYER,
+        fiat: { currency: 'THB', minor: 800_00n },
+        expiresAt: new Date(now.getTime() + 3_600_000),
+      });
+    const never = await order();
+    const recent = await order();
+    const stale = await order();
+    const verifying = await order();
+    const expired = await order();
+    await repos.onrampOrders.update(recent.id, { lastCheckedAt: now });
+    await repos.onrampOrders.update(stale.id, { lastCheckedAt: new Date(now.getTime() - 60_000) });
+    await repos.onrampOrders.transition(verifying.id, 'CREATED', 'PENDING', { lastCheckedAt: now, txHash: `0x${'ab'.repeat(32)}` });
+    await repos.onrampOrders.transition(expired.id, 'CREATED', 'EXPIRED');
+
+    const checkedBefore = new Date(now.getTime() - 15_000);
+    const open = await repos.onrampOrders.listDue({ statuses: ['CREATED', 'PENDING'], checkedBefore }, 10);
+    expect(open.map((o) => o.id)).toEqual([never.id, stale.id, verifying.id]);
+    const page = await repos.onrampOrders.listDue({ statuses: ['CREATED', 'PENDING'], checkedBefore, after: { createdAt: never.createdAt, id: never.id } }, 1);
+    expect(page.map((o) => o.id)).toEqual([stale.id]);
+
+    expect((await repos.onrampOrders.listDue({ statuses: ['EXPIRED'], checkedBefore, createdAfter: new Date(now.getTime() - 60_000) }, 10)).map((o) => o.id)).toEqual([
+      expired.id,
+    ]);
+    await expect(repos.onrampOrders.listDue({ statuses: ['EXPIRED'], checkedBefore, createdAfter: new Date(now.getTime() + 60_000) }, 10)).resolves.toEqual([]);
   });
 
   it('stores each deposit once', async () => {

@@ -3,6 +3,7 @@ import type { PayoutTracker } from '../modules/payouts/payout-tracker.js';
 import type { PaymentRepository, PaymentWithQuote, PayoutRepository } from '../ports/repositories.js';
 import type { SettlementGateway } from '../ports/settlement-gateway.js';
 import { PollingLoop, type WorkerLogger, silentLogger } from './loop.js';
+import { RoundRobin } from './paging.js';
 
 export interface PayoutWorkerDeps {
   payments: PaymentRepository;
@@ -13,6 +14,7 @@ export interface PayoutWorkerDeps {
   /** False when there's no relayer key: settling and refunding need one. */
   enabled: boolean;
   batchSize?: number;
+  now?: () => Date;
 }
 
 type Resolution = 'settle' | 'refund';
@@ -32,11 +34,15 @@ export class PayoutWorker {
   private readonly deps: PayoutWorkerDeps;
   private readonly loop: PollingLoop;
   private readonly batchSize: number;
+  private readonly now: () => Date;
+  /** Payout-pending payments are taken in turns, so ones that can't move yet don't hold up the rest. */
+  private readonly due = new RoundRobin<PaymentWithQuote>(({ payment }) => ({ createdAt: payment.createdAt, id: payment.id }));
   private log: WorkerLogger = silentLogger;
 
   constructor(deps: PayoutWorkerDeps) {
     this.deps = deps;
     this.batchSize = deps.batchSize ?? 20;
+    this.now = deps.now ?? (() => new Date());
     this.loop = new PollingLoop('payouts', deps.pollMs, () => this.tick());
   }
 
@@ -53,13 +59,19 @@ export class PayoutWorker {
     await this.loop.stop();
   }
 
-  /** One pass over paid and payout-pending payments. One payment's error doesn't stop the others. */
+  /**
+   * One pass over paid and payout-pending payments. One payment's error doesn't stop the others.
+   * Only payouts with something to do are taken (not those waiting out a backoff after an unclear
+   * answer), a page at a time, continuing where the last tick stopped: a partner outage that leaves
+   * many payouts UNKNOWN never stops new payments from being sent to the partner.
+   */
   async tick(): Promise<void> {
     const { payments } = this.deps;
     for (const item of await payments.listByStatus(['PAID'], this.batchSize)) {
       await this.guard(item, () => this.startPayout(item));
     }
-    for (const item of await payments.listByStatus(['PAYOUT_PENDING'], this.batchSize)) {
+    const now = this.now();
+    for (const item of await this.due.next(this.batchSize, (after) => payments.listPayoutDue(now, this.batchSize, after))) {
       await this.guard(item, () => this.advance(item));
     }
   }

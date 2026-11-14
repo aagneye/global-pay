@@ -18,6 +18,7 @@ import { parsePromptPayQr } from '../../src/lib/promptpay/parse.js';
 import type {
   OnrampFields,
   OpsAction,
+  PageCursor,
   PaymentFields,
   PaymentWithQuote,
   PayoutFields,
@@ -158,6 +159,18 @@ export function createMemoryRepositories() {
           .slice(0, limit)
           .map(withQuote);
       },
+      async listPayoutDue(at, limit, after) {
+        const due = (payout: Payout | undefined) =>
+          !payout ||
+          payout.status === 'SUCCEEDED' ||
+          payout.status === 'FAILED' ||
+          ((payout.status === 'PENDING' || payout.status === 'UNKNOWN') && (!payout.nextCheckAt || payout.nextCheckAt <= at));
+        return [...payments.values()]
+          .filter((p) => p.status === 'PAYOUT_PENDING' && due(payouts.get(p.id)) && isAfter(p, after))
+          .sort(byCreation)
+          .slice(0, limit)
+          .map(withQuote);
+      },
       async update(id, fields) {
         const payment = payments.get(id);
         if (!payment) throw new Error(`no payment ${id}`);
@@ -286,6 +299,14 @@ export function createMemoryRepositories() {
         return [...onrampOrders.values()]
           .filter((o) => statuses.includes(o.status))
           .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime())
+          .slice(0, limit)
+          .map((o) => ({ ...o }));
+      },
+      async listDue({ statuses, checkedBefore, createdAfter, after }, limit) {
+        const due = (o: OnrampOrder) => !o.lastCheckedAt || o.lastCheckedAt <= checkedBefore || (o.status === 'PENDING' && o.txHash !== undefined);
+        return [...onrampOrders.values()]
+          .filter((o) => statuses.includes(o.status) && due(o) && (!createdAfter || o.createdAt > createdAfter) && isAfter(o, after))
+          .sort(byCreation)
           .slice(0, limit)
           .map((o) => ({ ...o }));
       },
@@ -462,6 +483,18 @@ export function createMemoryRepositories() {
     /** Test-only views of the stored data. */
     state: { users, nonces, kyc, quotes, payments, payouts, cursors, payoutEvents, opsActions, onrampOrders, deposits, devices, paymentRequests },
   };
+}
+
+/** Like the Prisma repositories' `afterCursor`: after `after` in (createdAt, id) order. */
+function isAfter(item: PageCursor, after: PageCursor | undefined): boolean {
+  if (!after) return true;
+  const diff = item.createdAt.getTime() - after.createdAt.getTime();
+  return diff > 0 || (diff === 0 && item.id > after.id);
+}
+
+/** Sorts like `ORDER BY createdAt, id`. */
+function byCreation(a: PageCursor, b: PageCursor): number {
+  return a.createdAt.getTime() - b.createdAt.getTime() || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
 }
 
 /** Applies fields like the database would: `null` clears, `undefined` leaves alone. */

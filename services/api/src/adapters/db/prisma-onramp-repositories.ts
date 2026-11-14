@@ -7,8 +7,9 @@ import {
   Prisma,
   type PrismaClient,
 } from '../../generated/prisma/client.js';
-import type { DepositRepository, OnrampFields, OnrampOrderRepository } from '../../ports/repositories.js';
+import type { DepositRepository, OnrampFields, OnrampOrderRepository, PageCursor } from '../../ports/repositories.js';
 import { AppError } from '../../shared/errors.js';
+import { afterCursor } from './paging.js';
 
 const lower = <T extends string>(value: T) => value.toLowerCase() as T;
 const isUniqueViolation = (error: unknown) =>
@@ -45,6 +46,22 @@ export class PrismaOnrampOrderRepository implements OnrampOrderRepository {
     const rows = await this.prisma.onrampOrder.findMany({
       where: { status: { in: [...statuses] } },
       orderBy: { createdAt: 'asc' },
+      take: limit,
+    });
+    return rows.map(toOrder);
+  }
+
+  async listDue(
+    query: { statuses: readonly OnrampStatus[]; checkedBefore: Date; createdAfter?: Date; after?: PageCursor },
+    limit: number,
+  ): Promise<OnrampOrder[]> {
+    const rows = await this.prisma.onrampOrder.findMany({
+      where: {
+        status: { in: [...query.statuses] },
+        OR: [{ lastCheckedAt: null }, { lastCheckedAt: { lte: query.checkedBefore } }, { status: 'PENDING', txHash: { not: null } }],
+        AND: [afterCursor(query.after), query.createdAfter ? { createdAt: { gt: query.createdAfter } } : {}],
+      },
+      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
       take: limit,
     });
     return rows.map(toOrder);

@@ -88,7 +88,7 @@ describe('onramp worker', () => {
       },
     };
     const tracker = new OnrampTracker({ orders: repos.onrampOrders, provider, reader: chain, token: USDC, confirmations: 0, recheckMs: 0, now: () => new Date(clock) });
-    const worker = new OnrampWorker({ orders: repos.onrampOrders, tracker, pollMs: 60_000 });
+    const worker = new OnrampWorker({ orders: repos.onrampOrders, tracker, pollMs: 60_000, recheckMs: 0, now: () => new Date(clock) });
     for (let i = 0; i < 2; i++) {
       await repos.onrampOrders.create({
         userId: 'u1',

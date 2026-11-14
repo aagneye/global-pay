@@ -4,6 +4,7 @@ import { SimulatedPromptPayProvider } from '../src/adapters/payouts/simulated-pr
 import { buildPromptPayQr } from '../src/lib/promptpay/build.js';
 import { IndexerWorker } from '../src/workers/indexer.js';
 import type { WorkerLogger } from '../src/workers/loop.js';
+import { PayoutWorker } from '../src/workers/payout-worker.js';
 import { TransactionRejectedError } from '../src/ports/settlement-gateway.js';
 import { ANVIL } from './support/anvil.js';
 import {
@@ -306,6 +307,56 @@ describe('payout worker', () => {
     chain.failNextWrite = new TransactionRejectedError('EnforcedPause');
     await payouts.tick();
     expect(repos.state.payouts.get(id)?.lastError).toMatch(/EnforcedPause/);
+  });
+
+  /** A payout worker that looks at `batchSize` payout-pending payments per tick. */
+  function smallBatchWorker(t: Awaited<ReturnType<typeof setup>>, batchSize: number) {
+    return new PayoutWorker({
+      payments: t.repos.payments,
+      payouts: t.repos.payouts,
+      tracker: t.container.services.payouts,
+      gateway: t.chain,
+      pollMs: 60_000,
+      enabled: true,
+      batchSize,
+    });
+  }
+
+  it('keeps payouts waiting out a partner outage from holding up newer payments', async () => {
+    const t = await setup();
+    const worker = smallBatchWorker(t, 2);
+    const stuck = [await t.pay(), await t.pay()];
+    await t.indexer.tick();
+    // After a partner outage, both payouts are UNKNOWN and waiting out their backoff.
+    for (const { id } of stuck) {
+      await t.repos.payments.transition(id, 'PAID', 'PAYOUT_PENDING');
+      await t.container.services.payouts.ensurePayout((await t.repos.payments.findById(id))!);
+      await t.repos.payouts.transition(id, 'PENDING', 'UNKNOWN', {
+        unknownSince: new Date(),
+        nextCheckAt: new Date(Date.now() + 60 * 60_000),
+        lastError: 'Partner timed out',
+      });
+    }
+
+    const fresh = await t.pay();
+    await t.indexer.tick();
+    expect(await runUntilFinal(worker, () => t.status(fresh.id))).toBe('SETTLED');
+    expect(stuck.map(({ id }) => t.status(id))).toEqual(['PAYOUT_PENDING', 'PAYOUT_PENDING']);
+  });
+
+  it("takes turns, so payments it can't resolve don't hold up the rest", async () => {
+    const t = await setup();
+    const worker = smallBatchWorker(t, 2);
+    const stuck = [await t.pay(), await t.pay()];
+    await t.indexer.tick();
+    await t.payouts.tick(); // both payouts sent; the next check finds them SUCCEEDED
+    // But the chain has no payment to settle (e.g. it was made on an older contract).
+    for (const { quoteId } of stuck) t.chain.onChain.delete(quoteId);
+
+    const fresh = await t.pay();
+    await t.indexer.tick();
+    expect(await runUntilFinal(worker, () => t.status(fresh.id), 8)).toBe('SETTLED');
+    expect(stuck.map(({ id }) => t.status(id))).toEqual(['PAYOUT_PENDING', 'PAYOUT_PENDING']);
   });
 
   it('does nothing if the chain shows no payment to settle', async () => {

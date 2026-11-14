@@ -266,7 +266,12 @@ export function buildContainer(env: Env, overrides: Partial<Adapters> = {}): Con
         pollMs: env.PAYOUT_POLL_MS,
         enabled: Boolean(env.SETTLEMENT_ADDRESS && env.RELAYER_PRIVATE_KEY),
       }),
-      onramp: new OnrampWorker({ orders: repositories.onrampOrders, tracker: onrampTracker, pollMs: env.ONRAMP_POLL_MS }),
+      onramp: new OnrampWorker({
+        orders: repositories.onrampOrders,
+        tracker: onrampTracker,
+        pollMs: env.ONRAMP_POLL_MS,
+        recheckMs: env.ONRAMP_RECHECK_MS,
+      }),
       p2p: new P2pWorker({ requests: repositories.paymentRequests, gateway, p2p, pollMs: env.P2P_POLL_MS }),
       deposits: new DepositWorker({
         users: repositories.users,
