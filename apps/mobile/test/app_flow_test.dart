@@ -302,6 +302,13 @@ void main() {
       await tap(tester, 'Done');
       await pumpUntil(tester, find.text('Pay by tap'));
       await tester.pump(const Duration(seconds: 1));
+
+      // History shows it once: as the tap payment, not again as the deposit of its transfer.
+      await tap(tester, 'History');
+      await pumpUntil(tester, find.text('Received from 0x15d3…6A65'));
+      expect(find.text('+5.000000 USDC'), findsOneWidget);
+      expect(find.text('Received'), findsNothing);
+      expect(backend.requests.where((r) => r.method == 'GET' && r.path == '/p2p/requests'), isNotEmpty);
     });
 
     testWidgets('sender: answers taps, then approves with the wallet', (tester) async {
@@ -332,6 +339,10 @@ void main() {
       expect((approve.body as Map)['signature'], matches(RegExp(r'^0x[0-9a-f]{130}$')));
       await tap(tester, 'Done');
       await tester.pump(const Duration(seconds: 1));
+
+      await tap(tester, 'History');
+      await pumpUntil(tester, find.text('Paid Somchai Coffee'));
+      expect(find.text('5.000000 USDC'), findsOneWidget);
     });
 
     testWidgets('sender: refuses to sign a transfer to someone the screen does not show', (tester) async {

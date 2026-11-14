@@ -37,6 +37,7 @@ class P2pRequest {
     required this.recipientVerified,
     required this.recipientAddress,
     required this.expiresAt,
+    required this.createdAt,
     this.senderAddress,
     this.challenge,
     this.transaction,
@@ -60,6 +61,7 @@ class P2pRequest {
   final bool recipientVerified;
   final String recipientAddress;
   final DateTime expiresAt;
+  final DateTime createdAt;
   final String? senderAddress;
 
   /// Receiver only, while waiting for a sender: what the other phone signs, and what the QR carries.

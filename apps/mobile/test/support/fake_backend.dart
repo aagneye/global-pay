@@ -119,7 +119,16 @@ class FakeBackend implements HttpClientAdapter {
         _added = status == 'COMPLETED';
         return (200, _onramp(status));
       }(),
-      ('GET', '/me/deposits') => (200, {'deposits': _added ? [_deposit()] : []}),
+      ('GET', '/me/deposits') => (
+        200,
+        {
+          'deposits': [
+            if (_added) _deposit(),
+            // The deposit worker also sees a tap payment's transfer arrive in the receiver's wallet.
+            if (p2pRole == 'receiver' && p2pStatus == 'COMPLETED') _tapDeposit(),
+          ],
+        },
+      ),
       ('POST', '/devices') => (201, {'id': 'device_1'}),
       ('PUT', '/me/profile') => (200, {'displayName': (body as Map)['displayName'], 'nameVerified': false}),
       ('POST', '/p2p/requests') => (201, _p2p()),
@@ -131,6 +140,7 @@ class FakeBackend implements HttpClientAdapter {
         p2pStatus = 'SENDER_IDENTIFIED';
         return (200, _p2p());
       }(),
+      ('GET', '/p2p/requests') => (200, {'requests': p2pStatus == 'CREATED' ? [] : [_p2p()]}),
       ('GET', '/p2p/incoming') => (200, {'requests': p2pStatus == 'SENDER_IDENTIFIED' ? [_p2p()] : []}),
       ('GET', '/p2p/requests/request_1') => () {
         // The other side acts between polls: the sender approves, then the transfer lands.
@@ -232,6 +242,15 @@ class FakeBackend implements HttpClientAdapter {
     'from': '0x0000000000000000000000000000000000000000',
     'transaction': {'hash': '0x${'55' * 32}', 'url': 'https://explorer.test/tx/0x${'55' * 32}'},
     'onrampOrderId': 'order_1',
+    'createdAt': DateTime.now().toUtc().toIso8601String(),
+  };
+
+  Map<String, Object> _tapDeposit() => {
+    'id': 'deposit_2',
+    'token': '0x5FbDB2315678afecb367f032d93F642f64180aa3',
+    'amount': '5000000',
+    'from': '0x15d34AAf54267DB7D7c367839AAf71A00a2C6A65',
+    'transaction': {'hash': '0x${'66' * 32}', 'url': 'https://explorer.test/tx/0x${'66' * 32}'},
     'createdAt': DateTime.now().toUtc().toIso8601String(),
   };
 

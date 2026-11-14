@@ -38,6 +38,12 @@ class P2pRepository {
   Future<P2pRequest> claim(String id, String challenge) =>
       _call(() => api.api.p2p.claimPaymentRequest(id: id, body: dto.ClaimRequest(challenge: challenge)));
 
+  /// Requests I received or paid, newest first (the backend keeps the last 50).
+  Future<List<P2pRequest>> list() async {
+    final response = await ApiClient.call(() => api.api.p2p.listPaymentRequests());
+    return response.requests.map(p2pRequestFromDto).toList();
+  }
+
   /// Sender: requests waiting for my approval.
   Future<List<P2pRequest>> incoming() async {
     final response = await ApiClient.call(() => api.api.p2p.listIncomingRequests());
@@ -81,6 +87,7 @@ P2pRequest p2pRequestFromDto(dto.P2pRequest response) => P2pRequest(
   recipientVerified: response.recipient.verified,
   recipientAddress: response.recipient.address,
   expiresAt: response.expiresAt,
+  createdAt: response.createdAt,
   senderAddress: response.sender?.address,
   challenge: response.challenge,
   transaction: response.transaction == null ? null : TxLink(hash: response.transaction!.hash, url: response.transaction!.url),

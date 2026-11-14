@@ -2,6 +2,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:globalpay/core/providers.dart';
 import 'package:globalpay/domain/models/money.dart';
 import 'package:globalpay/domain/models/onramp.dart';
+import 'package:globalpay/domain/models/p2p.dart';
 import 'package:globalpay/domain/models/payment.dart';
 import 'package:globalpay/features/auth/session_controller.dart';
 
@@ -21,4 +22,10 @@ final depositsProvider = FutureProvider.autoDispose<List<Deposit>>((ref) async {
 final historyProvider = FutureProvider.autoDispose<List<Payment>>((ref) async {
   await ref.watch(sessionProvider.future);
   return ref.read(accountRepositoryProvider).history();
+});
+
+/// Tap-to-pay requests I paid or received, newest first, whatever their status.
+final tapHistoryProvider = FutureProvider.autoDispose<List<P2pRequest>>((ref) async {
+  await ref.watch(sessionProvider.future);
+  return ref.read(p2pRepositoryProvider).list();
 });

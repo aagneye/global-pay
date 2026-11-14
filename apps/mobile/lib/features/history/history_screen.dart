@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import 'package:globalpay/app/router.dart';
 import 'package:globalpay/core/widgets/common.dart';
 import 'package:globalpay/domain/models/onramp.dart';
+import 'package:globalpay/domain/models/p2p.dart';
 import 'package:globalpay/domain/models/payment.dart';
 import 'package:globalpay/features/home/account_providers.dart';
 
@@ -14,10 +15,12 @@ class HistoryScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final payments = ref.watch(historyProvider);
     final deposits = ref.watch(depositsProvider);
+    final taps = ref.watch(tapHistoryProvider);
 
     Future<void> refresh() async {
       ref.invalidate(historyProvider);
       ref.invalidate(depositsProvider);
+      ref.invalidate(tapHistoryProvider);
       await ref.read(historyProvider.future);
     }
 
@@ -25,34 +28,61 @@ class HistoryScreen extends ConsumerWidget {
       appBar: AppBar(title: const Text('History')),
       body: RefreshIndicator(
         onRefresh: refresh,
-        child: switch ((payments, deposits)) {
-          (AsyncError(:final error), _) || (_, AsyncError(:final error)) => ListView(
-            children: [ErrorView(error: error, onRetry: refresh)],
-          ),
-          (AsyncData(value: final paid), AsyncData(value: final received)) when paid.isEmpty && received.isEmpty => ListView(
-            children: const [
-              Padding(
-                padding: EdgeInsets.all(32),
-                child: Center(child: Text('No payments yet.')),
-              ),
-            ],
-          ),
-          (AsyncData(value: final paid), AsyncData(value: final received)) => ListView(
-            padding: const EdgeInsets.all(8),
-            children: [
-              // Newest first, payments and deposits together.
-              for (final entry in [
-                ...paid.map((p) => (at: p.createdAt, tile: PaymentTile(payment: p) as Widget)),
-                ...received.map((d) => (at: d.createdAt, tile: DepositTile(deposit: d) as Widget)),
-              ]..sort((a, b) => b.at.compareTo(a.at)))
-                entry.tile,
-            ],
-          ),
+        child: switch ((payments, deposits, taps)) {
+          (AsyncError(:final error), _, _) || (_, AsyncError(:final error), _) || (_, _, AsyncError(:final error)) =>
+            ListView(children: [ErrorView(error: error, onRetry: refresh)]),
+          (AsyncData(value: final paid), AsyncData(value: final received), AsyncData(value: final tapped)) => switch (
+              historyItems(payments: paid, deposits: received, taps: tapped)) {
+            [] => ListView(
+              children: const [
+                Padding(
+                  padding: EdgeInsets.all(32),
+                  child: Center(child: Text('No payments yet.')),
+                ),
+              ],
+            ),
+            final items => ListView(
+              padding: const EdgeInsets.all(8),
+              children: [
+                for (final item in items)
+                  switch (item) {
+                    Payment() => PaymentTile(payment: item),
+                    Deposit() => DepositTile(deposit: item),
+                    P2pRequest() => TapPaymentTile(request: item),
+                    _ => const SizedBox.shrink(),
+                  },
+              ],
+            ),
+          },
           _ => const Center(child: CircularProgressIndicator()),
         },
       ),
     );
   }
+}
+
+/// History's rows, newest first: payments, deposits, and tap payments that moved money (sent or completed).
+/// The receiver's wallet also sees a tap payment's transfer as a deposit: it shows once, as the tap payment.
+List<Object> historyItems({
+  required List<Payment> payments,
+  required List<Deposit> deposits,
+  required List<P2pRequest> taps,
+}) {
+  final moved = [
+    for (final request in taps)
+      if (request.status == P2pStatus.submitted || request.status == P2pStatus.completed) request,
+  ];
+  final tapTransfers = {
+    for (final request in moved)
+      if (request.transaction case final tx?) tx.hash.toLowerCase(),
+  };
+  final dated = [
+    for (final payment in payments) (at: payment.createdAt, item: payment as Object),
+    for (final deposit in deposits)
+      if (!tapTransfers.contains(deposit.transaction.hash.toLowerCase())) (at: deposit.createdAt, item: deposit),
+    for (final request in moved) (at: request.createdAt, item: request),
+  ]..sort((a, b) => b.at.compareTo(a.at));
+  return [for (final entry in dated) entry.item];
 }
 
 /// One payment in a list: merchant, baht amount, USDC paid, status. Opens its status screen.
@@ -105,6 +135,36 @@ class DepositTile extends StatelessWidget {
       title: Text(fromOnramp ? 'Added money' : 'Received'),
       subtitle: Text(fromOnramp ? date : '$date · from ${shortAddress(deposit.from)}'),
       trailing: Text('+${deposit.amount.format()}', style: theme.textTheme.titleSmall?.copyWith(color: theme.colorScheme.primary)),
+    );
+  }
+}
+
+/// A tap payment: "Paid Somchai Coffee" or "Received from 0x15d3…6A65". Tap to copy the explorer link.
+class TapPaymentTile extends StatelessWidget {
+  const TapPaymentTile({super.key, required this.request});
+
+  final P2pRequest request;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final date = MaterialLocalizations.of(context).formatShortDate(request.createdAt.toLocal());
+    final received = request.isReceiver;
+    final title = switch (request.senderAddress) {
+      _ when !received => 'Paid ${request.recipientName}',
+      final sender? => 'Received from ${shortAddress(sender)}',
+      null => 'Received',
+    };
+    final link = request.transaction?.url;
+    return ListTile(
+      onTap: link == null ? null : () => copyToClipboard(context, link, label: 'Link copied'),
+      leading: const CircleAvatar(child: Icon(Icons.contactless)),
+      title: Text(title, maxLines: 1, overflow: TextOverflow.ellipsis),
+      subtitle: Text(request.status == P2pStatus.submitted ? '$date · Sending' : date),
+      trailing: Text(
+        received ? '+${request.amount.format()}' : request.amount.format(),
+        style: theme.textTheme.titleSmall?.copyWith(color: received ? theme.colorScheme.primary : null),
+      ),
     );
   }
 }

@@ -186,6 +186,7 @@ void main() {
       recipientVerified: false,
       recipientAddress: receiver,
       expiresAt: now.add(const Duration(minutes: 2)),
+      createdAt: now,
       senderAddress: wallet,
     );
 
