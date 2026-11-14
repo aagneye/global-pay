@@ -1,4 +1,6 @@
-import type { Address } from 'viem';
+import { type Address, isAddressEqual } from 'viem';
+import type { Payment } from '../domain/payment.js';
+import type { Quote } from '../domain/quote.js';
 import type { CursorRepository, PaymentRepository, PaymentWithQuote, QuoteRepository } from '../ports/repositories.js';
 import type { PaymentReceivedEvent, SettlementGateway } from '../ports/settlement-gateway.js';
 import { PollingLoop, type WorkerLogger, silentLogger } from './loop.js';
@@ -29,6 +31,8 @@ export interface IndexerDeps {
  * Reads `PaymentReceived` events and moves payments SUBMITTED → PAID. On-chain events are the
  * source of truth: processing an event again has no effect, and the saved block cursor lets it
  * resume after a restart. Events are only read `confirmations` blocks behind the head.
+ * An event must match its stored quote field for field (payer, token, amounts, merchant); one that
+ * doesn't is never paid out, and is shown to operators.
  *
  * It also reconciles SUBMITTED payments whose pay() never produced an event: a reverted
  * transaction, or one that didn't land before the quote expired, becomes FAILED.
@@ -96,15 +100,21 @@ export class IndexerWorker {
 
   private async onPaymentReceived(event: PaymentReceivedEvent): Promise<void> {
     const { payments, quotes } = this.deps;
-    let payment = await payments.findByQuoteId(event.quoteId);
-    if (!payment) {
-      const stored = await quotes.findById(event.quoteId);
-      if (!stored) {
-        this.log.warn({ quoteId: event.quoteId, txHash: event.txHash }, 'PaymentReceived for an unknown quote');
-        return;
-      }
-      // pay() is permissionless, so someone else may have submitted our quote. Track it like our own.
-      payment = (await payments.createForQuote(event.quoteId, stored.userId)).payment;
+    const stored = await quotes.findById(event.quoteId);
+    if (!stored) {
+      this.log.warn({ quoteId: event.quoteId, txHash: event.txHash }, 'PaymentReceived for an unknown quote');
+      return;
+    }
+    // pay() is permissionless, so someone else may have submitted our quote. Track it like our own.
+    const payment =
+      (await payments.findByQuoteId(event.quoteId)) ?? (await payments.createForQuote(event.quoteId, stored.userId)).payment;
+
+    // The event must be for exactly the quote we signed and stored. Anything else (say, a quote signed
+    // with a leaked key under a stored quote's ID, for a smaller amount) is never paid out.
+    const mismatch = describeMismatch(event, stored.quote);
+    if (mismatch) {
+      await this.onMismatch(payment, event, mismatch);
+      return;
     }
 
     if (payment.status === 'SUBMITTED') {
@@ -118,6 +128,21 @@ export class IndexerWorker {
       this.log.error({ paymentId: payment.id, txHash: event.txHash }, 'FAILED payment was paid on-chain');
     }
     // Any other status: we've seen this event before.
+  }
+
+  /** Keeps the payment out of the payout path for good, and flags it for operators. */
+  private async onMismatch(payment: Payment, event: PaymentReceivedEvent, mismatch: string): Promise<void> {
+    const { payments } = this.deps;
+    this.log.error({ paymentId: payment.id, txHash: event.txHash, mismatch }, 'PaymentReceived does not match its quote; not paying out');
+    const eventMismatch = `Transaction ${event.txHash}: ${mismatch}`;
+    if (payment.status === 'SUBMITTED') {
+      const failed = await payments.transition(payment.id, 'SUBMITTED', 'FAILED', {
+        failureReason: "The on-chain payment doesn't match the quote",
+        eventMismatch,
+      });
+      if (failed) return;
+    }
+    await payments.update(payment.id, { eventMismatch });
   }
 
   private async reconcileSubmitted(): Promise<void> {
@@ -149,5 +174,33 @@ export class IndexerWorker {
     await payments.transition(payment.id, 'SUBMITTED', 'FAILED', {
       failureReason: payment.payTxHash ? 'pay() was not mined before the quote expired' : 'pay() was not sent',
     });
+  }
+}
+
+/** The fields where the event differs from the stored quote, e.g. "tokenAmount 1 (quote: 3107693)"; null if none. */
+export function describeMismatch(event: PaymentReceivedEvent, quote: Quote): string | null {
+  const differences: string[] = [];
+  const check = (field: string, onChain: string | bigint, stored: string | bigint, same: boolean) => {
+    if (!same) differences.push(`${field} ${onChain} (quote: ${stored})`);
+  };
+  check('payer', event.payer, quote.payer, sameAddress(event.payer, quote.payer));
+  check('token', event.token, quote.token, sameAddress(event.token, quote.token));
+  check('tokenAmount', event.tokenAmount, quote.tokenAmount, event.tokenAmount === quote.tokenAmount);
+  check('fiatCurrency', event.fiatCurrency, quote.fiat.currency, event.fiatCurrency === quote.fiat.currency);
+  check('fiatAmount', event.fiatAmount, quote.fiat.minor, event.fiatAmount === quote.fiat.minor);
+  check(
+    'merchantRefHash',
+    event.merchantRefHash,
+    quote.merchantRefHash,
+    event.merchantRefHash.toLowerCase() === quote.merchantRefHash.toLowerCase(),
+  );
+  return differences.length ? differences.join(', ') : null;
+}
+
+function sameAddress(a: string, b: string): boolean {
+  try {
+    return isAddressEqual(a as Address, b as Address);
+  } catch {
+    return false;
   }
 }

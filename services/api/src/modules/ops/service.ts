@@ -37,7 +37,9 @@ export type ExceptionKind =
   | 'payout_reversed'
   | 'partner_error'
   | 'resolution_stuck'
-  | 'payout_conflict';
+  | 'payout_conflict'
+  /** The on-chain payment differs from its quote (amount, payer, token or merchant): never paid out. */
+  | 'event_mismatch';
 
 export interface OpsException {
   kind: ExceptionKind;
@@ -93,6 +95,16 @@ export class OpsService {
     for (const item of await payments.listByStatus(['PAID'], LIMIT)) {
       if (now - item.payment.updatedAt.getTime() < stuckPaidMs) continue;
       items.push({ ...describe(item), kind: 'paid_without_payout', escalated: true, since: item.payment.updatedAt });
+    }
+
+    for (const item of await payments.listEventMismatches(LIMIT)) {
+      items.push({
+        ...describe(item),
+        kind: 'event_mismatch',
+        escalated: true,
+        since: item.payment.updatedAt,
+        lastError: item.payment.eventMismatch!,
+      });
     }
 
     for (const payout of await payouts.listNeedingAttention(LIMIT)) {

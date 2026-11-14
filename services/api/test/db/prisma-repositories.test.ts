@@ -221,6 +221,24 @@ describe.skipIf(!url)('Prisma repositories (Postgres)', () => {
     expect((await repos.payments.listByStatus(['FAILED'], 10))[0]?.payment.failureReason).toBe('test');
   });
 
+  it('keeps and lists payments whose on-chain event did not match their quote', async () => {
+    const user = await repos.users.upsertByWallet(PAYER);
+    const ids: string[] = [];
+    for (const n of [1, 2]) {
+      const quoteId = `0x${String(n).padStart(64, '0')}` as const;
+      await storeQuote(user.id, quoteId, 10_00n);
+      ids.push((await repos.payments.createForQuote(quoteId, user.id)).payment.id);
+    }
+    await expect(
+      repos.payments.transition(ids[1]!, 'SUBMITTED', 'FAILED', { failureReason: 'mismatch', eventMismatch: 'tokenAmount 1 (quote: 3107693)' }),
+    ).resolves.toBe(true);
+
+    const listed = await repos.payments.listEventMismatches(10);
+    expect(listed.map((p) => p.payment.id)).toEqual([ids[1]]);
+    expect(listed[0]?.payment).toMatchObject({ status: 'FAILED', eventMismatch: 'tokenAmount 1 (quote: 3107693)' });
+    expect((await repos.payments.findById(ids[0]!))?.payment.eventMismatch).toBeUndefined();
+  });
+
   it('lists the payout-pending payments due a payout step, in pages', async () => {
     const user = await repos.users.upsertByWallet(PAYER);
     const now = new Date();

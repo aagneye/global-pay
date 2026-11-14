@@ -296,6 +296,16 @@ export class PrismaPaymentRepository implements PaymentRepository {
     return rows.map(withQuote);
   }
 
+  async listEventMismatches(limit: number): Promise<PaymentWithQuote[]> {
+    const rows = await this.prisma.payment.findMany({
+      where: { eventMismatch: { not: null } },
+      orderBy: { createdAt: 'asc' },
+      take: limit,
+      include: { quote: true, payout: true },
+    });
+    return rows.map(withQuote);
+  }
+
   async update(id: string, fields: PaymentFields): Promise<void> {
     await this.prisma.payment.update({ where: { id }, data: toPaymentData(fields) });
   }
@@ -322,6 +332,7 @@ function toPayment(row: PaymentRow): Payment {
     ...(row.settleTxHash === null ? {} : { settleTxHash: row.settleTxHash as Hex }),
     ...(row.refundTxHash === null ? {} : { refundTxHash: row.refundTxHash as Hex }),
     ...(row.failureReason === null ? {} : { failureReason: row.failureReason }),
+    ...(row.eventMismatch === null ? {} : { eventMismatch: row.eventMismatch }),
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };
@@ -342,6 +353,7 @@ function toPaymentData(fields: PaymentFields) {
     ...(fields.settleTxHash === undefined ? {} : { settleTxHash: lower(fields.settleTxHash) }),
     ...(fields.refundTxHash === undefined ? {} : { refundTxHash: lower(fields.refundTxHash) }),
     ...(fields.failureReason === undefined ? {} : { failureReason: fields.failureReason }),
+    ...(fields.eventMismatch === undefined ? {} : { eventMismatch: fields.eventMismatch }),
   };
 }
 

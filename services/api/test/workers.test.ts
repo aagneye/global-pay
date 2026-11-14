@@ -6,6 +6,7 @@ import { IndexerWorker } from '../src/workers/indexer.js';
 import type { WorkerLogger } from '../src/workers/loop.js';
 import { PayoutWorker } from '../src/workers/payout-worker.js';
 import { TransactionRejectedError } from '../src/ports/settlement-gateway.js';
+import type { SignedQuote } from '../src/domain/quote.js';
 import { ANVIL } from './support/anvil.js';
 import {
   type TestApp,
@@ -151,6 +152,61 @@ describe('indexer', () => {
     const [payment] = [...repos.state.payments.values()];
     expect(payment).toMatchObject({ quoteId: quote.quote.quoteId, status: 'PAID', userId: session.userId });
     expect(lines).toContainEqual({ level: 'warn', message: 'PaymentReceived for an unknown quote' });
+  });
+
+  describe('an event that does not match its quote', () => {
+    /** Someone signs their own quote under a stored quote's ID (a leaked signer key) and pays it on-chain. */
+    async function forged(t: Awaited<ReturnType<typeof setup>>, change: (quote: SignedQuote['quote']) => SignedQuote['quote']) {
+      const quote = await createQuote(t.app, t.session, qr);
+      const stored = t.repos.state.quotes.get(quote.quote.quoteId)!;
+      await t.chain.submitPayment({ ...stored, quote: change({ ...stored.quote }) }, { validAfter: 0n, validBefore: 0n, signature: '0x' });
+      return quote;
+    }
+    const other = '0x00000000000000000000000000000000000000cc';
+    const changes: [string, (q: SignedQuote['quote']) => SignedQuote['quote']][] = [
+      ['tokenAmount', (q) => ({ ...q, tokenAmount: 1n })],
+      ['payer', (q) => ({ ...q, payer: other })],
+      ['token', (q) => ({ ...q, token: other })],
+      ['fiatAmount', (q) => ({ ...q, fiat: { ...q.fiat, minor: q.fiat.minor + 1n } })],
+      ['fiatCurrency', (q) => ({ ...q, fiat: { ...q.fiat, currency: 'USD' as never } })],
+      ['merchantRefHash', (q) => ({ ...q, merchantRefHash: keccak256(toHex('another merchant')) })],
+    ];
+
+    it.each(changes)('is never paid out (%s differs)', async (field, change) => {
+      const t = await setup();
+      const quote = await forged(t, change);
+      const { logger, lines } = recordingLogger();
+      t.indexer.start(logger);
+      await t.indexer.stop();
+      await t.indexer.tick();
+      for (let i = 0; i < 3; i++) await t.payouts.tick();
+
+      const payment = [...t.repos.state.payments.values()].find((p) => p.quoteId === quote.quote.quoteId);
+      expect(payment?.status).toBe('FAILED');
+      expect(payment?.eventMismatch).toContain(field);
+      expect(t.repos.state.payouts.size).toBe(0);
+      expect(t.chain.sent.filter((s) => s.functionName !== 'pay')).toHaveLength(0);
+      expect(lines).toContainEqual({ level: 'error', message: 'PaymentReceived does not match its quote; not paying out' });
+
+      const exceptions = await t.container.services.ops.exceptions();
+      expect(exceptions).toEqual([expect.objectContaining({ kind: 'event_mismatch', escalated: true, paymentId: payment?.id })]);
+      expect(exceptions[0]?.lastError).toContain(field);
+    });
+
+    it('fails our own payment too, if a forged payment of its quote got there first', async () => {
+      const t = await setup();
+      const quote = await forged(t, (q) => ({ ...q, tokenAmount: 1n }));
+      const response = await submitPayment(t.app, t.session, quote, await signAuthorization(PAYER_KEY, quote));
+      expect(response.statusCode).toBe(422); // QuoteAlreadyUsed
+      await t.indexer.tick();
+      await t.payouts.tick();
+
+      const payments = [...t.repos.state.payments.values()];
+      expect(payments).toHaveLength(1);
+      expect(payments[0]).toMatchObject({ quoteId: quote.quote.quoteId, status: 'FAILED' });
+      expect(payments[0]?.eventMismatch).toContain('tokenAmount');
+      expect(t.repos.state.payouts.size).toBe(0);
+    });
   });
 
   it('fails a payment whose pay() reverted', async () => {

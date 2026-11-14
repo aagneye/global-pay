@@ -66,6 +66,11 @@ export interface Payment {
   refundTxHash?: Hex;
   /** Why the payment FAILED, or why it was refunded. */
   failureReason?: string;
+  /**
+   * How the on-chain PaymentReceived event differed from the stored quote (payer, token, amounts or
+   * merchant). Such a payment is never paid out; it's shown to operators.
+   */
+  eventMismatch?: string;
   createdAt: Date;
   updatedAt: Date;
 }

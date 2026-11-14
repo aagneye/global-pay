@@ -108,6 +108,8 @@ model Payment {
   refundTxHash  String?
   /// Why the payment failed, or why it was refunded
   failureReason String?
+  /// How the on-chain PaymentReceived event differed from the quote. Never paid out; an operator looks.
+  eventMismatch String?
   createdAt     DateTime      @default(now())
   updatedAt     DateTime      @updatedAt
   payout        Payout?

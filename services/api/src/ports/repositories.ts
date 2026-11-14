@@ -60,7 +60,7 @@ export interface PageCursor {
 
 /** Fields that change without a status change, or alongside one. */
 export type PaymentFields = Partial<
-  Pick<Payment, 'payTxHash' | 'paidBlock' | 'settleTxHash' | 'refundTxHash' | 'failureReason'>
+  Pick<Payment, 'payTxHash' | 'paidBlock' | 'settleTxHash' | 'refundTxHash' | 'failureReason' | 'eventMismatch'>
 >;
 
 export interface PaymentRepository {
@@ -81,6 +81,8 @@ export interface PaymentRepository {
    * Oldest first (then by ID), after `after` if given.
    */
   listPayoutDue(now: Date, limit: number, after?: PageCursor): Promise<PaymentWithQuote[]>;
+  /** Payments whose on-chain event didn't match their quote (`eventMismatch` set), oldest first. */
+  listEventMismatches(limit: number): Promise<PaymentWithQuote[]>;
   update(id: string, fields: PaymentFields): Promise<void>;
   /**
    * Moves the payment from `from` to `to`, setting `fields`, only if it's still in `from`.

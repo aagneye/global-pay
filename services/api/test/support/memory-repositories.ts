@@ -171,6 +171,13 @@ export function createMemoryRepositories() {
           .slice(0, limit)
           .map(withQuote);
       },
+      async listEventMismatches(limit) {
+        return [...payments.values()]
+          .filter((p) => p.eventMismatch !== undefined)
+          .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime())
+          .slice(0, limit)
+          .map(withQuote);
+      },
       async update(id, fields) {
         const payment = payments.get(id);
         if (!payment) throw new Error(`no payment ${id}`);
