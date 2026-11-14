@@ -1,5 +1,6 @@
-import { FIAT_DECIMALS, formatMinor } from '../../domain/money.js';
+import { FIAT_DECIMALS, type FiatAmount, RATE_SCALE, TOKEN_DECIMALS, ceilDiv, formatMinor } from '../../domain/money.js';
 import { checkSpendingLimit, effectiveTier } from '../../domain/user.js';
+import type { RateProvider } from '../../ports/rate-provider.js';
 import type { KycRepository, PaymentRepository } from '../../ports/repositories.js';
 import { AppError } from '../../shared/errors.js';
 
@@ -32,6 +33,16 @@ export async function enforceSpendingLimit(
       422,
     );
   }
+}
+
+/**
+ * What a payment counts against the KYC limits, which are in THB: a THB payment's amount, or for another
+ * currency (INR) its THB equivalent, the token amount × USDC/THB, rounded up.
+ */
+export async function limitAmountThb(rates: RateProvider, fiat: FiatAmount, tokenAmount: bigint): Promise<bigint> {
+  if (fiat.currency === 'THB') return fiat.minor;
+  const { rateE8 } = await rates.getRate('USDC', 'THB');
+  return ceilDiv(tokenAmount * rateE8 * 10n ** BigInt(FIAT_DECIMALS.THB), 10n ** BigInt(TOKEN_DECIMALS.USDC) * RATE_SCALE);
 }
 
 function thb(minor: bigint): string {

@@ -1,10 +1,12 @@
 import { randomBytes } from 'node:crypto';
 import { type Address, type Hex, bytesToHex, getAddress } from 'viem';
-import { FIAT_DECIMALS, TOKEN_DECIMALS } from '../../domain/money.js';
+import type { Merchant } from '../../domain/merchant.js';
+import { isPersonalQr } from '../../domain/merchant.js';
+import { FIAT_DECIMALS, type FiatAmount, TOKEN_DECIMALS } from '../../domain/money.js';
 import { type Price, priceInToken } from '../../domain/pricing.js';
 import type { AuthorizationToSign, NearPaymentToSign, Quote, QuoteRequest, SignedQuote } from '../../domain/quote.js';
-import { merchantRef, merchantRefHash } from '../../lib/promptpay/merchant-ref.js';
-import { parsePromptPayQr } from '../../lib/promptpay/parse.js';
+import { merchantRefOf, parseMerchantQr } from '../../lib/merchant.js';
+import { merchantRefHash } from '../../lib/promptpay/merchant-ref.js';
 import { toUnixSeconds } from '../../lib/typed-data.js';
 import type { PayoutProvider } from '../../ports/payout-provider.js';
 import type { QuoteSigner } from '../../ports/quote-signer.js';
@@ -17,7 +19,7 @@ import { FT_TRANSFER_CALL } from '../../adapters/near/delegate.js';
 import { publicKeyOfImplicitAccount } from '../../adapters/near/keys.js';
 import { nearTransferMsg } from '../../adapters/near/quote-message.js';
 import type { NearRail } from '../../ports/near-chain.js';
-import { enforceSpendingLimit } from '../kyc/limits.js';
+import { enforceSpendingLimit, limitAmountThb } from '../kyc/limits.js';
 
 /** Gas for the user's `ft_transfer_call` (the settlement contract's ft_on_transfer runs inside it). */
 export const NEAR_PAYMENT_GAS = 100_000_000_000_000n;
@@ -40,9 +42,9 @@ export interface QuoteServiceDeps {
   quoteTtlSeconds: number;
   spreadBps: number;
   merchantQrOnly: boolean;
-  /** The active payout rail: can it pay this QR, and is there enough float? */
-  payoutRail: Pick<PayoutProvider, 'supports' | 'getBalance'>;
-  /** Refuse quotes that would leave less than this in the payout float (THB satang). */
+  /** The payout partner for each kind of QR (PayoutRouter): can it pay this QR, and is there enough float? */
+  payoutRail: { forMerchant(merchant: Merchant): Pick<PayoutProvider, 'supports' | 'getBalance'> | undefined };
+  /** Refuse THB quotes that would leave less than this in the payout float (THB satang). */
   payoutFloatBufferMinor: bigint;
   now?: () => Date;
   newQuoteId?: () => Hex;
@@ -57,7 +59,7 @@ export interface QuoteResponse extends SignedQuote {
 }
 
 /**
- * Turns a scanned PromptPay QR into a signed, short-lived quote:
+ * Turns a scanned PromptPay (THB) or UPI (INR) QR into a signed, short-lived quote:
  * parse QR → policy (merchant-only, payout rail, amount, payer, KYC limits, float) → rate + spread → sign → store.
  *
  * Everything that would stop the payout is checked here, before the user pays anything.
@@ -82,14 +84,16 @@ export class QuoteService {
     }
 
     // 1. The QR and what it allows.
-    const merchant = parsePromptPayQr(request.qrPayload);
-    if (deps.merchantQrOnly && merchant.kind === 'personal') {
-      throw new AppError('personal_qr_not_allowed', 'Only merchant PromptPay QRs can be paid', 422);
+    const merchant = parseMerchantQr(request.qrPayload);
+    if (deps.merchantQrOnly && isPersonalQr(merchant)) {
+      throw new AppError('personal_qr_not_allowed', 'Only merchant QRs can be paid', 422);
     }
-    if (!deps.payoutRail.supports(merchant)) {
-      throw new AppError('merchant_not_supported', "This kind of PromptPay QR can't be paid yet", 422);
+    const payoutRail = deps.payoutRail.forMerchant(merchant);
+    if (!payoutRail?.supports(merchant)) {
+      throw new AppError('merchant_not_supported', "This kind of QR can't be paid yet", 422);
     }
     const fiatMinor = resolveAmount(merchant.amount?.minor, request.fiatAmountMinor);
+    const fiat: FiatAmount = { currency: merchant.kind === 'upi' ? 'INR' : 'THB', minor: fiatMinor };
 
     // 2. Who pays, and whether they may.
     const user = await deps.users.findById(request.userId);
@@ -98,18 +102,22 @@ export class QuoteService {
       throw new AppError('payer_mismatch', 'The payer must be the wallet you signed in with', 403);
     }
     const now = this.now();
-    await enforceSpendingLimit(deps, user.id, fiatMinor, now);
-    await this.ensureFloat(fiatMinor);
+    // KYC limits are in THB: a THB payment is checked before pricing, another currency at its THB equivalent.
+    if (fiat.currency === 'THB') await enforceSpendingLimit(deps, user.id, fiatMinor, now);
+    await this.ensureFloat(payoutRail, fiat);
 
-    // 3. Price it.
-    const rate = await deps.rates.getRate('USDC', 'THB');
+    // 3. Price it, at the rate for the QR's currency.
+    const rate = await deps.rates.getRate('USDC', fiat.currency);
     const price = priceInToken({
       fiatMinor,
-      fiatDecimals: FIAT_DECIMALS.THB,
+      fiatDecimals: FIAT_DECIMALS[fiat.currency],
       tokenDecimals: TOKEN_DECIMALS.USDC,
       rateE8: rate.rateE8,
       spreadBps: deps.spreadBps,
     });
+    if (fiat.currency !== 'THB') {
+      await enforceSpendingLimit(deps, user.id, await limitAmountThb(deps.rates, fiat, price.tokenAmount), now);
+    }
     // What the wallet will sign needs chain reads: the token's EIP-712 domain, or the NEAR key's nonce.
     const chain = deps.near
       ? { near: await this.nearAccount(deps.near, request.payer) }
@@ -117,13 +125,13 @@ export class QuoteService {
 
     // 4. Sign and store. Expiry is on a whole second, because the contract stores seconds.
     const expiresAt = new Date((Math.floor(now.getTime() / 1000) + deps.quoteTtlSeconds) * 1000);
-    const ref = merchantRef(merchant);
+    const ref = merchantRefOf(merchant);
     const quote: Quote = {
       quoteId: this.newQuoteId(),
       payer: deps.near ? request.payer : getAddress(request.payer),
       token: deps.near ? (deps.near.usdcContract as Address) : getAddress(deps.usdcAddress),
       tokenAmount: price.tokenAmount,
-      fiat: { currency: 'THB', minor: fiatMinor },
+      fiat,
       rateE8: rate.rateE8,
       spreadBps: deps.spreadBps,
       merchantRef: ref,
@@ -186,15 +194,20 @@ export class QuoteService {
     return { publicKey, nonce, height };
   }
 
-  /** The partner must hold enough THB to pay this, plus a buffer. Unreadable float: refuse, to be safe. */
-  private async ensureFloat(fiatMinor: bigint): Promise<void> {
+  /**
+   * The partner must hold enough of the payout currency to pay this, plus a buffer (THB only). A partner that
+   * doesn't report a float (the simulated UPI partner) isn't checked. Unreadable float: refuse, to be safe.
+   */
+  private async ensureFloat(rail: Pick<PayoutProvider, 'getBalance'>, fiat: FiatAmount): Promise<void> {
     let float;
     try {
-      float = await this.deps.payoutRail.getBalance();
+      float = await rail.getBalance();
     } catch {
       throw new AppError('payouts_unavailable', "Payouts are unavailable right now; you haven't been charged", 503);
     }
-    if (float && float.minor - fiatMinor < this.deps.payoutFloatBufferMinor) {
+    if (!float) return;
+    const buffer = fiat.currency === 'THB' ? this.deps.payoutFloatBufferMinor : 0n;
+    if (float.currency !== fiat.currency || float.minor - fiat.minor < buffer) {
       throw new AppError('payouts_unavailable', "Payouts are unavailable right now; you haven't been charged", 503);
     }
   }

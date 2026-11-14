@@ -1,5 +1,6 @@
 import type { FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
 import { z } from 'zod';
+import type { Merchant } from '../../domain/merchant.js';
 import type { AuthorizationToSign, NearPaymentToSign } from '../../domain/quote.js';
 import { RECEIVE_WITH_AUTHORIZATION_TYPES, quoteStruct } from '../../lib/typed-data.js';
 import {
@@ -16,10 +17,15 @@ const QuoteBody = z.object({
   payer: walletSchema.meta({
     description: "Wallet that will pay; must be the signed-in user's wallet (a NEAR implicit account on the NEAR rail)",
   }),
-  qrPayload: z.string().min(20).max(512).meta({ description: 'The scanned PromptPay QR text' }),
-  fiatAmountMinor: minorUnitsSchema
-    .optional()
-    .meta({ description: 'THB satang. Required when the QR has no amount; must match it when it has one.' }),
+  qrPayload: z
+    .string()
+    .min(20)
+    .max(512)
+    .meta({ description: 'The scanned QR text: a Thai PromptPay QR (THB) or an Indian UPI QR, upi://pay?... (INR)' }),
+  fiatAmountMinor: minorUnitsSchema.optional().meta({
+    description:
+      "Minor units of the QR's currency (THB satang, INR paise). Required when the QR has no amount; must match it when it has one.",
+  }),
 }).meta({ id: 'QuoteRequest' });
 
 const typedDataField = z.object({ name: z.string(), type: z.string() }).meta({ id: 'TypedDataField' });
@@ -74,8 +80,8 @@ const QuoteDto = z.object({
       payer: z.string().meta({ description: '0x address (EVM rail) or NEAR implicit account (NEAR rail)' }),
       token: z.string().meta({ description: 'USDC: its 0x address (EVM rail) or contract account ID (NEAR rail)' }),
       tokenAmount: out.uint.meta({ description: 'USDC base units (6 decimals), spread included' }),
-      fiatCurrency: z.literal('THB'),
-      fiatAmount: out.uint.meta({ description: 'THB satang the merchant receives' }),
+      fiatCurrency: z.enum(['THB', 'INR']).meta({ description: 'THB for a PromptPay QR, INR for a UPI QR' }),
+      fiatAmount: out.uint.meta({ description: 'Minor units of fiatCurrency (satang, paise) the merchant receives' }),
       merchantRefHash: out.bytes32,
       expiresAt: z.number().int().meta({ description: 'Unix seconds' }),
     })
@@ -89,7 +95,7 @@ const QuoteDto = z.object({
   }),
   expiresAt: out.dateTime,
   pricing: z.object({
-    rateE8: out.uint.meta({ description: 'Mid-market THB per USDC × 1e8' }),
+    rateE8: out.uint.meta({ description: 'Mid-market fiatCurrency per USDC × 1e8' }),
     rateSource: z.string(),
     spreadBps: z.number().int(),
     baseTokenAmount: out.uint.meta({ description: 'USDC at the mid-market rate' }),
@@ -97,7 +103,7 @@ const QuoteDto = z.object({
   }).meta({ id: 'QuotePricing' }),
   merchant: z.object({
     kind: z.enum(['personal', 'merchant']),
-    targetType: z.enum(['mobile', 'nationalId', 'eWallet', 'biller']),
+    targetType: z.enum(['mobile', 'nationalId', 'eWallet', 'biller', 'vpa']),
     targetId: z.string(),
     reference1: z.string().optional(),
     reference2: z.string().optional(),
@@ -157,11 +163,34 @@ function nearPaymentDto(payment: NearPaymentToSign): z.infer<typeof NearPayment>
   };
 }
 
+/**
+ * The QR's payee. UPI: a merchant QR if it has a merchant code (mc), targetType "vpa", targetId the VPA (pa),
+ * merchantName the payee name (pn), reference1 the transaction reference (tr).
+ */
+function merchantDto(merchant: Merchant): z.infer<typeof QuoteDto>['merchant'] {
+  if (merchant.kind === 'upi') {
+    return {
+      kind: merchant.merchantCode === undefined ? 'personal' : 'merchant',
+      targetType: 'vpa',
+      targetId: merchant.vpa,
+      ...(merchant.reference === undefined ? {} : { reference1: merchant.reference }),
+      ...(merchant.name === undefined ? {} : { merchantName: merchant.name }),
+    };
+  }
+  return {
+    kind: merchant.kind,
+    targetType: merchant.targetType,
+    targetId: merchant.targetId,
+    ...(merchant.reference1 === undefined ? {} : { reference1: merchant.reference1 }),
+    ...(merchant.reference2 === undefined ? {} : { reference2: merchant.reference2 }),
+    ...(merchant.merchantName === undefined ? {} : { merchantName: merchant.merchantName }),
+    ...(merchant.merchantCity === undefined ? {} : { merchantCity: merchant.merchantCity }),
+  };
+}
+
 function toDto({ quote, signature, pricing, authorizationToSign, nearPayment }: QuoteResponse): z.infer<typeof QuoteDto> {
   const struct = quoteStruct(quote);
   const { merchant } = quote;
-  // Quotes are for PromptPay QRs in THB; UPI card charges never come through here.
-  if (merchant.kind === 'upi' || quote.fiat.currency !== 'THB') throw new Error('Only PromptPay quotes in THB have a QuoteResponse');
   return {
     quote: {
       quoteId: struct.quoteId,
@@ -182,15 +211,7 @@ function toDto({ quote, signature, pricing, authorizationToSign, nearPayment }: 
       baseTokenAmount: pricing.baseTokenAmount.toString(),
       feeTokenAmount: pricing.feeTokenAmount.toString(),
     },
-    merchant: {
-      kind: merchant.kind,
-      targetType: merchant.targetType,
-      targetId: merchant.targetId,
-      ...(merchant.reference1 === undefined ? {} : { reference1: merchant.reference1 }),
-      ...(merchant.reference2 === undefined ? {} : { reference2: merchant.reference2 }),
-      ...(merchant.merchantName === undefined ? {} : { merchantName: merchant.merchantName }),
-      ...(merchant.merchantCity === undefined ? {} : { merchantCity: merchant.merchantCity }),
-    },
+    merchant: merchantDto(merchant),
     ...(authorizationToSign ? { authorizationToSign: authorizationDto(authorizationToSign) } : {}),
     ...(nearPayment ? { nearPayment: nearPaymentDto(nearPayment) } : {}),
   };
@@ -202,10 +223,11 @@ export const quoteRoutes: FastifyPluginAsyncZod<{ quotes: QuoteService }> = asyn
     {
       schema: {
         tags: ['quotes'],
-        summary: 'Quote a PromptPay QR payment in USDC',
+        summary: 'Quote a PromptPay or UPI QR payment in USDC',
         operationId: 'createQuote',
         description:
-          'Parses the QR, checks KYC limits, prices it at the live rate plus the spread, and signs it. ' +
+          'Parses the QR (PromptPay: THB, UPI: INR), checks KYC limits, prices it at the live rate plus the spread, ' +
+          'and signs it. ' +
           'The quote expires after QUOTE_TTL_SECONDS (60 s by default). ' +
           'EVM rail: sign `authorizationToSign` with the payer wallet. NEAR rail: sign `nearPayment` as a ' +
           'delegate action. Then submit it to POST /payments.',

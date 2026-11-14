@@ -59,7 +59,7 @@ export const PaymentDto = z.object({
     .enum(['SUBMITTED', 'PAID', 'PAYOUT_PENDING', 'SETTLED', 'REFUNDED', 'FAILED'])
     .meta({ description: 'SETTLED, REFUNDED and FAILED are final. Poll until one of them.' }),
   fiatCurrency: z.string(),
-  fiatAmount: out.uint.meta({ description: 'THB satang the merchant receives' }),
+  fiatAmount: out.uint.meta({ description: 'Minor units of fiatCurrency (satang, paise) the merchant receives' }),
   token: z.string().meta({ description: 'USDC: its 0x address (EVM rail) or contract account ID (NEAR rail)' }),
   tokenAmount: out.uint.meta({ description: 'USDC base units the user pays' }),
   merchant: z
@@ -79,7 +79,10 @@ export const PaymentDto = z.object({
       reference: z.string().optional().meta({ description: 'Bank or partner reference, once paid' }),
     })
     .optional()
-    .meta({ id: 'PaymentPayout', description: 'Paying the merchant in THB. Absent until the payment is paid on-chain.' }),
+    .meta({
+      id: 'PaymentPayout',
+      description: 'Paying the merchant in fiatCurrency (THB, INR). Absent until the payment is paid on-chain.',
+    }),
   failureReason: z.string().optional(),
   quoteExpiresAt: out.dateTime,
   createdAt: out.dateTime,

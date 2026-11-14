@@ -11,13 +11,16 @@ import { AppError } from '../../shared/errors.js';
 import { checkSignedDelegate } from '../../adapters/near/delegate.js';
 import { nearTransferMsg } from '../../adapters/near/quote-message.js';
 import type { NearRail } from '../../ports/near-chain.js';
-import { enforceSpendingLimit } from '../kyc/limits.js';
+import type { RateProvider } from '../../ports/rate-provider.js';
+import { enforceSpendingLimit, limitAmountThb } from '../kyc/limits.js';
 import { type PaymentView, toPaymentView } from './view.js';
 
 export interface PaymentServiceDeps {
   quotes: QuoteRepository;
   payments: PaymentRepository;
   kyc: KycRepository;
+  /** Converts a non-THB quote to its THB equivalent for the KYC limits. */
+  rates: RateProvider;
   gateway: SettlementGateway;
   chainId: number;
   settlementAddress?: Address;
@@ -67,7 +70,7 @@ export class PaymentService {
     }
     await this.checkAuthorization(stored, authorization);
     // The tier, or other payments, may have changed since the quote.
-    await enforceSpendingLimit(deps, userId, stored.quote.fiat.minor, now);
+    await enforceSpendingLimit(deps, userId, await limitAmountThb(deps.rates, stored.quote.fiat, stored.quote.tokenAmount), now);
 
     const { payment, created } = await deps.payments.createForQuote(quoteId, userId);
     if (!created) return this.view(payment.id); // a concurrent submission got there first

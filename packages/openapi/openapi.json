@@ -3,7 +3,7 @@
   "info": {
     "title": "GlobalPay API",
     "version": "0.1.0",
-    "description": "Pay Thai PromptPay QRs with USDC on Base or NEAR (one settlement rail per server, SETTLEMENT_RAIL). Testnet demo: partners are simulated.\n\nMoney is sent as integer strings in minor units: THB satang (\"10000\" = 100.00 THB) and USDC base units (\"1000000\" = 1 USDC). Rates are THB per USDC × 1e8."
+    "description": "Pay Thai PromptPay and Indian UPI QRs with USDC on Base or NEAR (one settlement rail per server, SETTLEMENT_RAIL). Testnet demo: partners are simulated.\n\nMoney is sent as integer strings in minor units of its currency: THB satang (\"10000\" = 100.00 THB), INR paise (\"25000\" = ₹250.00) and USDC base units (\"1000000\" = 1 USDC). Rates are fiat per USDC × 1e8."
   },
   "components": {
     "securitySchemes": {
@@ -476,13 +476,15 @@
           "fiatCurrency": {
             "type": "string",
             "enum": [
-              "THB"
-            ]
+              "THB",
+              "INR"
+            ],
+            "description": "THB for a PromptPay QR, INR for a UPI QR"
           },
           "fiatAmount": {
             "type": "string",
             "pattern": "^\\d+$",
-            "description": "THB satang the merchant receives"
+            "description": "Minor units of fiatCurrency (satang, paise) the merchant receives"
           },
           "merchantRefHash": {
             "type": "string",
@@ -833,7 +835,7 @@
           "fiatAmount": {
             "type": "string",
             "pattern": "^\\d+$",
-            "description": "THB satang the merchant receives"
+            "description": "Minor units of fiatCurrency (satang, paise) the merchant receives"
           },
           "token": {
             "type": "string",
@@ -923,7 +925,7 @@
         "additionalProperties": false
       },
       "PaymentPayout": {
-        "description": "Paying the merchant in THB. Absent until the payment is paid on-chain.",
+        "description": "Paying the merchant in fiatCurrency (THB, INR). Absent until the payment is paid on-chain.",
         "type": "object",
         "properties": {
           "status": {
@@ -1068,7 +1070,8 @@
               "mobile",
               "nationalId",
               "eWallet",
-              "biller"
+              "biller",
+              "vpa"
             ]
           },
           "targetId": {
@@ -1100,7 +1103,7 @@
           "rateE8": {
             "type": "string",
             "pattern": "^\\d+$",
-            "description": "Mid-market THB per USDC × 1e8"
+            "description": "Mid-market fiatCurrency per USDC × 1e8"
           },
           "rateSource": {
             "type": "string"
@@ -1143,10 +1146,10 @@
             "type": "string",
             "minLength": 20,
             "maxLength": 512,
-            "description": "The scanned PromptPay QR text"
+            "description": "The scanned QR text: a Thai PromptPay QR (THB) or an Indian UPI QR, upi://pay?... (INR)"
           },
           "fiatAmountMinor": {
-            "description": "THB satang. Required when the QR has no amount; must match it when it has one.",
+            "description": "Minor units of the QR's currency (THB satang, INR paise). Required when the QR has no amount; must match it when it has one.",
             "type": "string",
             "pattern": "^\\d+$"
           }
@@ -1713,11 +1716,11 @@
     "/quotes": {
       "post": {
         "operationId": "createQuote",
-        "summary": "Quote a PromptPay QR payment in USDC",
+        "summary": "Quote a PromptPay or UPI QR payment in USDC",
         "tags": [
           "quotes"
         ],
-        "description": "Parses the QR, checks KYC limits, prices it at the live rate plus the spread, and signs it. The quote expires after QUOTE_TTL_SECONDS (60 s by default). EVM rail: sign `authorizationToSign` with the payer wallet. NEAR rail: sign `nearPayment` as a delegate action. Then submit it to POST /payments.",
+        "description": "Parses the QR (PromptPay: THB, UPI: INR), checks KYC limits, prices it at the live rate plus the spread, and signs it. The quote expires after QUOTE_TTL_SECONDS (60 s by default). EVM rail: sign `authorizationToSign` with the payer wallet. NEAR rail: sign `nearPayment` as a delegate action. Then submit it to POST /payments.",
         "requestBody": {
           "required": true,
           "content": {
@@ -3182,7 +3185,7 @@
     },
     {
       "name": "quotes",
-      "description": "Signed quotes for PromptPay QRs"
+      "description": "Signed quotes for PromptPay and UPI QRs"
     },
     {
       "name": "payments",
