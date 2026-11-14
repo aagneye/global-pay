@@ -1,10 +1,14 @@
 import type { Payout } from '../../domain/payment.js';
 import type { PayoutProvider, PayoutResult, PayoutWebhookRef } from '../../ports/payout-provider.js';
 import type { PaymentWithQuote, PayoutFields, PayoutRepository } from '../../ports/repositories.js';
+import { PayoutRouter } from './payout-router.js';
 
 export interface PayoutTrackerDeps {
   payouts: PayoutRepository;
+  /** The PromptPay partner (PAYOUT_PROVIDER): webhooks and operator float come from it. */
   provider: PayoutProvider;
+  /** Routes UPI merchants to their partner; without it, everything goes to `provider`. */
+  router?: PayoutRouter;
   /** How often to ask the partner about a pending payout. */
   recheckMs: number;
   /** A payout still pending after this long becomes UNKNOWN. */
@@ -32,10 +36,12 @@ const MAX_UNKNOWN_BACKOFF_MS = 60 * 60_000;
 export class PayoutTracker {
   private readonly deps: PayoutTrackerDeps;
   private readonly now: () => Date;
+  private readonly router: PayoutRouter;
 
   constructor(deps: PayoutTrackerDeps) {
     this.deps = deps;
     this.now = deps.now ?? (() => new Date());
+    this.router = deps.router ?? new PayoutRouter({ promptpay: deps.provider });
   }
 
   get providerName(): string {
@@ -57,7 +63,7 @@ export class PayoutTracker {
       (await this.deps.payouts.findByPaymentId(payment.id)) ??
       this.deps.payouts.createForPayment({
         paymentId: payment.id,
-        provider: this.deps.provider.name,
+        provider: (this.router.forMerchant(quote.quote.merchant) ?? this.deps.provider).name,
         amount: quote.quote.fiat,
         idempotencyKey: payment.id,
       })
@@ -69,14 +75,15 @@ export class PayoutTracker {
    * Only PENDING and UNKNOWN payouts are checked; `force` ignores the backoff (operator re-check).
    */
   async check(item: PaymentWithQuote, options: { force?: boolean } = {}): Promise<Payout> {
-    const { payouts, provider } = this.deps;
+    const { payouts } = this.deps;
     const payout = await this.ensurePayout(item);
     if (payout.status !== 'PENDING' && payout.status !== 'UNKNOWN') return payout;
     const now = this.now();
     if (!options.force && payout.nextCheckAt && now < payout.nextCheckAt) return payout;
 
-    if (payout.provider !== provider.name) {
-      return this.noteError(payout, `Created with ${payout.provider}, but the active partner is ${provider.name}`);
+    const provider = this.router.named(payout.provider);
+    if (!provider) {
+      return this.noteError(payout, `Created with ${payout.provider}, but the active partner is ${this.deps.provider.name}`);
     }
 
     let result: PayoutResult;
@@ -110,7 +117,7 @@ export class PayoutTracker {
    * idempotency key. null means the partner has no such payout. Used by operator actions.
    */
   async lookup(payout: Payout): Promise<PayoutResult | null> {
-    const { provider } = this.deps;
+    const provider = this.router.named(payout.provider) ?? this.deps.provider;
     return payout.providerRef ? provider.getPayout(payout.providerRef) : provider.findByIdempotencyKey(payout.idempotencyKey);
   }
 

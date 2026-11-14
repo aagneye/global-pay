@@ -14,6 +14,7 @@ import { MoonPayOnrampProvider } from './adapters/onramp/moonpay-provider.js';
 import { DisabledPushSender, FcmPushSender, type ServiceAccount } from './adapters/push/fcm-push-sender.js';
 import { SimulatedOnrampProvider, mintOnLocalChain } from './adapters/onramp/simulated-onramp-provider.js';
 import { SimulatedPromptPayProvider } from './adapters/payouts/simulated-promptpay-provider.js';
+import { SimulatedUpiProvider } from './adapters/payouts/simulated-upi-provider.js';
 import { XenditPayoutProvider } from './adapters/payouts/xendit-provider.js';
 import { FixedRateProvider } from './adapters/rates/fixed-rate-provider.js';
 import { PublicFeedRateProvider } from './adapters/rates/public-feed-rate-provider.js';
@@ -27,6 +28,7 @@ import { OnrampTracker } from './modules/onramp/onramp-tracker.js';
 import { OnrampService } from './modules/onramp/service.js';
 import { OpsService } from './modules/ops/service.js';
 import { P2pService } from './modules/p2p/service.js';
+import { PayoutRouter } from './modules/payouts/payout-router.js';
 import { PayoutTracker } from './modules/payouts/payout-tracker.js';
 import { PaymentService } from './modules/payments/service.js';
 import { QuoteService } from './modules/quotes/service.js';
@@ -54,6 +56,8 @@ export interface Adapters {
   gateway: SettlementGateway;
   kyc: KycProvider;
   payouts: PayoutProvider;
+  /** Pays UPI merchants (card terminal charges). */
+  upiPayouts: PayoutProvider;
   onramp: OnrampProvider;
   /** Token transfers on the payment chain (deposits). */
   tokens: TokenReader;
@@ -173,9 +177,15 @@ export function buildContainer(env: Env, overrides: Partial<Adapters> = {}): Con
       ? new FixedRateProvider({ THB: env.FIXED_USDC_THB_RATE, INR: env.FIXED_USDC_INR_RATE })
       : new PublicFeedRateProvider());
   const payoutProvider = overrides.payouts ?? buildPayoutProvider(env);
+  // UPI merchants (NEAR card terminal) are paid by a simulated UPI partner, testnet only.
+  const payoutRouter = new PayoutRouter({
+    promptpay: payoutProvider,
+    upi: overrides.upiPayouts ?? new SimulatedUpiProvider({ delayMs: env.PAYOUT_DELAY_MS, failureRate: env.PAYOUT_FAILURE_RATE }),
+  });
   const payoutTracker = new PayoutTracker({
     payouts: repositories.payouts,
     provider: payoutProvider,
+    router: payoutRouter,
     recheckMs: env.PAYOUT_RECHECK_MS,
     pendingDeadlineMs: env.PAYOUT_PENDING_DEADLINE_MS,
   });
