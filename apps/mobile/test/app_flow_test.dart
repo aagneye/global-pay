@@ -7,6 +7,7 @@ import 'package:globalpay/core/config/app_config.dart';
 import 'package:globalpay/core/providers.dart';
 import 'package:globalpay/core/storage/secure_store.dart';
 import 'package:globalpay/data/api/api_client.dart';
+import 'package:globalpay/features/p2p/p2p_support.dart';
 import 'package:globalpay/features/scan/scan_screen.dart';
 import 'package:globalpay/services/wallet/dev_wallet_service.dart';
 
@@ -380,6 +381,72 @@ void main() {
 
       await tap(tester, 'Decline');
       await pumpUntil(tester, find.text('Declined. No money moved.'));
+    });
+
+    Future<void> openThisPhone(WidgetTester tester) async {
+      await tester.tap(find.byType(PopupMenuButton<String>));
+      await pumpUntil(tester, find.text('This phone'));
+      await tester.pump(const Duration(milliseconds: 500)); // the menu opening
+      await tap(tester, 'This phone');
+    }
+
+    testWidgets('turns tap to pay off for this phone, and back on', (tester) async {
+      final backend = FakeBackend(p2pRole: 'sender')..kycStatus = 'APPROVED';
+      final card = FakeTapCard();
+      final store = MemorySecureStore();
+      await signIn(tester, app(backend, store, card: card));
+      await tester.pump(const Duration(milliseconds: 300));
+      expect(card.deviceId, 'device_1');
+      int registrations() => backend.requests.where((r) => r.method == 'POST' && r.path == '/devices').length;
+      final revocations = backend.requests.where((r) => r.method == 'DELETE');
+
+      // It asks first: cancelling changes nothing.
+      await openThisPhone(tester);
+      await pumpUntil(tester, find.text('Turn off tap to pay?'));
+      await tap(tester, 'Cancel');
+      await tester.pump(const Duration(milliseconds: 300));
+      expect(revocations, isEmpty);
+
+      await openThisPhone(tester);
+      await pumpUntil(tester, find.text('Turn off tap to pay?'));
+      await tap(tester, 'Turn off');
+      await pumpUntil(tester, find.text('Tap to pay is off for this phone'));
+      expect(revocations.map((r) => r.path), ['/devices/device_1']);
+      expect(card.disarms, greaterThan(0));
+      expect(store.values[tapToPayOffKey], isNotNull);
+
+      // "Pay by tap" says so, and doesn't arm the phone.
+      await tap(tester, 'Pay by tap');
+      await pumpUntil(tester, find.textContaining('Turn it back on from "This phone"'));
+      expect(tester.widget<Text>(find.byKey(const Key('tap-headline'))).data, 'Tap to pay is off for this phone');
+      expect(card.arms, isEmpty);
+      await tester.pageBack();
+      await pumpUntil(tester, find.text('Scan & pay'));
+
+      // Off lasts across a restart: the phone isn't registered again.
+      final before = registrations();
+      await tester.pumpWidget(const SizedBox());
+      await tester.pumpWidget(app(backend, store, card: card));
+      await pumpUntil(tester, find.text('Pay by tap'));
+      await tester.pump(const Duration(milliseconds: 300));
+      expect(registrations(), before);
+
+      await openThisPhone(tester);
+      await pumpUntil(tester, find.text('Tap to pay is off'));
+      await tap(tester, 'Turn on');
+      await pumpUntil(tester, find.text('Tap to pay is on for this phone'));
+      expect(registrations(), before + 1);
+      expect(store.values[tapToPayOffKey], isNull);
+    });
+
+    testWidgets("says when this phone can't pay by tap", (tester) async {
+      final backend = FakeBackend()..kycStatus = 'APPROVED';
+      await signIn(tester, app(backend, MemorySecureStore()));
+      await openThisPhone(tester);
+      await pumpUntil(tester, find.textContaining("This phone can't pay by tap"));
+      await tap(tester, 'OK');
+      await tester.pump(const Duration(milliseconds: 300));
+      expect(backend.requests.where((r) => r.method == 'DELETE'), isEmpty);
     });
   });
 

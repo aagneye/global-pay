@@ -23,6 +23,9 @@ class PayByTapScreen extends ConsumerStatefulWidget {
 
 class _PayByTapScreenState extends ConsumerState<PayByTapScreen> {
   bool? _supported;
+
+  /// Tap to pay is turned off for this phone ("This phone" in the home menu).
+  bool _off = false;
   Timer? _poll;
   Timer? _rearm;
   bool _leaving = false;
@@ -46,8 +49,12 @@ class _PayByTapScreenState extends ConsumerState<PayByTapScreen> {
 
   Future<void> _start() async {
     final deviceId = await ref.read(deviceRegistrationProvider.future);
+    final off = deviceId == null && await ref.read(tapToPaySwitchProvider).isOff();
     if (!mounted) return;
-    setState(() => _supported = deviceId != null);
+    setState(() {
+      _supported = deviceId != null;
+      _off = off;
+    });
     if (deviceId != null) {
       final card = _card;
       await card.arm(tapArmDuration);
@@ -84,14 +91,20 @@ class _PayByTapScreenState extends ConsumerState<PayByTapScreen> {
           Icon(Icons.contactless, size: 96, color: theme.colorScheme.primary),
           const SizedBox(height: 16),
           Text(
-            supported == false ? "This phone can't pay by tap" : 'Hold your phone to theirs',
+            _off
+                ? 'Tap to pay is off for this phone'
+                : supported == false
+                ? "This phone can't pay by tap"
+                : 'Hold your phone to theirs',
             key: const Key('tap-headline'),
             textAlign: TextAlign.center,
             style: theme.textTheme.headlineSmall,
           ),
           const SizedBox(height: 8),
           Text(
-            supported == false
+            _off
+                ? 'Turn it back on from "This phone" in the menu, or scan the code on their screen instead.'
+                : supported == false
                 ? 'Scan the code on their screen instead.'
                 : "Back to back, near the top. You'll see who you're paying and approve with your fingerprint.",
             textAlign: TextAlign.center,

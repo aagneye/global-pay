@@ -39,9 +39,11 @@ class HomeScreen extends ConsumerWidget {
             onSelected: (value) {
               if (value == 'sign-out') ref.read(sessionProvider.notifier).signOut();
               if (value == 'name') _editName(context, ref);
+              if (value == 'phone') _thisPhone(context, ref);
             },
             itemBuilder: (context) => const [
               PopupMenuItem(value: 'name', child: Text('Your name')),
+              PopupMenuItem(value: 'phone', child: Text('This phone')),
               PopupMenuItem(value: 'sign-out', child: Text('Sign out')),
             ],
           ),
@@ -187,4 +189,46 @@ Future<void> _editName(BuildContext context, WidgetRef ref) async {
   } on Object catch (error) {
     if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(describeError(error))));
   }
+}
+
+/// "This phone": turns tap to pay off for this phone, e.g. before giving it away, or back on.
+Future<void> _thisPhone(BuildContext context, WidgetRef ref) async {
+  final tapToPay = ref.read(tapToPaySwitchProvider);
+  final off = await tapToPay.isOff();
+  final deviceId = off ? null : await tapToPay.deviceId();
+  if (!context.mounted) return;
+  final (title, message, action) = switch ((off, deviceId)) {
+    (true, _) => ('Tap to pay is off', "This phone doesn't pay by tap. You can still pay by scanning a code.", 'Turn on'),
+    (false, null) => ('This phone', "This phone can't pay by tap. You can still pay by scanning a code.", null),
+    (false, _) => (
+      'Turn off tap to pay?',
+      'This phone will stop paying by tap, for example if you are giving it away. '
+          'You can still pay by scanning a code, and turn it back on here.',
+      'Turn off',
+    ),
+  };
+  final confirmed = await showDialog<bool>(
+    context: context,
+    builder: (context) => AlertDialog(
+      title: Text(title),
+      content: Text(message),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context, false), child: Text(action == null ? 'OK' : 'Cancel')),
+        if (action != null) FilledButton(onPressed: () => Navigator.pop(context, true), child: Text(action)),
+      ],
+    ),
+  );
+  if (confirmed != true || !context.mounted) return;
+  String result;
+  try {
+    if (off) {
+      result = await tapToPay.turnOn() ? 'Tap to pay is on for this phone' : "Couldn't turn tap to pay on. Try again later.";
+    } else {
+      await tapToPay.turnOff();
+      result = 'Tap to pay is off for this phone';
+    }
+  } on Object catch (error) {
+    result = describeError(error);
+  }
+  if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(result)));
 }

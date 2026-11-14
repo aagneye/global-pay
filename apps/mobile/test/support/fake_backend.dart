@@ -75,7 +75,7 @@ class FakeBackend implements HttpClientAdapter {
     );
   }
 
-  (int, Object) _route(String method, String path, Object? body) {
+  (int, Object?) _route(String method, String path, Object? body) {
     final expiresAt = DateTime.now().add(const Duration(seconds: 60)).toUtc();
     return switch ((method, path)) {
       ('POST', '/auth/nonce') => (
@@ -130,6 +130,7 @@ class FakeBackend implements HttpClientAdapter {
         },
       ),
       ('POST', '/devices') => (201, {'id': 'device_1'}),
+      ('DELETE', '/devices/device_1') => (204, null),
       ('PUT', '/me/profile') => (200, {'displayName': (body as Map)['displayName'], 'nameVerified': false}),
       ('POST', '/p2p/requests') => (201, _p2p()),
       ('POST', '/p2p/requests/request_1/tap') => () {

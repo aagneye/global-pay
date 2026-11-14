@@ -1,4 +1,5 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:globalpay/core/errors/app_exception.dart';
 import 'package:globalpay/core/providers.dart';
 import 'package:globalpay/features/auth/session_controller.dart';
 
@@ -27,15 +28,21 @@ BigInt? parseUsdc(String text) {
   return units > BigInt.zero ? units : null;
 }
 
+/// Secure-storage keys: tap to pay was turned off for this phone ("This phone" in the home menu), and the
+/// device ID the backend last gave it.
+const tapToPayOffKey = 'tap_to_pay_off';
+const tapDeviceIdKey = 'tap_device_id';
+
 /// Registers this phone for tap to pay, once per run after sign-in: its hardware key, and its push
-/// token if push is set up. Null when the phone can't act as a card (then only the QR works).
-/// Failures are swallowed: tap to pay is optional, and the next run tries again.
+/// token if push is set up. Null when the phone can't act as a card (then only the QR works), or when
+/// tap to pay is turned off for it. Failures are swallowed: tap to pay is optional, and the next run tries again.
 final deviceRegistrationProvider = FutureProvider<String?>((ref) async {
   final session = await ref.watch(sessionProvider.future);
   if (session == null) return null;
   try {
     final card = ref.read(tapCardProvider);
-    if (!await card.isSupported()) return null;
+    final store = ref.read(secureStoreProvider);
+    if (await store.read(tapToPayOffKey) != null || !await card.isSupported()) return null;
     final push = ref.read(pushServiceProvider);
     try {
       await push.start();
@@ -44,11 +51,57 @@ final deviceRegistrationProvider = FutureProvider<String?>((ref) async {
     }
     final id = await ref.read(p2pRepositoryProvider).registerDevice(publicKey: await card.publicKey(), fcmToken: await push.token());
     await card.setDeviceId(id);
+    await store.write(tapDeviceIdKey, id);
     return id;
   } on Object {
     return null;
   }
 });
+
+/// Turns tap to pay off for this phone (e.g. before giving it away), or back on. Off lasts across restarts.
+final tapToPaySwitchProvider = Provider<TapToPaySwitch>(TapToPaySwitch.new);
+
+class TapToPaySwitch {
+  TapToPaySwitch(this._ref);
+
+  final Ref _ref;
+
+  Future<bool> isOff() async => await _ref.read(secureStoreProvider).read(tapToPayOffKey) != null;
+
+  /// This phone's device ID: from this run's registration, or the last one if it failed this time.
+  /// Null if the phone can't pay by tap, or tap to pay is off.
+  Future<String?> deviceId() async =>
+      await _ref.read(deviceRegistrationProvider.future) ?? await _ref.read(secureStoreProvider).read(tapDeviceIdKey);
+
+  /// The backend stops accepting this phone's taps, the phone stops answering them, and it isn't
+  /// registered again on the next start. Throws (changing nothing) if the backend can't be reached.
+  Future<void> turnOff() async {
+    final store = _ref.read(secureStoreProvider);
+    final id = await deviceId();
+    if (id != null) {
+      try {
+        await _ref.read(p2pRepositoryProvider).revokeDevice(id);
+      } on AppException catch (error) {
+        if (error.code != 'not_found') rethrow; // Already revoked.
+      }
+    }
+    await store.write(tapToPayOffKey, 'true');
+    await store.delete(tapDeviceIdKey);
+    try {
+      await _ref.read(tapCardProvider).disarm();
+    } on Object {
+      // Revoked: the backend refuses its taps anyway.
+    }
+    _ref.invalidate(deviceRegistrationProvider);
+  }
+
+  /// Registers this phone again. False if that failed (the next start tries again).
+  Future<bool> turnOn() async {
+    await _ref.read(secureStoreProvider).delete(tapToPayOffKey);
+    _ref.invalidate(deviceRegistrationProvider);
+    return await _ref.read(deviceRegistrationProvider.future) != null;
+  }
+}
 
 /// Request IDs from push notifications, to open their approve screen.
 final pushRequestsProvider = StreamProvider<String>((ref) => ref.watch(pushServiceProvider).requestIds);

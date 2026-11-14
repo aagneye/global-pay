@@ -20,6 +20,11 @@ class P2pRepository {
     return response.id;
   }
 
+  /// Stops the backend accepting taps from this device. Registering the same key again undoes it.
+  Future<void> revokeDevice(String id) async {
+    await ApiClient.call(() => api.api.p2p.revokeDevice(id: id));
+  }
+
   /// Sets the name people see when paying you.
   Future<String> updateName(String name) async =>
       (await ApiClient.call(() => api.api.account.updateProfile(body: dto.ProfileUpdate(displayName: name)))).displayName;
