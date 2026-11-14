@@ -306,6 +306,19 @@ function checkProduction(env: Env, ctx: z.RefinementCtx): void {
   if (new URL(env.MOONPAY_WIDGET_URL).hostname.includes('sandbox')) {
     refuse('MOONPAY_WIDGET_URL', "MOONPAY_WIDGET_URL is MoonPay's sandbox; production uses https://buy.moonpay.com");
   }
+
+  // Webhooks fail closed without their secret: in production that silently loses every partner update.
+  if (env.PAYOUT_PROVIDER === 'xendit' && !env.XENDIT_CALLBACK_TOKEN) {
+    refuse('XENDIT_CALLBACK_TOKEN', 'Production needs XENDIT_CALLBACK_TOKEN, or every payout webhook is refused');
+  }
+  if (env.ONRAMP_PROVIDER === 'moonpay' && !env.MOONPAY_WEBHOOK_KEY) {
+    refuse('MOONPAY_WEBHOOK_KEY', 'Production needs MOONPAY_WEBHOOK_KEY, or every onramp webhook is refused');
+  }
+  // Paying personal QRs turns the product into a cash-out tool for any account (docs/scope.md).
+  if (!env.MERCHANT_QR_ONLY) refuse('MERCHANT_QR_ONLY', 'Production pays merchant QRs only: set MERCHANT_QR_ONLY=true');
+  if (/\.local(:\d+)?$/i.test(env.SIWE_DOMAIN)) {
+    refuse('SIWE_DOMAIN', "SIWE_DOMAIN is a local name; production signs in on the API's real domain");
+  }
 }
 
 /** Validates configuration at startup. Empty strings count as unset. */

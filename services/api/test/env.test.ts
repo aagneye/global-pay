@@ -91,6 +91,9 @@ describe('production checks', () => {
     RPC_URL: 'https://mainnet.base.org',
     PAYOUT_PROVIDER: 'xendit',
     XENDIT_SECRET_KEY: 'xnd_production_x',
+    XENDIT_CALLBACK_TOKEN: 'cb_live_x',
+    MERCHANT_QR_ONLY: 'true',
+    SIWE_DOMAIN: 'api.globalpay.example',
     ONRAMP_PROVIDER: 'moonpay',
     MOONPAY_PUBLISHABLE_KEY: 'pk_live_x',
     MOONPAY_SECRET_KEY: 'sk_live_x',
@@ -139,5 +142,18 @@ describe('production checks', () => {
     expect(() => testEnv(withDefaultWidget)).toThrow(/MoonPay's sandbox/);
     expect(refused({ RATE_SOURCE: 'fixed' })).toThrow(/RATE_SOURCE=fixed/);
     expect(refused({ RATE_LIMIT_ENABLED: 'false' })).toThrow(/Rate limits cannot be turned off/);
+  });
+
+  it('refuses unsigned webhooks, personal QRs and a local sign-in domain', () => {
+    const { XENDIT_CALLBACK_TOKEN: _token, ...noCallbackToken } = production;
+    expect(() => testEnv(noCallbackToken)).toThrow(/needs XENDIT_CALLBACK_TOKEN/);
+    const { MOONPAY_WEBHOOK_KEY: _key, ...noWebhookKey } = production;
+    expect(() => testEnv(noWebhookKey)).toThrow(/needs MOONPAY_WEBHOOK_KEY/);
+    expect(refused({ MERCHANT_QR_ONLY: 'false' })).toThrow(/MERCHANT_QR_ONLY=true/);
+    const { SIWE_DOMAIN: _domain, ...defaultDomain } = production;
+    expect(() => testEnv(defaultDomain)).toThrow(/SIWE_DOMAIN is a local name/);
+    expect(refused({ SIWE_DOMAIN: 'globalpay.local:3000' })).toThrow(/SIWE_DOMAIN is a local name/);
+    // Development keeps the easy defaults.
+    expect(testEnv({}).MERCHANT_QR_ONLY).toBe(false);
   });
 });

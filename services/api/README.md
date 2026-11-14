@@ -198,7 +198,11 @@ Fastify's request logs only show the method, URL and status anyway; redaction co
 - the local anvil chain (`CHAIN_ID` or `ONRAMP_CHAIN_ID` 31337), or any of anvil's ten public keys as `QUOTE_SIGNER_PRIVATE_KEY` or `RELAYER_PRIVATE_KEY`;
 - a guessable `JWT_SECRET` or `OPS_API_TOKEN` (fewer than 10 distinct characters, or words like "secret" or "change me"), or the same value for both;
 - `RATE_SOURCE=fixed` or `RATE_LIMIT_ENABLED=false`;
-- simulated partners, `PAYOUT_TEST_DESTINATIONS`, Xendit test-mode keys (`xnd_development_…`), MoonPay sandbox keys (`pk_test_`, `sk_test_`, `wk_test_`) or MoonPay's sandbox widget URL.
+- simulated partners, `PAYOUT_TEST_DESTINATIONS`, Xendit test-mode keys (`xnd_development_…`), MoonPay sandbox keys (`pk_test_`, `sk_test_`, `wk_test_`) or MoonPay's sandbox widget URL;
+- a real partner without its webhook secret (`XENDIT_CALLBACK_TOKEN`, `MOONPAY_WEBHOOK_KEY`);
+- `MERCHANT_QR_ONLY=false`, or a `SIWE_DOMAIN` ending in `.local` (the default is `globalpay.local`).
+
+KYC is still the mock provider in every environment: production can't refuse it until a real KYC adapter exists (see the roadmap, "Before real money").
 
 ## Conventions
 
