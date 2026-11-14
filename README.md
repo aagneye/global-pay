@@ -1,5 +1,81 @@
 # GlobalPay
 
+> **NEAR Hackathon entry · track: Real-World Money (`realworld`) · live on NEAR testnet · MIT**
+
+## For judges: review in 5 minutes
+
+[![GlobalPay demo: card key and a ₹500 UPI payment on NEAR testnet](docs/demo/globalpay-demo.jpg)](docs/demo/globalpay-demo.mp4)
+
+**▶ [Watch the 75-second demo](docs/demo/globalpay-demo.mp4).** It shows the real app on an Android emulator. You register a bank card as your key, scan a shop's UPI QR, enter ₹500, tap the card, and the merchant is paid in rupees, all on NEAR testnet.
+
+| | |
+|---|---|
+| **The problem** | Many people now hold their money in stablecoins (USDC), but shops take local QR payments in local currency. No chai stall in India or café in Thailand takes USDC. |
+| **What GlobalPay does** | You scan the QR the shop already shows (India's **UPI**, Thailand's **PromptPay**) and pay in USDC. You approve with a tap of **your own contactless bank card** (it becomes your wallet key) plus your fingerprint. The shop receives **rupees or baht** and changes nothing. |
+| **How NEAR is used** | Our own **settlement contract** in Rust ([`contracts-near/settlement`](contracts-near/settlement)) receives **NEP-141 USDC** via `ft_transfer_call` and checks a backend-signed quote on-chain (`env::ed25519_verify`). Payments are **gasless NEP-366 meta transactions**: the phone signs, our relayer pays the gas. Sign-in is **NEP-413**, with no seed phrase. The contract logs **NEP-297** events, then `settle` sends the USDC to the treasury or `refund` returns it to the payer. |
+| **Deployed (testnet)** | settlement [`gp-oy8fad-settle.testnet`](https://testnet.nearblocks.io/address/gp-oy8fad-settle.testnet) · test USDC [`gp-oy8fad-usdc.testnet`](https://testnet.nearblocks.io/address/gp-oy8fad-usdc.testnet) |
+| **Live proof on nearblocks** | **₹500 UPI payment** (the one in the video): [pay](https://testnet.nearblocks.io/txns/8aSGmFLCsCy8kcnQ8445DF5M2VpCphmqRwpzyNNTUmqT) → [settle](https://testnet.nearblocks.io/txns/CRSZyQaRULLJ3kKRm41gQNtGXmiC6dvS5tBy1m8BNC4F) · **฿100 PromptPay payment**: [pay](https://testnet.nearblocks.io/txns/3iqZySU1L7h4ZnxRK4VpqTjPeRzkdCrAody9u3Uv4EYw) → [settle](https://testnet.nearblocks.io/txns/Dnhybx9aZb51MjmQ9jyLQdo7T3ScjrHfrThg5zTjvLfT) · **failed payout → refund**: [pay](https://testnet.nearblocks.io/txns/FFcw2gLVDNHNZTLD8xjW3VT6iGwrJbqow3HCWsFgQEy9) → [refund](https://testnet.nearblocks.io/txns/AYFScijZtFBpN7ME7FM35zAw2U6KLvB7ZTxpwjzgrksN) |
+| **Real vs simulated** | **Real:** the contracts, every NEAR transaction above, the Flutter app, the TypeScript backend, live USDC/INR and USDC/THB rates, and the NFC/EMV card reading code. **Simulated (testnet):** the UPI and PromptPay payout partners, KYC, and the test USDC token. The emulator has no NFC, so the video uses the app's testnet demo card. |
+| **Tests** | Contract **72** passing · backend **585** passing · app **513** passing. Edge cases are listed [below](#test-coverage). |
+| **Built in the window** | The repo's first commit is on 2026-11-12. The NEAR work to judge is [`pre-near...hackathon-submission`](https://github.com/aagneye/global-pay/compare/pre-near...hackathon-submission) (rules Q-001 to Q-003). |
+| **Team** | Built by [@aagneye](https://github.com/aagneye), with Claude Code as the coding assistant (disclosed per Q-005). |
+
+### Check it yourself
+| Do this | You'll see |
+|---|---|
+| Open the **₹500 pay** link above | `ft_transfer` of 4.834665 USDC into `gp-oy8fad-settle.testnet`, then a `payment_received` event with `fiat_currency: INR`, `fiat_amount: 50000` (paise) |
+| Open the **settle** link | the USDC moves to `gp-oy8fad-treasury.testnet`; `settle` returns `true` |
+| `cd contracts-near && cargo test` | 72 tests pass, 1 ignored (a known issue, listed below) |
+| `cd services/api && npm ci && npm test` | 585 tests pass; 23 are skipped (the Postgres-only suites, plus 1 known issue) |
+| `cd apps/mobile && flutter pub get && flutter test` | 513 tests pass; 2 are skipped (the live end-to-end test, plus 1 known issue) |
+| Run it end to end | follow [Try it](#try-it-do-x-see-y) below: deploy your own contracts on testnet for free, start the backend, run the app, pay a UPI QR |
+
+### A payment on the NEAR rail
+```mermaid
+sequenceDiagram
+  participant U as User's phone (GlobalPay app)
+  participant B as GlobalPay backend
+  participant R as Relayer (pays gas)
+  participant T as USDC (NEP-141)
+  participant S as Settlement contract
+  participant P as Payout partner (UPI / PromptPay, simulated)
+  U->>B: scan shop QR (upi://pay… or PromptPay) → POST /quotes
+  B-->>U: signed quote: ₹500 = 4.834665 USDC, valid 60 s
+  U->>U: card tap matches the registered card key, then fingerprint
+  U->>B: NEP-366 signed delegate (ft_transfer_call, quote inside msg)
+  B->>R: relay the delegate
+  R->>T: ft_transfer_call(settlement, 4.834665 USDC, msg)
+  T->>S: ft_on_transfer: check the ed25519 quote signature, payer, amount, expiry, one use
+  S-->>B: NEP-297 payment_received (indexer)
+  B->>P: pay the merchant ₹500 (UTR 298508372851)
+  B->>S: settle (USDC → treasury), or refund (USDC → payer) if the payout failed
+```
+
+### Test coverage
+Seven areas were tested with edge cases, each by its own agent, then merged:
+
+| Area | What the tests cover |
+|---|---|
+| **NFC card key** (app) | NFC missing or switched off; tag lost mid-read; NTAG/MIFARE tags fall back to the UID; random-UID cards; two taps; cancel; platform errors; wrong card means nothing is signed; only a salted hash plus the last 4 digits is stored; demo card on testnet only |
+| **EMV reader** (app) | PPSE/PSE, AID priority, PDOL, GPO templates 77/80, READ RECORD, 6Cxx/61xx status words, Luhn, PAN never logged |
+| **QR parsing and scan** (app) | 66 UPI cases (case, encoding, bad VPAs, currencies, amounts, repeated fields), 34 PromptPay cases (CRC, truncated TLV, currencies), the scan screen (camera denied, double scans, static vs dynamic amounts) |
+| **Login** (app + backend) | Nonce expiry and reuse, wrong recipient, foreign keys, malformed signatures, faucet down, JWT tampering and expiry, per-IP rate limits |
+| **Payments** (app) | Quote expiry, 10 tampered `nearPayment` variants (nothing signed), dropped connections without double charges, status polling to Settled, Refunded, Failed or Needs review, history in mixed ₹ and ฿ |
+| **Payments and payouts** (backend) | Replayed and tampered delegates, other users' quotes, RPC failures (never stuck), settle returning `false`, UPI payout idempotency, UNKNOWN never auto-settled, KYC limits across ₹ and ฿, rate feed down |
+| **Settlement contract** | INR accepted; 14 bad currencies refused; nanosecond expiry boundary; `u128::MAX` amounts; lookalike token callers; replays after settle or refund; operator-only; the gas floor; paging; 20+ bad signatures |
+
+**Bugs the tests found:**
+- **Fixed tonight:**
+  - A UPI QR with a repeated `pa` field could show one payee in the app while the backend paid another. The app now reads QR fields exactly like the backend.
+  - A raw NFC platform error froze the card tap sheet.
+  - A non-JSON server error showed the HTTP library's developer text on the sign-in screen.
+  - `PAYOUT_UNKNOWN_RATE` didn't reach the UPI simulator.
+- **Known, with skipped tests:**
+  - The 24-hour KYC total counts paise as satang. It only ever blocks too early, never too late.
+  - `MIN_GAS_FOR_PAYOUT` (40 TGas) is below the ~44 TGas `settle` uses. The backend always attaches 100 TGas.
+  - One payment in a currency the app doesn't know would hide the history list. Today the backend only sends THB and INR.
+
+
 **A universal crypto spending wallet for the real world.** One wallet. Any compatible contactless card as your key. UPI or PromptPay QR. Crypto in, local currency out.
 
 Your existing bank card becomes a physical key to your crypto wallet. Your smartphone becomes the payment interface. Your USDC becomes spendable at physical shops that show a UPI or PromptPay QR, and the merchant receives local currency: rupees in India, baht in Thailand. The merchant never touches crypto and installs nothing.
@@ -51,8 +127,8 @@ It settles on **NEAR** (testnet, the NEAR Hackathon entry below) or on **Base**,
 - a ฿100 PromptPay payment, Paid then Settled: [payment (meta transaction)](https://testnet.nearblocks.io/txns/3iqZySU1L7h4ZnxRK4VpqTjPeRzkdCrAody9u3Uv4EYw) and [settlement](https://testnet.nearblocks.io/txns/Dnhybx9aZb51MjmQ9jyLQdo7T3ScjrHfrThg5zTjvLfT); the treasury received 2.978891 USDC
 - a ฿100 PromptPay payment whose payout failed (forced), then Refunded: [payment](https://testnet.nearblocks.io/txns/FFcw2gLVDNHNZTLD8xjW3VT6iGwrJbqow3HCWsFgQEy9) and [refund](https://testnet.nearblocks.io/txns/AYFScijZtFBpN7ME7FM35zAw2U6KLvB7ZTxpwjzgrksN)
 
-**Try it ("do X, see Y"):**
-1. **Contracts.** Run `cd contracts-near && cargo test`: 44 tests pass. Prebuilt wasm files are in `contracts-near/res/`.
+### Try it: do X, see Y
+1. **Contracts.** Run `cd contracts-near && cargo test`: 72 tests pass (1 ignored: a known issue). Prebuilt wasm files are in `contracts-near/res/`.
 2. **Deploy your own copy on testnet** (free, using faucet accounts). In `services/api`, run `npm install`, then `npm run near:testnet -- init`, `create`, `deploy` and `status`. You'll see both contracts initialised.
 3. **Backend.** Start a Postgres database (see `services/api/README.md`; `npx prisma dev` works), set its `DATABASE_URL` in `.env.near-testnet`, then run `npx prisma migrate deploy` and `npm run start:near`. `GET http://localhost:3001/health` returns `ok`.
 4. **App** (Android emulator). In `apps/mobile`, run `flutter run --dart-define=SETTLEMENT_RAIL=near --dart-define=API_BASE_URL=http://10.0.2.2:3001 --dart-define=NEAR_USDC_CONTRACT=<usdc> --dart-define=NEAR_SETTLEMENT_CONTRACT=<settle> --dart-define=NEAR_SIGN_IN_RECIPIENT=globalpay.local`, adding `--no-enable-impeller` on Android 17 emulators. Then:
