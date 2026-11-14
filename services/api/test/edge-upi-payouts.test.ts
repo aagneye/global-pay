@@ -80,9 +80,8 @@ describe('UPI payouts on the NEAR rail: unclear outcomes', () => {
     expect(shown.payout.reference).toBeUndefined();
   });
 
-  // README: with the simulated partner, PAYOUT_UNKNOWN_RATE=1 "makes every outcome unclear". The container
-  // builds the simulated UPI partner without it (only delayMs and failureRate), so UPI payouts still settle.
-  it.skip('BUG: PAYOUT_UNKNOWN_RATE=1 makes simulated UPI payouts unclear too, as it does PromptPay ones', async () => {
+  // README: with the simulated partner, PAYOUT_UNKNOWN_RATE=1 "makes every outcome unclear", for UPI payouts too.
+  it('PAYOUT_UNKNOWN_RATE=1 makes simulated UPI payouts unclear too, as it does PromptPay ones', async () => {
     const { container, near, repos, pay, status } = await setup({ PAYOUT_UNKNOWN_RATE: '1' });
     const { id } = (await pay(chai250)).paid.json<{ id: string }>();
     await container.workers.indexer.tick();

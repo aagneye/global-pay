@@ -180,7 +180,11 @@ export function buildContainer(env: Env, overrides: Partial<Adapters> = {}): Con
   // UPI merchants (NEAR card terminal) are paid by a simulated UPI partner, testnet only.
   const payoutRouter = new PayoutRouter({
     promptpay: payoutProvider,
-    upi: overrides.upiPayouts ?? new SimulatedUpiProvider({ delayMs: env.PAYOUT_DELAY_MS, failureRate: env.PAYOUT_FAILURE_RATE }),
+    upi: overrides.upiPayouts ?? new SimulatedUpiProvider({
+        delayMs: env.PAYOUT_DELAY_MS,
+        failureRate: env.PAYOUT_FAILURE_RATE,
+        unknownRate: env.PAYOUT_UNKNOWN_RATE,
+      }),
   });
   const payoutTracker = new PayoutTracker({
     payouts: repositories.payouts,
