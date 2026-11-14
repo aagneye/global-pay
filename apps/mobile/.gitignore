@@ -43,3 +43,9 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# Release signing (README.md, "Release build"): never commit the key or its passwords.
+# android/.gitignore covers android/; these catch a keystore made anywhere else in the app.
+key.properties
+*.jks
+*.keystore
