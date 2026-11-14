@@ -20,6 +20,7 @@ dependencies:
   qr_flutter: ^4.1.0
   # Pinned with retrofit_generator: newer pairs need Dart 3.9+.
   retrofit: 4.9.1
+  url_launcher: ^6.3.2
 
 dev_dependencies:
   flutter_test:

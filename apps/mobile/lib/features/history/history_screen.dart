@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:globalpay/app/router.dart';
 import 'package:globalpay/core/widgets/common.dart';
+import 'package:globalpay/domain/models/onramp.dart';
 import 'package:globalpay/domain/models/payment.dart';
 import 'package:globalpay/features/home/account_providers.dart';
 
@@ -11,13 +12,24 @@ class HistoryScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final history = ref.watch(historyProvider);
+    final payments = ref.watch(historyProvider);
+    final deposits = ref.watch(depositsProvider);
+
+    Future<void> refresh() async {
+      ref.invalidate(historyProvider);
+      ref.invalidate(depositsProvider);
+      await ref.read(historyProvider.future);
+    }
+
     return Scaffold(
       appBar: AppBar(title: const Text('History')),
       body: RefreshIndicator(
-        onRefresh: () => ref.refresh(historyProvider.future),
-        child: switch (history) {
-          AsyncData(:final value) when value.isEmpty => ListView(
+        onRefresh: refresh,
+        child: switch ((payments, deposits)) {
+          (AsyncError(:final error), _) || (_, AsyncError(:final error)) => ListView(
+            children: [ErrorView(error: error, onRetry: refresh)],
+          ),
+          (AsyncData(value: final paid), AsyncData(value: final received)) when paid.isEmpty && received.isEmpty => ListView(
             children: const [
               Padding(
                 padding: EdgeInsets.all(32),
@@ -25,12 +37,16 @@ class HistoryScreen extends ConsumerWidget {
               ),
             ],
           ),
-          AsyncData(:final value) => ListView(
+          (AsyncData(value: final paid), AsyncData(value: final received)) => ListView(
             padding: const EdgeInsets.all(8),
-            children: [for (final payment in value) PaymentTile(payment: payment)],
-          ),
-          AsyncError(:final error) => ListView(
-            children: [ErrorView(error: error, onRetry: () => ref.invalidate(historyProvider))],
+            children: [
+              // Newest first, payments and deposits together.
+              for (final entry in [
+                ...paid.map((p) => (at: p.createdAt, tile: PaymentTile(payment: p) as Widget)),
+                ...received.map((d) => (at: d.createdAt, tile: DepositTile(deposit: d) as Widget)),
+              ]..sort((a, b) => b.at.compareTo(a.at)))
+                entry.tile,
+            ],
           ),
           _ => const Center(child: CircularProgressIndicator()),
         },
@@ -68,6 +84,27 @@ class PaymentTile extends StatelessWidget {
           Text(payment.statusLabel, style: theme.textTheme.labelSmall?.copyWith(color: color)),
         ],
       ),
+    );
+  }
+}
+
+/// USDC that came in: from Add money, or from another wallet. Tap to copy the explorer link.
+class DepositTile extends StatelessWidget {
+  const DepositTile({super.key, required this.deposit});
+
+  final Deposit deposit;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final date = MaterialLocalizations.of(context).formatShortDate(deposit.createdAt.toLocal());
+    final fromOnramp = deposit.onrampOrderId != null;
+    return ListTile(
+      onTap: () => copyToClipboard(context, deposit.transaction.url, label: 'Link copied'),
+      leading: CircleAvatar(child: Icon(fromOnramp ? Icons.add_card : Icons.south_west)),
+      title: Text(fromOnramp ? 'Added money' : 'Received'),
+      subtitle: Text(fromOnramp ? date : '$date · from ${shortAddress(deposit.from)}'),
+      trailing: Text('+${deposit.amount.format()}', style: theme.textTheme.titleSmall?.copyWith(color: theme.colorScheme.primary)),
     );
   }
 }

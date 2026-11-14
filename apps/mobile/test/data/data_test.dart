@@ -4,6 +4,7 @@ import 'package:globalpay/core/config/app_config.dart';
 import 'package:globalpay/core/errors/app_exception.dart';
 import 'package:globalpay/core/storage/secure_store.dart';
 import 'package:globalpay/data/api/api_client.dart';
+import 'package:globalpay/data/repositories/onramp_repository.dart';
 import 'package:globalpay/data/session_store.dart';
 import 'package:globalpay/domain/models/session.dart';
 
@@ -12,6 +13,14 @@ import '../support/fake_backend.dart';
 const config = AppConfig(apiBaseUrl: 'http://backend.test', chainId: 31337);
 
 void main() {
+  group('resolveCheckoutUrl', () {
+    test("keeps a partner's absolute URL and resolves the simulator's path against the API", () {
+      const moonpay = 'https://buy-sandbox.moonpay.com?apiKey=pk_test&signature=abc%3D';
+      expect(resolveCheckoutUrl('http://10.0.2.2:3000', moonpay).toString(), moonpay);
+      expect(resolveCheckoutUrl('http://10.0.2.2:3000', '/onramp/simulator/order_1').toString(), 'http://10.0.2.2:3000/onramp/simulator/order_1');
+    });
+  });
+
   group('SessionStore', () {
     final now = DateTime.utc(2026, 11, 12, 12);
     Session session({Duration validFor = const Duration(hours: 1)}) =>

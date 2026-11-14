@@ -84,6 +84,13 @@ class HomeScreen extends ConsumerWidget {
               style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(56)),
             ),
             const SizedBox(height: 12),
+            FilledButton.tonalIcon(
+              onPressed: () => context.push(Routes.addMoney),
+              icon: const Icon(Icons.add_card),
+              label: const Text('Add money'),
+              style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(48)),
+            ),
+            const SizedBox(height: 12),
             Row(
               children: [
                 Expanded(

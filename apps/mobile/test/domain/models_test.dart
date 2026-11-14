@@ -1,6 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:globalpay/data/repositories/payments_repository.dart' show thb, usdc;
 import 'package:globalpay/domain/models/money.dart';
+import 'package:globalpay/domain/models/onramp.dart';
 import 'package:globalpay/domain/models/payment.dart';
 
 void main() {
@@ -60,6 +61,15 @@ void main() {
       expect(payment(PaymentStatus.settled, reversed).statusLabel, 'Needs review');
       expect(payment(PaymentStatus.settled, paid).statusLabel, 'Merchant paid');
       expect(payment(PaymentStatus.paid, null).statusLabel, 'Received');
+    });
+  });
+
+  group('OnrampStatus', () {
+    test('maps backend names; an unknown one keeps waiting, never "added"', () {
+      expect(OnrampStatus.fromApi('COMPLETED'), OnrampStatus.completed);
+      expect(OnrampStatus.fromApi('SOMETHING_NEW'), OnrampStatus.pending);
+      expect(OnrampStatus.expired.isTerminal, isTrue);
+      expect(OnrampStatus.pending.isTerminal, isFalse);
     });
   });
 }

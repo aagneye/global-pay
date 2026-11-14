@@ -10,6 +10,7 @@ import 'clients/kyc_client.dart';
 import 'clients/quotes_client.dart';
 import 'clients/payments_client.dart';
 import 'clients/account_client.dart';
+import 'clients/onramp_client.dart';
 
 /// GlobalPay API `v0.1.0`.
 ///
@@ -34,6 +35,7 @@ class GlobalPayApi {
   QuotesClient? _quotes;
   PaymentsClient? _payments;
   AccountClient? _account;
+  OnrampClient? _onramp;
 
   SystemClient get system => _system ??= SystemClient(_dio, baseUrl: _baseUrl);
 
@@ -46,4 +48,6 @@ class GlobalPayApi {
   PaymentsClient get payments => _payments ??= PaymentsClient(_dio, baseUrl: _baseUrl);
 
   AccountClient get account => _account ??= AccountClient(_dio, baseUrl: _baseUrl);
+
+  OnrampClient get onramp => _onramp ??= OnrampClient(_dio, baseUrl: _baseUrl);
 }

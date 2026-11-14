@@ -6,7 +6,12 @@ import 'package:dio/dio.dart';
 /// A canned GlobalPay backend for widget tests, plugged into Dio below the generated client.
 /// Responses follow packages/openapi/openapi.json.
 class FakeBackend implements HttpClientAdapter {
-  FakeBackend({this.balanceUnits = '10000000000', this.finalStatus = 'SETTLED', this.payoutStatus = 'PENDING'});
+  FakeBackend({
+    this.balanceUnits = '10000000000',
+    this.finalStatus = 'SETTLED',
+    this.payoutStatus = 'PENDING',
+    this.onrampFinalStatus = 'COMPLETED',
+  });
 
   final String balanceUnits;
   final String finalStatus;
@@ -14,6 +19,11 @@ class FakeBackend implements HttpClientAdapter {
   /// The payout's status while the payment is PAYOUT_PENDING, e.g. UNKNOWN.
   final String payoutStatus;
   static const bankReference = 'SIM0A1B2C3D4E5F';
+
+  /// What an Add-money order becomes after the first check (it starts CREATED).
+  final String onrampFinalStatus;
+  int _onrampPolls = 0;
+  bool _added = false;
   final requests = <({String method, String path, Object? body, String? auth})>[];
   String kycStatus = 'NOT_STARTED';
   int _statusPolls = 0;
@@ -91,9 +101,43 @@ class FakeBackend implements HttpClientAdapter {
         return (202, _payment('SUBMITTED'));
       }(),
       ('GET', '/payments/$paymentId') => (200, _payment(++_statusPolls < 2 ? 'PAID' : finalStatus)),
+      ('POST', '/onramp/orders') => (201, {'order': _onramp('CREATED'), 'checkoutUrl': '/onramp/simulator/order_1'}),
+      ('GET', '/onramp/orders/order_1') => () {
+        final status = ++_onrampPolls < 2 ? 'CREATED' : onrampFinalStatus;
+        _added = status == 'COMPLETED';
+        return (200, _onramp(status));
+      }(),
+      ('GET', '/me/deposits') => (200, {'deposits': _added ? [_deposit()] : []}),
       _ => (404, {'error': 'not_found', 'message': 'No route $method $path'}),
     };
   }
+
+  Map<String, Object> _onramp(String status) {
+    final now = DateTime.now().toUtc().toIso8601String();
+    return {
+      'id': 'order_1',
+      'status': status,
+      'provider': 'simulated-onramp',
+      'fiatCurrency': 'THB',
+      'fiatAmount': '80000',
+      if (status == 'COMPLETED') 'tokenAmount': '24615384',
+      if (status == 'COMPLETED') 'transaction': {'hash': '0x${'55' * 32}', 'url': 'https://explorer.test/tx/0x${'55' * 32}'},
+      if (status == 'FAILED') 'failureReason': 'Card declined (simulated)',
+      'expiresAt': now,
+      'createdAt': now,
+      'updatedAt': now,
+    };
+  }
+
+  Map<String, Object> _deposit() => {
+    'id': 'deposit_1',
+    'token': '0x5FbDB2315678afecb367f032d93F642f64180aa3',
+    'amount': '24615384',
+    'from': '0x0000000000000000000000000000000000000000',
+    'transaction': {'hash': '0x${'55' * 32}', 'url': 'https://explorer.test/tx/0x${'55' * 32}'},
+    'onrampOrderId': 'order_1',
+    'createdAt': DateTime.now().toUtc().toIso8601String(),
+  };
 
   Map<String, Object>? _kyc(String status) {
     kycStatus = status;

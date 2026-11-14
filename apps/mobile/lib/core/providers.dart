@@ -1,10 +1,12 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'package:globalpay/core/config/app_config.dart';
 import 'package:globalpay/core/storage/secure_store.dart';
 import 'package:globalpay/data/api/api_client.dart';
 import 'package:globalpay/data/repositories/account_repository.dart';
 import 'package:globalpay/data/repositories/auth_repository.dart';
 import 'package:globalpay/data/repositories/kyc_repository.dart';
+import 'package:globalpay/data/repositories/onramp_repository.dart';
 import 'package:globalpay/data/repositories/payments_repository.dart';
 import 'package:globalpay/data/session_store.dart';
 import 'package:globalpay/features/auth/session_controller.dart';
@@ -53,4 +55,14 @@ final paymentsRepositoryProvider = Provider<PaymentsRepository>(
 
 final accountRepositoryProvider = Provider<AccountRepository>(
   (ref) => AccountRepository(api: ref.watch(apiClientProvider)),
+);
+
+final onrampRepositoryProvider = Provider<OnrampRepository>(
+  (ref) => OnrampRepository(api: ref.watch(apiClientProvider), apiBaseUrl: ref.watch(appConfigProvider).apiBaseUrl),
+);
+
+/// Opens the partner's checkout in a Custom Tab (not a WebView, so the app can't see card details).
+/// Returns false if no browser could open it. Tests replace it.
+final checkoutLauncherProvider = Provider<Future<bool> Function(Uri)>(
+  (ref) => (url) => launchUrl(url, mode: LaunchMode.inAppBrowserView),
 );

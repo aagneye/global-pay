@@ -6,6 +6,7 @@ import 'package:dio/dio.dart';
 import 'package:retrofit/retrofit.dart';
 
 import '../models/balance.dart';
+import '../models/deposit_list.dart';
 import '../models/payment_list.dart';
 
 part 'account_client.g.dart';
@@ -21,4 +22,10 @@ abstract class AccountClient {
   /// Payment history, newest first (last 50)
   @GET('/me/payments')
   Future<PaymentList> listPayments();
+
+  /// USDC that arrived in your wallet from outside, newest first (last 50).
+  ///
+  /// Found on-chain by the deposit watcher, a few blocks after they land. Refunds show on their payment instead.
+  @GET('/me/deposits')
+  Future<DepositList> listDeposits();
 }

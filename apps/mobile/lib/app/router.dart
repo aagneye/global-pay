@@ -2,6 +2,8 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:globalpay/domain/models/kyc.dart';
+import 'package:globalpay/features/add_money/add_money_screen.dart';
+import 'package:globalpay/features/add_money/onramp_status_screen.dart';
 import 'package:globalpay/domain/models/promptpay_qr.dart';
 import 'package:globalpay/domain/models/session.dart';
 import 'package:globalpay/features/auth/login_screen.dart';
@@ -25,8 +27,10 @@ abstract final class Routes {
   static const scan = '/scan';
   static const confirm = '/pay/confirm';
   static const history = '/history';
+  static const addMoney = '/add-money';
 
   static String status(String paymentId) => '/pay/status/$paymentId';
+  static String addMoneyStatus(String orderId) => '/add-money/$orderId';
 }
 
 /// Where the app must go given the session and KYC state, or null to stay at [location].
@@ -75,6 +79,14 @@ final routerProvider = Provider<GoRouter>((ref) {
         builder: (context, state) => PaymentStatusScreen(paymentId: state.pathParameters['paymentId']!),
       ),
       GoRoute(path: Routes.history, builder: (context, state) => const HistoryScreen()),
+      GoRoute(path: Routes.addMoney, builder: (context, state) => const AddMoneyScreen()),
+      GoRoute(
+        path: '/add-money/:orderId',
+        builder: (context, state) => OnrampStatusScreen(
+          orderId: state.pathParameters['orderId']!,
+          checkoutUrl: state.extra is Uri ? state.extra! as Uri : null,
+        ),
+      ),
     ],
   );
   ref.onDispose(() {

@@ -22,7 +22,8 @@ const qr250 =
 
 const config = AppConfig(apiBaseUrl: 'http://backend.test', chainId: 31337);
 
-Widget app(FakeBackend backend, SecureStore store) {
+/// [launched] collects the checkout pages the app opens (no browser in tests).
+Widget app(FakeBackend backend, SecureStore store, {List<Uri>? launched}) {
   return ProviderScope(
     overrides: [
       appConfigProvider.overrideWithValue(config),
@@ -33,6 +34,10 @@ Widget app(FakeBackend backend, SecureStore store) {
         return ApiClient(config, token: () => sessions.current?.token, dio: Dio()..httpClientAdapter = backend);
       }),
       cameraScannerProvider.overrideWithValue(false),
+      checkoutLauncherProvider.overrideWithValue((url) async {
+        launched?.add(url);
+        return true;
+      }),
     ],
     child: const GlobalPayApp(),
   );
@@ -159,6 +164,42 @@ void main() {
     expect(tester.widget<Text>(find.byKey(const Key('status-headline'))).data, 'Needs review');
     expect(find.text('Bank reference'), findsNothing);
     expect(find.text('Done'), findsNothing);
+  });
+
+  testWidgets('adds money: opens the checkout, then shows the USDC once it arrives', (tester) async {
+    tester.view.physicalSize = const Size(1080, 2400);
+    tester.view.devicePixelRatio = 2.5;
+    addTearDown(tester.view.reset);
+    final backend = FakeBackend()..kycStatus = 'APPROVED';
+    final launched = <Uri>[];
+
+    await tester.pumpWidget(app(backend, MemorySecureStore(), launched: launched));
+    await pumpUntil(tester, find.text('Continue with dev wallet'));
+    await tap(tester, 'Continue with dev wallet');
+    await pumpUntil(tester, find.text('Add money'));
+    await tap(tester, 'Add money');
+    await pumpUntil(tester, find.byKey(const Key('add-money-amount')));
+
+    await tester.enterText(find.byKey(const Key('add-money-amount')), '500');
+    await tap(tester, 'Continue to payment');
+    expect(find.text('Enter at least ฿800'), findsOneWidget);
+
+    await tester.enterText(find.byKey(const Key('add-money-amount')), '800');
+    await tap(tester, 'Continue to payment');
+    await pumpUntil(tester, find.text('Waiting for your payment'));
+    expect(launched, [Uri.parse('http://backend.test/onramp/simulator/order_1')]);
+    expect((backend.requests.firstWhere((r) => r.path == '/onramp/orders').body as Map)['fiatAmountMinor'], '80000');
+    expect(find.text('Open checkout again'), findsOneWidget);
+
+    await pumpUntil(tester, find.text('Added 24.615384 USDC'), maxFrames: 60);
+    expect(find.text('The USDC is in your wallet.'), findsOneWidget);
+    expect(find.text('Delivery transaction'), findsOneWidget);
+
+    await tap(tester, 'Done');
+    await pumpUntil(tester, find.text('History'));
+    await tap(tester, 'History');
+    await pumpUntil(tester, find.text('Added money'));
+    expect(find.text('+24.615384 USDC'), findsOneWidget);
   });
 
   testWidgets('stays signed in across restarts', (tester) async {
