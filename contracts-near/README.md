@@ -104,6 +104,11 @@ The committed wasm was built with:
   reference types) leaves padded `call_indirect` table indices that NEAR's wasm parser refuses.
   The result is WebAssembly MVP plus sign-extension ops.
 
+The committed files (settlement.wasm 213,829 bytes, test_usdc.wasm 186,493 bytes) also pass
+nearcore's own `prepare_contract` (near-vm-runner 0.35.1, protocol versions 80, 83 and 84,
+NearVM and Wasmtime). Deploying locks about 2.2 NEAR (settlement) and 1.9 NEAR (token) of
+storage for the code.
+
 ## Test
 
 ```bash
