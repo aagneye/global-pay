@@ -48,6 +48,15 @@ export async function buildApp({ container, logger = true }: BuildAppOptions): P
   app.decorateRequest('user', null);
   app.addHook('onRequest', authHook(container.tokens));
   app.addHook('onSend', securityHeaders);
+  if (container.rail === 'near') {
+    // EVM-only features stay in the spec (one API for both rails) but answer 503 on the NEAR rail.
+    app.addHook('onRequest', async (request) => {
+      const path = request.url.split('?')[0] ?? '';
+      if (path.startsWith('/p2p/') || path.startsWith('/onramp/orders')) {
+        throw new AppError('not_configured', 'Tap to pay and Add money are not available on the NEAR rail', 503);
+      }
+    });
+  }
 
   app.setErrorHandler((error, request, reply) => {
     if (hasZodFastifySchemaValidationErrors(error)) {

@@ -20,9 +20,14 @@ installCrashHandlers(app.log);
 
 container.workers.indexer.start(app.log);
 container.workers.payouts.start(app.log);
-container.workers.onramp.start(app.log);
-container.workers.deposits.start(app.log);
-container.workers.p2p.start(app.log);
+if (container.rail === 'evm') {
+  container.workers.onramp.start(app.log);
+  container.workers.deposits.start(app.log);
+  container.workers.p2p.start(app.log);
+} else {
+  app.log.info({ rail: container.rail }, 'NEAR rail: Add money, deposits and tap to pay are off');
+}
+container.onboarding?.useLogger?.(app.log);
 
 async function shutdown(signal: string): Promise<void> {
   app.log.info({ signal }, 'shutting down');

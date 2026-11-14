@@ -13,7 +13,16 @@ import type { KycRepository, PaymentRepository, QuoteRepository, UserRepository 
 import type { SettlementGateway } from '../../ports/settlement-gateway.js';
 import { AppError } from '../../shared/errors.js';
 import { parseWallet } from '../../shared/schemas.js';
+import { FT_TRANSFER_CALL } from '../../adapters/near/delegate.js';
+import { publicKeyOfImplicitAccount } from '../../adapters/near/keys.js';
+import { nearTransferMsg } from '../../adapters/near/quote-message.js';
+import type { NearRail } from '../../ports/near-chain.js';
 import { enforceSpendingLimit } from '../kyc/limits.js';
+
+/** Gas for the user's `ft_transfer_call` (the settlement contract's ft_on_transfer runs inside it). */
+export const NEAR_PAYMENT_GAS = 100_000_000_000_000n;
+/** The delegate action stays valid this many blocks (about 5 minutes; the quote expires sooner). */
+export const NEAR_PAYMENT_BLOCKS = 300n;
 
 export interface QuoteServiceDeps {
   users: UserRepository;
@@ -26,6 +35,8 @@ export interface QuoteServiceDeps {
   chainId: number;
   usdcAddress: Address;
   settlementAddress?: Address;
+  /** Set on the NEAR rail: quotes carry `nearPayment` instead of `authorizationToSign`. */
+  near?: NearRail;
   quoteTtlSeconds: number;
   spreadBps: number;
   merchantQrOnly: boolean;
@@ -64,9 +75,9 @@ export class QuoteService {
 
   async createQuote(request: QuoteRequest): Promise<QuoteResponse> {
     const { deps } = this;
-    parseWallet('evm', request.payer);
+    parseWallet(deps.near ? 'near' : 'evm', request.payer);
     const settlementAddress = deps.settlementAddress;
-    if (!settlementAddress) {
+    if (!deps.near && !settlementAddress) {
       throw new AppError('not_configured', 'Quotes need SETTLEMENT_ADDRESS to be set', 503);
     }
 
@@ -99,15 +110,18 @@ export class QuoteService {
       rateE8: rate.rateE8,
       spreadBps: deps.spreadBps,
     });
-    const tokenDomain = await deps.gateway.getTokenDomain(deps.usdcAddress);
+    // What the wallet will sign needs chain reads: the token's EIP-712 domain, or the NEAR key's nonce.
+    const chain = deps.near
+      ? { near: await this.nearAccount(deps.near, request.payer) }
+      : { tokenDomain: await deps.gateway.getTokenDomain(deps.usdcAddress) };
 
     // 4. Sign and store. Expiry is on a whole second, because the contract stores seconds.
     const expiresAt = new Date((Math.floor(now.getTime() / 1000) + deps.quoteTtlSeconds) * 1000);
     const ref = merchantRef(merchant);
     const quote: Quote = {
       quoteId: this.newQuoteId(),
-      payer: getAddress(request.payer),
-      token: getAddress(deps.usdcAddress),
+      payer: deps.near ? request.payer : getAddress(request.payer),
+      token: deps.near ? (deps.near.usdcContract as Address) : getAddress(deps.usdcAddress),
       tokenAmount: price.tokenAmount,
       fiat: { currency: 'THB', minor: fiatMinor },
       rateE8: rate.rateE8,
@@ -120,15 +134,35 @@ export class QuoteService {
     const signature = await deps.signer.sign(quote);
     await deps.quotes.create(user.id, { quote, signature });
 
+    const response = { quote, signature, pricing: { ...price, rateSource: rate.source } };
+    if (deps.near && chain.near) {
+      const { publicKey, nonce, height } = chain.near;
+      return {
+        ...response,
+        nearPayment: {
+          signerId: quote.payer,
+          publicKey,
+          receiverId: deps.near.usdcContract,
+          methodName: FT_TRANSFER_CALL,
+          args: {
+            receiver_id: deps.near.settlementContract,
+            amount: quote.tokenAmount.toString(),
+            msg: nearTransferMsg(quote, signature),
+          },
+          gas: NEAR_PAYMENT_GAS,
+          deposit: 1n,
+          nonce: nonce + 1n,
+          maxBlockHeight: height + NEAR_PAYMENT_BLOCKS,
+        },
+      };
+    }
     return {
-      quote,
-      signature,
-      pricing: { ...price, rateSource: rate.source },
+      ...response,
       authorizationToSign: {
-        domain: { ...tokenDomain, chainId: deps.chainId, verifyingContract: quote.token },
+        domain: { ...(chain.tokenDomain as { name: string; version: string }), chainId: deps.chainId, verifyingContract: quote.token },
         message: {
           from: quote.payer,
-          to: getAddress(settlementAddress),
+          to: getAddress(settlementAddress as Address),
           value: quote.tokenAmount,
           validAfter: 0n,
           validBefore: toUnixSeconds(expiresAt),
@@ -136,6 +170,20 @@ export class QuoteService {
         },
       },
     };
+  }
+
+  /** The payer's key (its implicit account's), the key's nonce and the final block height, for the delegate action. */
+  private async nearAccount(near: NearRail, payer: string): Promise<{ publicKey: string; nonce: bigint; height: bigint }> {
+    const publicKey = publicKeyOfImplicitAccount(payer);
+    const [nonce, height] = await Promise.all([near.chain.getAccessKeyNonce(payer, publicKey), near.chain.getFinalBlockHeight()]);
+    if (nonce === null) {
+      throw new AppError(
+        'near_account_not_found',
+        "Your NEAR account doesn't exist on-chain yet: it needs a little NEAR first (on testnet, sign in again to get test funds)",
+        422,
+      );
+    }
+    return { publicKey, nonce, height };
   }
 
   /** The partner must hold enough THB to pay this, plus a buffer. Unreadable float: refuse, to be safe. */

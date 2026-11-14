@@ -26,8 +26,14 @@ export interface TxLink {
   url: string;
 }
 
-export function toPaymentView({ payment, quote: { quote }, payout }: PaymentWithQuote, explorerUrl: string): PaymentView {
-  const link = (hash: Hex | undefined) => (hash ? { hash, url: `${explorerUrl.replace(/\/$/, '')}/tx/${hash}` } : undefined);
+/** `txPath`: "tx" for Etherscan-style explorers (EVM rail), "txns" for nearblocks (NEAR rail). */
+export function toPaymentView(
+  { payment, quote: { quote }, payout }: PaymentWithQuote,
+  explorerUrl: string,
+  txPath = 'tx',
+): PaymentView {
+  const explorer = explorerUrl.replace(/\/$/, '');
+  const link = (hash: Hex | undefined) => (hash ? { hash, url: `${explorer}/${txPath}/${hash}` } : undefined);
   const pay = link(payment.payTxHash);
   const settle = link(payment.settleTxHash);
   const refund = link(payment.refundTxHash);

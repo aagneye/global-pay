@@ -1,6 +1,11 @@
 import { readFileSync } from 'node:fs';
-import { parseEther } from 'viem';
+import { type Address, parseEther, parseUnits } from 'viem';
 import { ViemQuoteSigner } from './adapters/chain/viem-quote-signer.js';
+import { NearTestnetFaucet } from './adapters/near/faucet.js';
+import { NearQuoteSigner } from './adapters/near/near-quote-signer.js';
+import { NearSettlementGateway } from './adapters/near/near-settlement-gateway.js';
+import type { NearGateway, NearOnboarding, NearRail } from './ports/near-chain.js';
+import type { SettlementRail } from './shared/schemas.js';
 import { ViemSettlementGateway } from './adapters/chain/viem-settlement-gateway.js';
 import { ViemTokenReader } from './adapters/chain/viem-token-reader.js';
 import { createPrismaClient, createPrismaRepositories } from './adapters/db/prisma-repositories.js';
@@ -55,6 +60,10 @@ export interface Adapters {
   /** Token transfers where the onramp delivers: the payment chain unless ONRAMP_RPC_URL/ONRAMP_CHAIN_ID say otherwise. */
   onrampTokens: TokenReader;
   push: PushSender;
+  /** SETTLEMENT_RAIL=near: replaces the NEAR gateway (and takes precedence over `gateway`). */
+  nearGateway: NearGateway;
+  /** SETTLEMENT_RAIL=near: replaces the testnet faucet. */
+  nearOnboarding: NearOnboarding;
 }
 
 /** How the HTTP server protects itself. */
@@ -68,6 +77,10 @@ export interface HttpSettings {
 }
 
 export interface Container {
+  /** SETTLEMENT_RAIL. Tap to pay, Add money and the deposit watcher are EVM only. */
+  rail: SettlementRail;
+  /** NEAR testnet faucet (NEAR_TESTNET_FAUCET), run after each NEAR sign-in. */
+  onboarding?: NearOnboarding;
   tokens: AccessTokens;
   http: HttpSettings;
   /** OPS_API_TOKEN: without it, the operator console is off. */
@@ -106,7 +119,31 @@ export function buildContainer(env: Env, overrides: Partial<Adapters> = {}): Con
     repositories = createPrismaRepositories(prisma);
   }
 
+  // One settlement rail per backend: SETTLEMENT_RAIL=near swaps in the NEAR gateway and quote signer.
+  const nearSettings = env.SETTLEMENT_RAIL === 'near' ? nearRailSettings(env) : undefined;
+  let nearClient: NearSettlementGateway | undefined;
+  let nearGateway: NearGateway | undefined;
+  if (nearSettings) {
+    nearClient = overrides.nearGateway ? undefined : buildNearGateway(env, nearSettings);
+    nearGateway = overrides.nearGateway ?? nearClient;
+  }
+  const near: NearRail | undefined =
+    nearSettings && nearGateway
+      ? {
+          network: env.NEAR_NETWORK,
+          usdcContract: nearSettings.usdcContract,
+          settlementContract: nearSettings.settlementContract,
+          chain: nearGateway,
+        }
+      : undefined;
+  const onboarding =
+    overrides.nearOnboarding ??
+    (nearClient && nearSettings && env.NEAR_TESTNET_FAUCET
+      ? new NearTestnetFaucet({ relayer: nearClient, usdcContract: nearSettings.usdcContract })
+      : undefined);
+
   const gateway =
+    nearGateway ??
     overrides.gateway ??
     new ViemSettlementGateway({
       rpcUrl: env.RPC_URL,
@@ -117,11 +154,18 @@ export function buildContainer(env: Env, overrides: Partial<Adapters> = {}): Con
     });
   const signer =
     overrides.signer ??
-    new ViemQuoteSigner({
-      privateKey: env.QUOTE_SIGNER_PRIVATE_KEY,
-      chainId: env.CHAIN_ID,
-      settlementAddress: env.SETTLEMENT_ADDRESS,
-    });
+    (nearSettings
+      ? new NearQuoteSigner(nearSettings.quoteSignerPrivateKey)
+      : new ViemQuoteSigner({
+          privateKey: env.QUOTE_SIGNER_PRIVATE_KEY,
+          chainId: env.CHAIN_ID,
+          settlementAddress: env.SETTLEMENT_ADDRESS,
+        }));
+  const explorer = near
+    ? { explorerUrl: env.NEAR_EXPLORER_URL, explorerTxPath: 'txns' }
+    : { explorerUrl: env.EXPLORER_URL, explorerTxPath: 'tx' };
+  /** The token users pay with: USDC's 0x address, or the NEAR USDC contract's account ID. */
+  const paymentToken = near ? (near.usdcContract as Address) : env.USDC_ADDRESS;
   const kycProvider = overrides.kyc ?? new MockKycProvider();
   const rates =
     overrides.rates ??
@@ -177,10 +221,13 @@ export function buildContainer(env: Env, overrides: Partial<Adapters> = {}): Con
     gateway,
     chainId: env.CHAIN_ID,
     settlementAddress: env.SETTLEMENT_ADDRESS,
-    explorerUrl: env.EXPLORER_URL,
+    ...(near ? { near } : {}),
+    ...explorer,
   });
 
   return {
+    rail: env.SETTLEMENT_RAIL,
+    ...(onboarding ? { onboarding } : {}),
     tokens,
     http: httpSettings(env),
     opsToken: env.OPS_API_TOKEN,
@@ -191,6 +238,8 @@ export function buildContainer(env: Env, overrides: Partial<Adapters> = {}): Con
         tokens,
         chainId: env.CHAIN_ID,
         domain: env.SIWE_DOMAIN,
+        rail: env.SETTLEMENT_RAIL,
+        ...(onboarding ? { onboarding } : {}),
       }),
       kyc: new KycService({ provider: kycProvider, records: repositories.kyc }),
       quotes: new QuoteService({
@@ -204,6 +253,7 @@ export function buildContainer(env: Env, overrides: Partial<Adapters> = {}): Con
         chainId: env.CHAIN_ID,
         usdcAddress: env.USDC_ADDRESS,
         settlementAddress: env.SETTLEMENT_ADDRESS,
+        ...(near ? { near } : {}),
         quoteTtlSeconds: env.QUOTE_TTL_SECONDS,
         spreadBps: env.SPREAD_BPS,
         merchantQrOnly: env.MERCHANT_QR_ONLY,
@@ -235,14 +285,15 @@ export function buildContainer(env: Env, overrides: Partial<Adapters> = {}): Con
         gateway,
         escalateAfterMs: env.OPS_ESCALATE_AFTER_MS,
         refundCooloffMs: env.OPS_REFUND_COOLOFF_MS,
-        minRelayerWei: parseEther(env.OPS_MIN_RELAYER_ETH),
+        // On NEAR the relayer's balance is yoctoNEAR (24 decimals), and OPS_MIN_RELAYER_ETH is read as NEAR.
+        minRelayerWei: near ? parseUnits(env.OPS_MIN_RELAYER_ETH, 24) : parseEther(env.OPS_MIN_RELAYER_ETH),
         minFloatMinor: env.OPS_MIN_PAYOUT_FLOAT_THB,
       }),
       account: new AccountService({
         users: repositories.users,
         gateway,
         payments,
-        usdcAddress: env.USDC_ADDRESS,
+        usdcAddress: paymentToken,
         deposits: repositories.deposits,
         onrampOrders: repositories.onrampOrders,
         explorerUrl: env.EXPLORER_URL,
@@ -255,11 +306,21 @@ export function buildContainer(env: Env, overrides: Partial<Adapters> = {}): Con
         quotes: repositories.quotes,
         cursors: repositories.cursors,
         chainId: env.CHAIN_ID,
-        settlementAddress: env.SETTLEMENT_ADDRESS,
         pollMs: env.INDEXER_POLL_MS,
-        confirmations: env.INDEXER_CONFIRMATIONS,
-        startBlock: env.INDEXER_START_BLOCK,
         maxBlockRange: env.INDEXER_MAX_BLOCK_RANGE,
+        // NEAR: the contract's payment sequence stands in for blocks, read at final finality.
+        ...(near
+          ? {
+              settlementAddress: near.settlementContract as Address,
+              cursorId: `settlement:near-${near.network}:${near.settlementContract}`,
+              confirmations: 0,
+              startBlock: 0n,
+            }
+          : {
+              settlementAddress: env.SETTLEMENT_ADDRESS,
+              confirmations: env.INDEXER_CONFIRMATIONS,
+              startBlock: env.INDEXER_START_BLOCK,
+            }),
       }),
       payouts: new PayoutWorker({
         payments: repositories.payments,
@@ -267,7 +328,8 @@ export function buildContainer(env: Env, overrides: Partial<Adapters> = {}): Con
         tracker: payoutTracker,
         gateway,
         pollMs: env.PAYOUT_POLL_MS,
-        enabled: Boolean(env.SETTLEMENT_ADDRESS && env.RELAYER_PRIVATE_KEY),
+        // NEAR: the relayer settings are required with SETTLEMENT_RAIL=near (config/env.ts).
+        enabled: near ? true : Boolean(env.SETTLEMENT_ADDRESS && env.RELAYER_PRIVATE_KEY),
       }),
       onramp: new OnrampWorker({
         orders: repositories.onrampOrders,
@@ -293,6 +355,39 @@ export function buildContainer(env: Env, overrides: Partial<Adapters> = {}): Con
       await prisma?.$disconnect();
     },
   };
+}
+
+interface NearRailSettings {
+  settlementContract: string;
+  usdcContract: string;
+  relayerAccountId: string;
+  relayerPrivateKey: string;
+  quoteSignerPrivateKey: string;
+}
+
+/** The NEAR settings SETTLEMENT_RAIL=near requires; loadEnv has checked they're all set. */
+function nearRailSettings(env: Env): NearRailSettings {
+  const settings = {
+    settlementContract: env.NEAR_SETTLEMENT_CONTRACT,
+    usdcContract: env.NEAR_USDC_CONTRACT,
+    relayerAccountId: env.NEAR_RELAYER_ACCOUNT_ID,
+    relayerPrivateKey: env.NEAR_RELAYER_PRIVATE_KEY,
+    quoteSignerPrivateKey: env.NEAR_QUOTE_SIGNER_PRIVATE_KEY,
+  };
+  for (const [name, value] of Object.entries(settings)) {
+    if (!value) throw new Error(`SETTLEMENT_RAIL=near needs the NEAR settings (${name} is missing)`);
+  }
+  return settings as NearRailSettings;
+}
+
+function buildNearGateway(env: Env, settings: NearRailSettings): NearSettlementGateway {
+  return new NearSettlementGateway({
+    rpcUrl: env.NEAR_RPC_URL,
+    settlementContract: settings.settlementContract,
+    relayerAccountId: settings.relayerAccountId,
+    relayerPrivateKey: settings.relayerPrivateKey,
+    pollingIntervalMs: env.CHAIN_POLL_MS,
+  });
 }
 
 function httpSettings(env: Env): HttpSettings {

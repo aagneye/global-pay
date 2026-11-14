@@ -8,6 +8,9 @@ import {
   TransactionRejectedError,
 } from '../../ports/settlement-gateway.js';
 import { AppError } from '../../shared/errors.js';
+import { checkSignedDelegate } from '../../adapters/near/delegate.js';
+import { nearTransferMsg } from '../../adapters/near/quote-message.js';
+import type { NearRail } from '../../ports/near-chain.js';
 import { enforceSpendingLimit } from '../kyc/limits.js';
 import { type PaymentView, toPaymentView } from './view.js';
 
@@ -18,7 +21,11 @@ export interface PaymentServiceDeps {
   gateway: SettlementGateway;
   chainId: number;
   settlementAddress?: Address;
+  /** Set on the NEAR rail: payments are signed delegate actions, checked against the quote here. */
+  near?: NearRail;
   explorerUrl: string;
+  /** Path to a transaction on the explorer: "tx" (Etherscan-style) or "txns" (nearblocks). */
+  explorerTxPath?: string;
   now?: () => Date;
 }
 
@@ -83,17 +90,33 @@ export class PaymentService {
     if (!found || found.payment.userId !== userId) {
       throw new AppError('payment_not_found', 'No such payment for this user', 404);
     }
-    return toPaymentView(found, this.deps.explorerUrl);
+    return toPaymentView(found, this.deps.explorerUrl, this.deps.explorerTxPath);
   }
 
   /** The user's payments, newest first. */
   async list(userId: string, limit = 50): Promise<PaymentView[]> {
     const items = await this.deps.payments.listByUser(userId, limit);
-    return items.map((item) => toPaymentView(item, this.deps.explorerUrl));
+    return items.map((item) => toPaymentView(item, this.deps.explorerUrl, this.deps.explorerTxPath));
   }
 
   /** The signature must be the payer's, over exactly this quote. Checking it here saves a doomed transaction. */
   private async checkAuthorization(stored: StoredQuote, authorization: PaymentAuthorization): Promise<void> {
+    const { near } = this.deps;
+    if (near) {
+      if (authorization.kind !== 'near-delegate') {
+        throw new AppError('invalid_authorization', 'This server settles on NEAR; sign nearPayment and send signedDelegate', 422);
+      }
+      const { quote, signature } = stored;
+      checkSignedDelegate(authorization.signedDelegate, {
+        payer: quote.payer,
+        usdcContract: near.usdcContract,
+        settlementContract: near.settlementContract,
+        tokenAmount: quote.tokenAmount,
+        msg: nearTransferMsg(quote, signature),
+        currentHeight: await near.chain.getFinalBlockHeight(),
+      });
+      return;
+    }
     if (authorization.kind === 'near-delegate') {
       throw new AppError('invalid_authorization', 'This server settles on the EVM rail; sign authorizationToSign', 422);
     }
@@ -160,6 +183,6 @@ export class PaymentService {
   private async view(paymentId: string): Promise<PaymentView> {
     const found = await this.deps.payments.findById(paymentId);
     if (!found) throw new AppError('payment_not_found', 'No such payment', 404);
-    return toPaymentView(found, this.deps.explorerUrl);
+    return toPaymentView(found, this.deps.explorerUrl, this.deps.explorerTxPath);
   }
 }

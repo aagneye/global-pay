@@ -69,6 +69,13 @@ export function createPrismaRepositories(prisma: PrismaClient): Repositories {
 }
 
 const lower = <T extends string>(value: T) => value.toLowerCase() as T;
+/**
+ * Lowercases 0x values only. On the NEAR rail, transaction hashes (base58) and quote signatures (base64)
+ * are case-sensitive and kept as they are.
+ */
+const lowerHex = <T extends string>(value: T) => (value.startsWith('0x') ? lower(value) : value);
+/** Checksums 0x addresses; NEAR account IDs are kept as they are. */
+const toAddress = (value: string) => (value.startsWith('0x') ? getAddress(value) : (value as Address));
 
 function toUser(row: { id: string; walletAddress: string; displayName: string | null; nameVerified: boolean }): User {
   return {
@@ -186,7 +193,7 @@ export class PrismaQuoteRepository implements QuoteRepository {
         merchantRefHash: lower(quote.merchantRefHash),
         merchantName: quote.merchant.merchantName ?? null,
         qrPayload: quote.merchant.raw,
-        signature: lower(signature as Hex),
+        signature: lowerHex(signature),
         expiresAt: quote.expiresAt,
       },
     });
@@ -204,8 +211,8 @@ function toStoredQuote(row: QuoteRow): StoredQuote {
     signature: row.signature as Hex,
     quote: {
       quoteId: row.id as Hex,
-      payer: getAddress(row.payer),
-      token: getAddress(row.token),
+      payer: toAddress(row.payer),
+      token: toAddress(row.token),
       tokenAmount: row.tokenAmount,
       fiat: { currency: row.fiatCurrency as FiatCurrency, minor: row.fiatAmount },
       rateE8: row.rateE8,
@@ -358,10 +365,10 @@ function withQuote(row: PaymentRow & { quote: QuoteRow; payout: PayoutRow | null
 
 function toPaymentData(fields: PaymentFields) {
   return {
-    ...(fields.payTxHash === undefined ? {} : { payTxHash: lower(fields.payTxHash) }),
+    ...(fields.payTxHash === undefined ? {} : { payTxHash: lowerHex(fields.payTxHash) }),
     ...(fields.paidBlock === undefined ? {} : { paidBlock: fields.paidBlock }),
-    ...(fields.settleTxHash === undefined ? {} : { settleTxHash: lower(fields.settleTxHash) }),
-    ...(fields.refundTxHash === undefined ? {} : { refundTxHash: lower(fields.refundTxHash) }),
+    ...(fields.settleTxHash === undefined ? {} : { settleTxHash: lowerHex(fields.settleTxHash) }),
+    ...(fields.refundTxHash === undefined ? {} : { refundTxHash: lowerHex(fields.refundTxHash) }),
     ...(fields.failureReason === undefined ? {} : { failureReason: fields.failureReason }),
     ...(fields.eventMismatch === undefined ? {} : { eventMismatch: fields.eventMismatch }),
   };

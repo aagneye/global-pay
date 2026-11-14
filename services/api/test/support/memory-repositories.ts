@@ -551,12 +551,14 @@ function lowerOnramp(fields: OnrampFields): OnrampFields {
   return { ...fields, ...(fields.txHash ? { txHash: fields.txHash.toLowerCase() as Hex } : {}) };
 }
 
+/** Like the Prisma repositories: 0x hashes lowercase, NEAR (base58) hashes as they are. */
 function lowerFields(fields: PaymentFields): PaymentFields {
+  const lowerHex = (hash: Hex) => (hash.startsWith('0x') ? (hash.toLowerCase() as Hex) : hash);
   return {
     ...fields,
-    ...(fields.payTxHash ? { payTxHash: fields.payTxHash.toLowerCase() as Hex } : {}),
-    ...(fields.settleTxHash ? { settleTxHash: fields.settleTxHash.toLowerCase() as Hex } : {}),
-    ...(fields.refundTxHash ? { refundTxHash: fields.refundTxHash.toLowerCase() as Hex } : {}),
+    ...(fields.payTxHash ? { payTxHash: lowerHex(fields.payTxHash) } : {}),
+    ...(fields.settleTxHash ? { settleTxHash: lowerHex(fields.settleTxHash) } : {}),
+    ...(fields.refundTxHash ? { refundTxHash: lowerHex(fields.refundTxHash) } : {}),
   };
 }
 
