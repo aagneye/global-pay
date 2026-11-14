@@ -11,7 +11,7 @@ Stack: Fastify, zod (validation and OpenAPI), viem, Prisma 7 (Postgres), jose (J
 
 ## Status
 
-Iterations 3 (backend core), 4 (settlement loop), 6 (payout confirmation and operations), 8 (Add money) and 9 (tap to pay) are done. These work:
+Iterations 3 (backend core), 4 (settlement loop), 6 (payout confirmation and operations), 8 (Add money), 9 (tap to pay) and 10 (production hardening, see [Hardening](#hardening)) are done. These work:
 
 | Route | What it does |
 |---|---|
