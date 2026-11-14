@@ -55,7 +55,7 @@ The pre-funded pool is needed in every country. That makes it capital-intensive,
 
 If the app can pay any account, people will use it to turn crypto into cash in mule accounts. Controls built into the design:
 
-- Merchant QRs only (P2M).
+- Merchant QRs only (P2M): baht goes only to merchants, never to a personal PromptPay account (`MERCHANT_QR_ONLY`, forced on in production).
 - Limits per payment and per day, based on KYC tier.
 - On-chain screening of incoming funds.
 
@@ -82,7 +82,9 @@ Thai-resident freelancers are out of scope for now. Thailand has restricted lice
 - A partner debit card.
 - Income and spending statements.
 
-**Out of scope for now:** Thai residents, payments to individuals (P2P), credit, savings/yield, other countries.
+**Out of scope for now:** Thai residents, baht payouts to individuals (personal PromptPay accounts), credit, savings/yield, other countries.
+
+Tap to pay (iteration 9) is different: it moves USDC between two GlobalPay wallets, and no baht leaves the system. Both sides must pass KYC, and it has its own limits (per request, per day per sender). It still needs the same AML review before real money.
 
 **Next markets:** Indonesia (QRIS), Vietnam (VietQR), then India through the offshore + prepaid-wallet structure.
 

@@ -3,7 +3,7 @@
 Solidity contracts for GlobalPay, built with [Foundry](https://getfoundry.sh/). Target network: **Base** (Base Sepolia for development).
 
 **Status:** iteration 2 is complete.
-- `GlobalPaySettlement` is implemented and tested: 42 tests including fuzzing, with 100% line and branch coverage.
+- `GlobalPaySettlement` is implemented and tested: 47 tests in all (including fuzzing and the mock USDC's own tests), with 100% line and branch coverage of the contract.
 - Deploy scripts are tested on a local chain (anvil).
 - The real `Deploy.s.sol` is rehearsed on a fork of Base Sepolia, against Circle's test USDC. The Base Sepolia deployment (iteration 7) follows [docs/testnet.md](../docs/testnet.md).
 

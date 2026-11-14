@@ -9,7 +9,7 @@
 | Node.js | 22+ | Backend |
 | Docker | latest | Local Postgres |
 | Git | latest | — |
-| Java | 17+ | OpenAPI client generator (iteration 5) |
+| Java | 17+ | Android builds (Gradle) and `keytool` for the release key; Android Studio bundles one |
 | Foundry | latest | Contracts (from iteration 2) |
 
 iOS builds need a Mac with Xcode. The project targets Android first.
