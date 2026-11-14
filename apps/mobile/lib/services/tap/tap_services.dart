@@ -129,7 +129,8 @@ abstract interface class KeyVault {
   /// Encrypts [secret]; asks for the fingerprint.
   Future<String> seal(String secret, {required String reason});
 
-  /// Decrypts; asks for the fingerprint with [reason]. Throws `biometric_cancelled` if the user backs out.
+  /// Decrypts; asks for the fingerprint with [reason]. Throws `biometric_cancelled` if the user backs out,
+  /// and `biometric_invalidated` if fingerprints changed since [seal], so it can never be opened.
   Future<String> open(String sealed, {required String reason});
 }
 
@@ -157,7 +158,12 @@ class ChannelKeyVault implements KeyVault {
     try {
       return (await _channel.invokeMethod<String>(method, args))!;
     } on PlatformException catch (e) {
-      throw AppException(e.code == 'cancelled' ? 'biometric_cancelled' : 'biometric_failed', e.message ?? 'Fingerprint check failed');
+      final code = switch (e.code) {
+        'cancelled' => 'biometric_cancelled',
+        'invalidated' => 'biometric_invalidated',
+        _ => 'biometric_failed',
+      };
+      throw AppException(code, e.message ?? 'Fingerprint check failed');
     }
   }
 }

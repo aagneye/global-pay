@@ -22,16 +22,28 @@ import javax.crypto.spec.GCMParameterSpec
  * (fingerprint or face) for every single use: the cipher is only unlocked through BiometricPrompt with a
  * CryptoObject, so the plaintext key exists only for one signature (lib/services/tap/tap_services.dart,
  * KeyVault). Enrolling a new fingerprint invalidates the key.
+ *
+ * It also seals the token that the Privy wallet's fingerprint check opens before every signature
+ * (lib/services/wallet/signature_gate.dart).
  */
 class KeyVault(private val activity: FragmentActivity) {
     private val alias = "globalpay_wallet_vault"
 
     fun isAvailable(): Boolean = BiometricManager.from(activity).canAuthenticate(BIOMETRIC_STRONG) == BiometricManager.BIOMETRIC_SUCCESS
 
-    /** Encrypts `secret`, after a fingerprint; returns "iv:ciphertext" in base64. */
+    /**
+     * Encrypts `secret`, after a fingerprint; returns "iv:ciphertext" in base64. If fingerprints changed
+     * since the key was made, Android has invalidated it and nothing it sealed can be opened again, so a
+     * new key replaces it.
+     */
     fun seal(secret: String, reason: String, result: MethodChannel.Result) {
         val cipher = try {
-            Cipher.getInstance(TRANSFORMATION).apply { init(Cipher.ENCRYPT_MODE, key(createIfMissing = true)) }
+            try {
+                encryptCipher()
+            } catch (e: KeyPermanentlyInvalidatedException) {
+                deleteKey()
+                encryptCipher()
+            }
         } catch (e: Exception) {
             return result.error("failed", "Couldn't prepare the vault: ${e.message}", null)
         }
@@ -82,8 +94,15 @@ class KeyVault(private val activity: FragmentActivity) {
         BiometricPrompt(activity, ContextCompat.getMainExecutor(activity), callback).authenticate(info, BiometricPrompt.CryptoObject(cipher))
     }
 
+    private fun encryptCipher(): Cipher =
+        Cipher.getInstance(TRANSFORMATION).apply { init(Cipher.ENCRYPT_MODE, key(createIfMissing = true)) }
+
+    private fun keyStore(): KeyStore = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
+
+    private fun deleteKey() = keyStore().deleteEntry(alias)
+
     private fun key(createIfMissing: Boolean): SecretKey {
-        val store = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
+        val store = keyStore()
         (store.getKey(alias, null) as? SecretKey)?.let { return it }
         if (!createIfMissing) throw IllegalStateException("No wallet vault key")
         val spec = KeyGenParameterSpec.Builder(alias, KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT)
