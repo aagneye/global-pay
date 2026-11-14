@@ -202,15 +202,21 @@ class AccentTag extends StatelessWidget {
 
 /// "GlobalPay" with the yellow dot: the one place the accent is always visible.
 class Wordmark extends StatelessWidget {
-  const Wordmark({super.key, this.size = 22});
+  const Wordmark({super.key, this.size = 22, this.color});
 
   final double size;
 
+  /// The letters' color: ink by default, paper on a black card.
+  final Color? color;
+
   @override
   Widget build(BuildContext context) {
-    final style = Theme.of(
-      context,
-    ).textTheme.titleLarge?.copyWith(fontSize: size, fontWeight: FontWeight.w700, letterSpacing: -0.04 * size);
+    final style = Theme.of(context).textTheme.titleLarge?.copyWith(
+      fontSize: size,
+      fontWeight: FontWeight.w700,
+      letterSpacing: -0.04 * size,
+      color: color,
+    );
     return Row(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.end,

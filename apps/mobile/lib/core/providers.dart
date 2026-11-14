@@ -9,6 +9,8 @@ import 'package:globalpay/data/repositories/auth_repository.dart';
 import 'package:globalpay/data/repositories/kyc_repository.dart';
 import 'package:globalpay/data/repositories/onramp_repository.dart';
 import 'package:globalpay/data/repositories/p2p_repository.dart';
+import 'package:globalpay/services/card_key/card_key_store.dart';
+import 'package:globalpay/services/card_key/card_reader.dart';
 import 'package:globalpay/services/push/push_service.dart';
 import 'package:globalpay/services/tap/tap_services.dart';
 import 'package:globalpay/data/repositories/payments_repository.dart';
@@ -91,6 +93,16 @@ final keyVaultProvider = Provider<KeyVault?>((ref) => const ChannelKeyVault());
 final tapCardProvider = Provider<TapCard>((ref) => const ChannelTapCard());
 final tapReaderProvider = Provider<TapReader>((ref) => NfcTapReader());
 final pushServiceProvider = Provider<PushService>((ref) => FirebasePushService(FirebaseConfig.fromEnvironment()));
+
+/// Card key: the contactless card that approves payments, read on the back of this phone.
+final cardReaderProvider = Provider<CardReader>((ref) => NfcCardReader());
+final cardKeyStoreProvider = Provider<CardKeyStore>((ref) => CardKeyStore(ref.watch(secureStoreProvider)));
+
+/// The registered card key, or null. Invalidate it after registering or removing one.
+final cardKeyProvider = FutureProvider<CardKey?>((ref) => ref.watch(cardKeyStoreProvider).current());
+
+/// Whether a first sign-in on the NEAR rail offers to register a card key. Tests turn it off.
+final cardKeyOnboardingProvider = Provider<bool>((ref) => ref.watch(appConfigProvider).isNear);
 
 final apiClientProvider = Provider<ApiClient>((ref) {
   final sessions = ref.watch(sessionStoreProvider);

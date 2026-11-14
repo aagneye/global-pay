@@ -118,4 +118,8 @@ class AppConfig {
   final String nearSignInRecipient;
 
   bool get isNear => settlementRail == SettlementRail.near;
+
+  /// A test network: NEAR testnet (the NEAR rail is testnet only), Base Sepolia or a local anvil chain. Only
+  /// testnet builds offer the demo card key on phones without NFC.
+  bool get isTestnet => isNear || chainId == 84532 || chainId == 31337;
 }

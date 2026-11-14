@@ -7,6 +7,7 @@ import 'package:globalpay/features/add_money/onramp_status_screen.dart';
 import 'package:globalpay/domain/models/payment_qr.dart';
 import 'package:globalpay/domain/models/session.dart';
 import 'package:globalpay/features/auth/login_screen.dart';
+import 'package:globalpay/features/card_key/card_key_screen.dart';
 import 'package:globalpay/features/auth/session_controller.dart';
 import 'package:globalpay/features/auth/splash_screen.dart';
 import 'package:globalpay/features/history/history_screen.dart';
@@ -33,6 +34,10 @@ abstract final class Routes {
   static const addMoney = '/add-money';
   static const request = '/request';
   static const payByTap = '/pay-by-tap';
+  static const cardKey = '/card-key';
+
+  /// The skippable card key step after a first sign-in.
+  static const cardKeySetup = '/card-key/setup';
 
   static String status(String paymentId) => '/pay/status/$paymentId';
   static String addMoneyStatus(String orderId) => '/add-money/$orderId';
@@ -88,6 +93,8 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(path: Routes.addMoney, builder: (context, state) => const AddMoneyScreen()),
       GoRoute(path: Routes.request, builder: (context, state) => const RequestScreen()),
       GoRoute(path: Routes.payByTap, builder: (context, state) => const PayByTapScreen()),
+      GoRoute(path: Routes.cardKey, builder: (context, state) => const CardKeyScreen()),
+      GoRoute(path: Routes.cardKeySetup, builder: (context, state) => const CardKeyScreen(onboarding: true)),
       GoRoute(path: '/approve/:requestId', builder: (context, state) => ApproveScreen(requestId: state.pathParameters['requestId']!)),
       GoRoute(
         path: '/add-money/:orderId',

@@ -12,11 +12,13 @@ import 'package:globalpay/core/storage/secure_store.dart';
 import 'package:globalpay/data/api/api_client.dart';
 import 'package:globalpay/features/history/history_screen.dart';
 import 'package:globalpay/features/scan/scan_screen.dart';
+import 'package:globalpay/services/card_key/card_reader.dart';
 import 'package:globalpay/services/push/push_service.dart';
 import 'package:globalpay/services/wallet/near/borsh.dart';
 
 import 'support/borsh_reader.dart';
 import 'support/fake_backend.dart';
+import 'support/fake_card_reader.dart';
 import 'support/fake_tap.dart';
 import 'support/near_vectors.dart';
 import 'support/spy_near_wallet.dart';
@@ -38,11 +40,21 @@ const nearConfig = AppConfig(
   nearSettlementContract: FakeBackend.nearSettlement,
 );
 
-/// [wallet] is the NEAR wallet, with an in-memory store. Vault off, push off, no NFC.
-Widget nearApp(FakeBackend backend, SecureStore store, SpyNearWallet wallet, {AppConfig config = nearConfig}) {
+/// [wallet] is the NEAR wallet, with an in-memory store. Vault off, push off, no NFC unless [cardReader] has it.
+/// [onboarding]: offer the card key step after the first sign-in.
+Widget nearApp(
+  FakeBackend backend,
+  SecureStore store,
+  SpyNearWallet wallet, {
+  AppConfig config = nearConfig,
+  CardReader? cardReader,
+  bool onboarding = false,
+}) {
   return ProviderScope(
     overrides: [
       appConfigProvider.overrideWithValue(config),
+      cardReaderProvider.overrideWithValue(cardReader ?? FakeCardReader()),
+      cardKeyOnboardingProvider.overrideWithValue(onboarding),
       secureStoreProvider.overrideWithValue(store),
       nearWalletProvider.overrideWithValue(wallet),
       keyVaultProvider.overrideWithValue(null),

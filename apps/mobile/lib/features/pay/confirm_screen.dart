@@ -15,6 +15,7 @@ import 'package:globalpay/domain/models/upi_qr.dart';
 import 'package:globalpay/domain/signing/authorization_check.dart';
 import 'package:globalpay/domain/signing/near_payment_check.dart';
 import 'package:globalpay/features/auth/session_controller.dart';
+import 'package:globalpay/features/card_key/card_widgets.dart';
 import 'package:globalpay/services/wallet/wallet_switch.dart';
 
 final _amount = RegExp(r'^\d+(\.\d{1,2})?$');
@@ -23,6 +24,12 @@ final _amount = RegExp(r'^\d+(\.\d{1,2})?$');
 const nearAccountSettingUp = AppException(
   'near_account_not_found',
   'Your testnet account is still being set up. Try again in a few seconds.',
+);
+
+/// A card tapped to approve a payment that isn't the registered card key.
+const cardKeyMismatch = AppException(
+  'card_key_mismatch',
+  "That's not your registered card. Nothing was signed.",
 );
 
 /// Parses "250", "250.5" or "250.50" baht into satang (or rupees into paise: both have 2 decimals).
@@ -105,6 +112,8 @@ class _ConfirmScreenState extends ConsumerState<ConfirmScreen> {
   });
 
   Future<void> _pay(Quote quote) => _guarded(() async {
+    // With a card key, the registered card must tap first: before the fingerprint and before anything is signed.
+    if (!await _approveWithCard()) return;
     // Never sign more, to anyone else or on another chain than this screen shows, whatever the backend sent.
     final config = ref.read(appConfigProvider);
     if (config.isNear) return _payOnNear(quote, config);
@@ -119,6 +128,24 @@ class _ConfirmScreenState extends ConsumerState<ConfirmScreen> {
     final payment = await ref.read(paymentsRepositoryProvider).submit(quote, signature);
     if (mounted) context.pushReplacement(Routes.status(payment.id));
   });
+
+  /// True to go on: there's no card key, or the registered card was tapped. False if the user cancelled.
+  /// Throws [cardKeyMismatch] for another card.
+  Future<bool> _approveWithCard() async {
+    final store = ref.read(cardKeyStoreProvider);
+    final key = await store.current();
+    if (key == null) return true;
+    if (!mounted) return false;
+    final card = await showCardTapSheet(
+      context,
+      title: 'Tap your card to approve',
+      detail: 'Card •••• ${key.last4} on the back of your phone, then your fingerprint.',
+      demoLabel: 'Tap demo card',
+    );
+    if (card == null) return false;
+    if (!await store.matches(card)) throw cardKeyMismatch;
+    return true;
+  }
 
   /// NEAR rail: check the meta transaction, sign it (the relayer pays the gas), and hand it to the backend.
   Future<void> _payOnNear(Quote quote, AppConfig config) async {

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -10,6 +12,16 @@ import 'package:globalpay/features/auth/session_controller.dart';
 import 'package:globalpay/features/history/history_screen.dart';
 import 'package:globalpay/features/home/account_providers.dart';
 import 'package:globalpay/features/p2p/p2p_support.dart';
+
+/// Set once the card key step has been offered on this phone.
+const cardKeyOnboardingSeenKey = 'card_key_onboarding_seen';
+
+/// Whether to offer the card key step now: on this build, never offered on this phone, and no card key yet.
+final cardKeyOnboardingDueProvider = FutureProvider.autoDispose<bool>((ref) async {
+  if (!ref.watch(cardKeyOnboardingProvider)) return false;
+  if (await ref.watch(secureStoreProvider).read(cardKeyOnboardingSeenKey) != null) return false;
+  return await ref.watch(cardKeyStoreProvider).current() == null;
+});
 
 class HomeScreen extends ConsumerWidget {
   const HomeScreen({super.key});
@@ -24,6 +36,12 @@ class HomeScreen extends ConsumerWidget {
     final history = ref.watch(historyProvider);
     // Registers this phone for tap to pay (hardware key, push token) once signed in.
     ref.watch(deviceRegistrationProvider);
+    // NEAR rail, first sign-in on this phone, no card key yet: offer to make a card the key (once, skippable).
+    ref.listen(cardKeyOnboardingDueProvider, (_, next) {
+      if (next.value != true) return;
+      unawaited(ref.read(secureStoreProvider).write(cardKeyOnboardingSeenKey, '1'));
+      context.push(Routes.cardKeySetup);
+    });
 
     Future<void> refresh() async {
       ref.invalidate(balanceProvider);
@@ -76,8 +94,15 @@ class HomeScreen extends ConsumerWidget {
                   _QuickAction(icon: Icons.add, label: 'Add money', onTap: () => context.push(Routes.addMoney)),
                 ],
                 _QuickAction(icon: Icons.qr_code_2, label: 'Receive', onTap: () => context.push(Routes.receive)),
-                // Keeps Receive the size of one of four actions.
-                if (near) const Spacer(flex: 3),
+                if (near) ...[
+                  _QuickAction(
+                    icon: Icons.contactless_outlined,
+                    label: 'Card key',
+                    onTap: () => context.push(Routes.cardKey),
+                  ),
+                  // Keeps the actions the size of one of four.
+                  const Spacer(flex: 2),
+                ],
               ],
             ),
             const SizedBox(height: 36),
