@@ -163,6 +163,7 @@ export function buildContainer(env: Env, overrides: Partial<Adapters> = {}): Con
     requestTtlMs: env.P2P_REQUEST_TTL_MS,
     authorizationTtlMs: env.P2P_AUTHORIZATION_TTL_MS,
     maxAmount: env.P2P_MAX_AMOUNT_USDC,
+    dailyLimit: env.P2P_DAILY_LIMIT_USDC,
     maxOpenPerReceiver: env.P2P_MAX_OPEN_REQUESTS,
     maxAwaitingPerSender: env.P2P_MAX_AWAITING_PER_SENDER,
     explorerUrl: env.EXPLORER_URL,

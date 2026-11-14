@@ -24,6 +24,8 @@ export interface P2pServiceDeps {
   /** EIP-3009 validBefore, from the request's creation. */
   authorizationTtlMs: number;
   maxAmount: bigint;
+  /** The most one sender may send in any 24 hours (token units). */
+  dailyLimit: bigint;
   maxOpenPerReceiver: number;
   maxAwaitingPerSender: number;
   explorerUrl: string;
@@ -52,6 +54,7 @@ export interface P2pRequestView {
 }
 
 const NAME = /^[\p{L}\p{M}\p{N} .,'&()-]{2,40}$/u;
+const DAY_MS = 24 * 60 * 60_000;
 
 /**
  * Tap to pay (ADR 0010): the receiver asks for an amount; the sender is identified by a tap (their phone
@@ -190,6 +193,7 @@ export class P2pService {
     if (!(await requests.transition(requestId, 'SENDER_IDENTIFIED', 'APPROVING'))) {
       throw new AppError('request_unavailable', 'This request was just cancelled, expired or approved', 409);
     }
+    await this.enforceDailyLimit(request);
     let txHash: Hex;
     try {
       txHash = await gateway.submitTransfer(
@@ -301,6 +305,25 @@ export class P2pService {
     if (request.status !== 'SENDER_IDENTIFIED') throw new AppError('request_unavailable', `The request is ${request.status}`, 409);
     if (this.now() >= request.expiresAt) throw new AppError('request_expired', 'This request has expired', 409);
     return request;
+  }
+
+  /**
+   * The sender's approved transfers in the last 24 hours, this one included (it's APPROVING), must stay
+   * within the daily limit. Checked after claiming the request, so two approvals at once can't both slip
+   * under it. Over the limit, the request is handed back: nothing was sent.
+   */
+  private async enforceDailyLimit(request: PaymentRequest): Promise<void> {
+    const { requests, dailyLimit } = this.deps;
+    const sent = await requests.sumSentSince(request.senderId!, new Date(this.now().getTime() - DAY_MS));
+    if (sent <= dailyLimit) return;
+    await requests.transitionIfUnsent(request.id, 'APPROVING', 'SENDER_IDENTIFIED');
+    const before = sent - request.amount;
+    const remaining = before < dailyLimit ? dailyLimit - before : 0n;
+    throw new AppError(
+      'p2p_daily_limit_exceeded',
+      `The 24-hour limit for tap to pay is ${usdc(dailyLimit)} USDC; ${usdc(remaining)} USDC remains`,
+      422,
+    );
   }
 
   private async requireVerified(userId: string): Promise<void> {

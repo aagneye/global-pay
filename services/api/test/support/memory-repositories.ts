@@ -471,6 +471,11 @@ export function createMemoryRepositories() {
       async countOpenByReceiver(receiverId) {
         return [...paymentRequests.values()].filter((r) => r.receiverId === receiverId && (r.status === 'CREATED' || r.status === 'SENDER_IDENTIFIED')).length;
       },
+      async sumSentSince(senderId, since) {
+        return [...paymentRequests.values()]
+          .filter((r) => r.senderId === senderId && ['APPROVING', 'SUBMITTED', 'COMPLETED'].includes(r.status) && r.createdAt >= since)
+          .reduce((sum, r) => sum + r.amount, 0n);
+      },
       async listAwaitingSender(senderId, at) {
         return [...paymentRequests.values()]
           .filter((r) => r.senderId === senderId && r.status === 'SENDER_IDENTIFIED' && r.expiresAt > at)

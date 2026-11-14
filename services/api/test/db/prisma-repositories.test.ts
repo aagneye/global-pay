@@ -506,6 +506,10 @@ describe.skipIf(!url)('Prisma repositories (Postgres)', () => {
     await expect(repos.paymentRequests.transition(live.id, 'APPROVING', 'SUBMITTED')).resolves.toBe(true);
     await expect(repos.paymentRequests.transition(live.id, 'SUBMITTED', 'EXPIRED')).rejects.toThrow(/cannot move/);
     expect((await repos.paymentRequests.findById(live.id))?.txHash).toBe(txHash);
+    // What the sender approved sending counts toward the daily limit.
+    await expect(repos.paymentRequests.sumSentSince(sender.id, new Date(now.getTime() - 60_000))).resolves.toBe(5_000_000n);
+    await expect(repos.paymentRequests.sumSentSince(sender.id, new Date(now.getTime() + 60_000))).resolves.toBe(0n);
+    await expect(repos.paymentRequests.sumSentSince(receiver.id, new Date(now.getTime() - 60_000))).resolves.toBe(0n);
     expect((await repos.paymentRequests.listByUser(sender.id, 10)).map((r) => r.id)).toEqual([live.id]);
     expect((await repos.paymentRequests.listByStatus(['CREATED'], 10)).map((r) => r.id)).toEqual([stale.id]);
   });

@@ -122,6 +122,14 @@ export class PrismaPaymentRequestRepository implements PaymentRequestRepository 
     return this.prisma.paymentRequest.count({ where: { receiverId, status: { in: ['CREATED', 'SENDER_IDENTIFIED'] } } });
   }
 
+  async sumSentSince(senderId: string, since: Date): Promise<bigint> {
+    const result = await this.prisma.paymentRequest.aggregate({
+      _sum: { amount: true },
+      where: { senderId, status: { in: ['APPROVING', 'SUBMITTED', 'COMPLETED'] }, createdAt: { gte: since } },
+    });
+    return result._sum.amount ?? 0n;
+  }
+
   async listAwaitingSender(senderId: string, now: Date): Promise<PaymentRequest[]> {
     const rows = await this.prisma.paymentRequest.findMany({
       where: { senderId, status: 'SENDER_IDENTIFIED', expiresAt: { gt: now } },

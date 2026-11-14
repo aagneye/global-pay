@@ -279,6 +279,34 @@ describe('tap to pay', () => {
     });
   });
 
+  it("caps what a sender can send in 24 hours, counting only transfers that weren't refused or reverted", async () => {
+    const { phone, request, tap, approve, sender, chain, repos, call } = await setup({ P2P_DAILY_LIMIT_USDC: '8' });
+    const senderPhone = await phone(sender, 'fcm-1');
+    const tapped = async (amount: string) => {
+      const created = await request(amount);
+      await tap(created.id, senderPhone.id, senderPhone.signTap(created.challenge));
+      return created;
+    };
+
+    const first = await tapped('5000000');
+    expect((await approve(first.id)).json().status).toBe('SUBMITTED');
+
+    const second = await tapped('5000000');
+    const refused = await approve(second.id);
+    expect(refused.statusCode).toBe(422);
+    expect(refused.json()).toMatchObject({ error: 'p2p_daily_limit_exceeded', message: expect.stringMatching(/8 USDC; 3 USDC remains/) });
+    expect((await call('GET', `/p2p/requests/${second.id}`, sender)).json().status).toBe('SENDER_IDENTIFIED');
+    expect(chain.sent.filter((s) => s.functionName === 'transferWithAuthorization')).toHaveLength(1);
+
+    // A transfer that reverted doesn't count, nor does one from more than a day ago.
+    repos.state.paymentRequests.get(first.id)!.status = 'FAILED';
+    expect((await approve(second.id)).json().status).toBe('SUBMITTED');
+    const third = await tapped('5000000');
+    expect((await approve(third.id)).statusCode).toBe(422);
+    repos.state.paymentRequests.get(second.id)!.createdAt = new Date(Date.now() - 25 * 60 * 60_000);
+    expect((await approve(third.id)).json().status).toBe('SUBMITTED');
+  });
+
   it('works by QR too: the sender claims with the challenge', async () => {
     const { request, call, sender, receiver, approve } = await setup();
     const created = await request();

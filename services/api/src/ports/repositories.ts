@@ -262,6 +262,8 @@ export interface PaymentRequestRepository {
   recordTxHash(id: string, status: P2pStatus, txHash: Hex): Promise<boolean>;
   /** CREATED or SENDER_IDENTIFIED requests this user is receiving. */
   countOpenByReceiver(receiverId: string): Promise<number>;
+  /** Token units this user approved sending (APPROVING, SUBMITTED or COMPLETED) in requests created since `since`. */
+  sumSentSince(senderId: string, since: Date): Promise<bigint>;
   /** Unexpired requests waiting for this sender's approval, newest first. */
   listAwaitingSender(senderId: string, now: Date): Promise<PaymentRequest[]>;
   /** Requests this user received or sent, newest first. */

@@ -205,6 +205,18 @@ export const envSchema = z.object({
       }
       return units;
     }),
+  /** The most one sender may send by tap to pay in any 24 hours, in USDC. */
+  P2P_DAILY_LIMIT_USDC: z
+    .string()
+    .default('2000')
+    .transform((value, ctx) => {
+      const units = parseDecimal(value, TOKEN_DECIMALS.USDC);
+      if (units === null || units <= 0n) {
+        ctx.addIssue({ code: 'custom', message: 'P2P_DAILY_LIMIT_USDC must be a positive USDC amount' });
+        return z.NEVER;
+      }
+      return units;
+    }),
   P2P_MAX_OPEN_REQUESTS: z.coerce.number().int().min(1).default(3),
   /** Requests waiting for one sender's approval: stops a stranger spamming someone with taps. */
   P2P_MAX_AWAITING_PER_SENDER: z.coerce.number().int().min(1).default(3),
